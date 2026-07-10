@@ -1,0 +1,174 @@
+--- git commit ---
+0954ba7e2445f5b0902e3f4b948ebcd5d48b8ee3
+
+
+--- git status ---
+On branch release/3.0.0-beta2
+Your branch is up to date with 'origin/release/3.0.0-beta2'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .gitignore
+	modified:   README.md
+	modified:   scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+	modified:   source/isaaclab_physx/isaaclab_physx/sensors/contact_sensor/contact_sensor.py
+	modified:   source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	README_GO2_SYMM_ISAACLAB.md
+	scripts/go2_symm/
+	source/isaaclab_assets/isaaclab_assets/robots/go2_symm/
+	source/isaaclab_rl/changelog.d/go2-symm-trs.rst
+	source/isaaclab_tasks/changelog.d/go2-symm-task.rst
+	source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/
+	source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+
+--- git diff ---
+diff --git a/.gitignore b/.gitignore
+index 60989ad..2a1619b 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -82,6 +82,8 @@ _build
+
+ # Dev-time files, generated stuff
+ **/__*
++!source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/__init__.py
++!source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/__init__.py
+
+ # Isaac Lab CI environments in native mode
+ **/_isaaclab_install_ci_*
+diff --git a/README.md b/README.md
+index 2362929..29680e1 100644
+--- a/README.md
++++ b/README.md
+@@ -13,6 +13,10 @@
+ [![License](https://img.shields.io/badge/license-BSD--3-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
+ [![License](https://img.shields.io/badge/license-Apache--2.0-yellow.svg)](https://opensource.org/license/apache-2-0)
+
++> [!NOTE]
++> Local Go2 symmetric RL migration guide:
++> [README_GO2_SYMM_ISAACLAB.md](README_GO2_SYMM_ISAACLAB.md).
++
+
+ This branch is a development branch for Isaac Sim 6.0, which is currently only available through the Isaac Sim [GitHub repo](https://github.com/isaac-sim/IsaacSim).
+ For installation, please refer to the Isaac Sim GitHub repo to build the latest Isaac Sim branch, and follow the binary installation method in the
+diff --git a/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py b/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+index ce72810..f4e2116 100644
+--- a/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
++++ b/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+@@ -111,6 +111,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+         # note: certain randomizations occur in the environment initialization so we set the seed here
+         env_cfg.seed = agent_cfg.seed
+         env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
++        if args_cli.disable_fabric:
++            env_cfg.sim.use_fabric = False
+
+         # specify directory for logging experiments
+         log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
+@@ -132,7 +134,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+         env_cfg.log_dir = log_dir
+
+         # create isaac environment
+-        env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
++        visualizers = args_cli.visualizer or []
++        if isinstance(visualizers, str):
++            visualizers = [visualizers]
++        render_mode = "rgb_array" if args_cli.video else ("human" if "kit" in visualizers else None)
++        env = gym.make(args_cli.task, cfg=env_cfg, render_mode=render_mode)
+
+         # convert to single-agent instance if required by the RL algorithm
+         if isinstance(env.unwrapped.cfg, DirectMARLEnvCfg):
+diff --git a/source/isaaclab_physx/isaaclab_physx/sensors/contact_sensor/contact_sensor.py b/source/isaaclab_physx/isaaclab_physx/sensors/contact_sensor/contact_sensor.py
+index 4e26659..256f851 100644
+--- a/source/isaaclab_physx/isaaclab_physx/sensors/contact_sensor/contact_sensor.py
++++ b/source/isaaclab_physx/isaaclab_physx/sensors/contact_sensor/contact_sensor.py
+@@ -303,26 +303,40 @@ class ContactSensor(BaseContactSensor):
+         matches = resolve_matching_prims_from_source(parent_expr)
+         if not matches:
+             raise RuntimeError(f"No prim found at '{parent_expr}'.")
+-        asset_prim, body_parent = matches[0]
++        asset_prim, body_parent = min(matches, key=lambda match: match[0].GetPath().pathString.count("/"))
+         walk_root = asset_prim.GetPath().pathString
+         prims = get_all_matching_child_prims(walk_root, predicate=has_contact_report, traverse_instance_prims=False)
+-        body_names = [prim.GetPath().pathString.rsplit("/", 1)[-1] for prim in prims]
+-        if not body_names:
++        body_paths = [prim.GetPath().pathString for prim in prims]
++        body_names = [body_path.rsplit("/", 1)[-1] for body_path in body_paths]
++        if not body_paths:
+             raise RuntimeError(
+                 f"Sensor at path '{self.cfg.prim_path}' could not find any bodies with contact reporter API."
+                 "\nHINT: Make sure to enable 'activate_contact_sensors' in the corresponding asset spawn configuration."
+             )
+
+-        # construct regex expression for the body names and convert to PhysX glob form
+-        body_names_regex = r"(" + "|".join(body_names) + r")"
+-        body_names_regex = f"{body_parent}/{body_names_regex}"
+-        body_names_glob = body_names_regex.replace(".*", "*")
++        # construct explicit PhysX glob paths, preserving nested descendant paths under the selected root
++        body_paths_glob = []
++        for body_path in body_paths:
++            relative_path = body_path.removeprefix(walk_root).strip("/")
++            body_parent = body_parent.rstrip("/")
++            if not relative_path or body_parent.endswith(f"/{relative_path}"):
++                body_path_glob = body_parent
++            else:
++                body_path_glob = f"{body_parent}/{relative_path}"
++            body_path_glob = body_path_glob.replace(".*", "*")
++            if "/envs/env_*" in body_path_glob:
++                body_paths_glob.extend(
++                    body_path_glob.replace("/envs/env_*", f"/envs/env_{env_id}")
++                    for env_id in range(self._num_envs)
++                )
++            else:
++                body_paths_glob.append(body_path_glob)
+         filter_prim_paths_glob = [expr.replace(".*", "*") for expr in self.cfg.filter_prim_paths_expr]
+
+         # create a rigid prim view for the sensor
+-        self._body_physx_view = self._physics_sim_view.create_rigid_body_view(body_names_glob)
++        self._body_physx_view = self._physics_sim_view.create_rigid_body_view(body_paths_glob)
+         self._contact_view = self._physics_sim_view.create_rigid_contact_view(
+-            body_names_glob,
++            body_paths_glob,
+             filter_patterns=filter_prim_paths_glob,
+             max_contact_data_count=self.cfg.max_contact_data_count_per_prim * len(body_names) * self._num_envs,
+         )
+@@ -333,7 +347,7 @@ class ContactSensor(BaseContactSensor):
+             raise RuntimeError(
+                 "Failed to initialize contact reporter for specified bodies."
+                 f"\n\tInput prim path    : {self.cfg.prim_path}"
+-                f"\n\tResolved prim paths: {body_names_glob}"
++                f"\n\tResolved prim paths: {body_paths_glob}"
+             )
+
+         # check if filter paths are valid
+diff --git a/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py b/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+index 1246627..1636598 100644
+--- a/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
++++ b/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+@@ -49,3 +49,21 @@ class RslRlSymmetryCfg:
+
+     mirror_loss_coeff: float = 0.0
+     """The weight for the symmetry-mirror loss. Defaults to 0.0."""
++
++    use_legacy_time_reversal_regularization: bool = False
++    """Whether to use legacy time-reversal regularization semantics."""
++
++    value_loss_coeff: float = 0.0
++    """The weight for the value-function time-reversal consistency loss. Defaults to 0.0."""
++
++    min_abs_command_velocity: float = 0.0
++    """Minimum absolute command velocity [m/s] for applying time-reversal losses."""
++
++    warmup_iterations: int = 0
++    """Number of PPO iterations before applying time-reversal losses."""
++
++    command_observation_index: int = 3
++    """Index of the forward velocity command in the policy observation."""
++
++    command_observation_scale: float = 1.0
++    """Scale applied to the command observation."""

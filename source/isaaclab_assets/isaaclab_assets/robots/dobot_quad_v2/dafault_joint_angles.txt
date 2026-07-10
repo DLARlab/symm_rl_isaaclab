@@ -1,0 +1,17 @@
+_.default_joint_angles = {  # = target angles [rad] when action = 0.0, in index order
+        'joint_front_left_abad': 0.1,  # [rad]
+        'joint_front_left_thigh_pitch': 0.7,  # [rad]
+        'joint_front_left_calf_pitch': -1.5,  # [rad]
+
+        'joint_front_right_abad': -0.1,  # [rad]
+        'joint_front_right_thigh_pitch': 0.7,  # [rad]
+        'joint_front_right_calf_pitch': -1.5,  # [rad]
+
+        'joint_rear_left_abad': 0.1,  # [rad]
+        'joint_rear_left_thigh_pitch': -0.7,  # [rad]
+        'joint_rear_left_calf_pitch': 1.5,  # [rad]
+
+        'joint_rear_right_abad': -0.1,  # [rad]
+        'joint_rear_right_thigh_pitch': -0.7,  # [rad]
+        'joint_rear_right_calf_pitch': 1.5  # [rad]
+    }
