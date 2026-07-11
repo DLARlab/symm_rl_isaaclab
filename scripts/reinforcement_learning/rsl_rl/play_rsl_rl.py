@@ -71,7 +71,7 @@ parser.add_argument(
     "--print_gait_info",
     action="store_true",
     default=False,
-    help="Print live Go2 gait command and velocity information during play, when available.",
+    help="Print live symmetric gait command and velocity information during play, when available.",
 )
 parser.add_argument(
     "--print_gait_info_interval",
@@ -104,7 +104,7 @@ sys.argv = [sys.argv[0]] + remaining_args
 installed_version = metadata.version("rsl-rl-lib")
 
 
-_GO2_GAIT_THETAS = (
+_SYMM_GAIT_THETAS = (
     ("trot", (0.0, 0.5, 0.5, 0.0)),
     ("bound", (0.0, 0.0, 0.5, 0.5)),
     ("half-bound-left", (0.13, -0.13, 0.5, 0.5)),
@@ -114,12 +114,12 @@ _GO2_GAIT_THETAS = (
 )
 
 
-def _classify_go2_gait(foot_thetas: torch.Tensor) -> str:
-    """Return the nearest named Go2 gait for the sampled foot phase offsets."""
+def _classify_symmetric_gait(foot_thetas: torch.Tensor) -> str:
+    """Return the nearest named symmetric gait for sampled foot phase offsets."""
     theta = foot_thetas.detach().to(dtype=torch.float32, device="cpu")
     best_name = "unknown"
     best_error = float("inf")
-    for gait_name, gait_thetas in _GO2_GAIT_THETAS:
+    for gait_name, gait_thetas in _SYMM_GAIT_THETAS:
         reference = torch.tensor(gait_thetas, dtype=torch.float32)
         phase_error = torch.atan2(
             torch.sin(2.0 * torch.pi * (theta - reference)),
@@ -132,8 +132,8 @@ def _classify_go2_gait(foot_thetas: torch.Tensor) -> str:
     return best_name
 
 
-def _format_go2_gait_info(env, env_index: int = 0) -> str | None:
-    """Format live Go2 gait command information if the environment exposes it."""
+def _format_symmetric_gait_info(env, env_index: int = 0) -> str | None:
+    """Format live symmetric gait command information when available."""
     try:
         command_term = env.unwrapped.command_manager.get_term("base_velocity")
     except Exception:
@@ -148,7 +148,7 @@ def _format_go2_gait_info(env, env_index: int = 0) -> str | None:
 
     command_b = command[env_index].detach().cpu()
     foot_theta = foot_thetas[env_index].detach().cpu()
-    gait_name = _classify_go2_gait(foot_theta)
+    gait_name = _classify_symmetric_gait(foot_theta)
     duty_factor = float(duty_factors[env_index].detach().cpu())
     gait_period = float(gait_periods[env_index].detach().cpu())
 
@@ -161,7 +161,7 @@ def _format_go2_gait_info(env, env_index: int = 0) -> str | None:
         yaw_vel_b = 0.0
 
     return (
-        "[go2_symm] "
+        "[symm_locomotion] "
         f"gait={gait_name} "
         f"cmd=({command_b[0]:+.2f}, {command_b[1]:+.2f}, {command_b[2]:+.2f}) "
         f"vel=({lin_vel_b[0]:+.2f}, {lin_vel_b[1]:+.2f}, {yaw_vel_b:+.2f}) "
@@ -303,7 +303,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
                 timestep += 1
                 if args_cli.print_gait_info and timestep % gait_info_interval == 0:
-                    gait_info = _format_go2_gait_info(env)
+                    gait_info = _format_symmetric_gait_info(env)
                     if gait_info is not None:
                         print(gait_info, flush=True)
                 if args_cli.video:

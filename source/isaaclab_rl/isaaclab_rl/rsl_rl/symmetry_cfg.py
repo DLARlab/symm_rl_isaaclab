@@ -50,8 +50,8 @@ class RslRlSymmetryCfg:
     mirror_loss_coeff: float = 0.0
     """The weight for the symmetry-mirror loss. Defaults to 0.0."""
 
-    use_legacy_time_reversal_regularization: bool = False
-    """Whether to use legacy time-reversal regularization semantics."""
+    use_time_reversal_regularization: bool = False
+    """Whether to use time-reversal regularization."""
 
     value_loss_coeff: float = 0.0
     """The weight for the value-function time-reversal consistency loss. Defaults to 0.0."""

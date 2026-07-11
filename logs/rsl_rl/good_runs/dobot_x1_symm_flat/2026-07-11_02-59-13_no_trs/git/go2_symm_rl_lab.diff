@@ -1,0 +1,2315 @@
+--- git commit ---
+f9fa92f25a43e317ec26fec0ed73baf73faa6a65
+
+
+--- git status ---
+On branch jding/go2-x1-symm-backup
+Your branch is up to date with 'dlarlab/jding/go2-x1-symm-backup'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .gitignore
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/env.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/spawners.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/env.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/legacy_trs_ppo.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/spawners.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	scripts/symm_locomotion/
+	source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/
+	source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+	source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+
+--- git diff ---
+diff --git a/.gitignore b/.gitignore
+index ed29be8c3..d761265ed 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -101,6 +101,8 @@ logs/rsl_rl/dobot_x1_symm_flat/*
+ !source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/__init__.py
+ !source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/__init__.py
+ !source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/__init__.py
++!source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/__init__.py
++!source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/__init__.py
+
+ # Isaac Lab CI environments in native mode
+ **/_isaaclab_install_ci_*
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+index 003f01e7d..96ad7d261 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+@@ -5,11 +5,12 @@
+
+ from isaaclab.utils.configclass import configclass
+
+-from isaaclab_rl.rsl_rl import RslRlSymmetryCfg
+-
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.agents.rsl_rl_ppo_cfg import (
+     UnitreeGo2FlatPPORunnerCfg,
+ )
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.agents.rsl_rl_ppo_cfg import (
++    configure_symm_quadruped_ppo,
++)
+ from isaaclab_tasks.manager_based.locomotion.velocity.mdp import dobot_x1_symm as dobot_mdp
+
+
+@@ -20,26 +21,10 @@ class DobotX1SymmFlatPPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
+     def __post_init__(self) -> None:
+         super().__post_init__()
+
+-        self.max_iterations = 5000
+-        self.save_interval = 1000
+-        self.experiment_name = "dobot_x1_symm_flat"
+-        self.clip_actions = None
+-        self.obs_groups = {"actor": ["policy"], "critic": ["policy"]}
+-        self.actor.hidden_dims = [512, 256, 128]
+-        self.critic.hidden_dims = [512, 256, 128]
+-        self.algorithm.class_name = (
+-            "isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.legacy_trs_ppo:LegacyTimeReversalPPO"
+-        )
+-        self.algorithm.entropy_coef = 0.01
+-        self.algorithm.symmetry_cfg = RslRlSymmetryCfg(
++        configure_symm_quadruped_ppo(
++            self,
++            experiment_name="dobot_x1_symm_flat",
+             use_data_augmentation=False,
+-            use_mirror_loss=True,
+             data_augmentation_func=dobot_mdp.compute_time_reversal_states,
+-            mirror_loss_coeff=0.1,
+-            use_legacy_time_reversal_regularization=True,
+             value_loss_coeff=0.05,
+-            min_abs_command_velocity=0.2,
+-            warmup_iterations=500,
+-            command_observation_index=3,
+-            command_observation_scale=2.0,
+         )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/env.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/env.py
+index 47f97fe96..43b795956 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/env.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/env.py
+@@ -3,14 +3,16 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Task-local environment behavior for the Dobot X1 symmetric task."""
++"""Dobot X1 environment compatibility aliases for the shared symmetric quadruped env."""
+
+ from __future__ import annotations
+
+-from isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.env import Go2SymmManagerBasedRLEnv
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.env import (
++    SymmQuadrupedManagerBasedRLEnv,
++)
+
+
+-class DobotX1SymmManagerBasedRLEnv(Go2SymmManagerBasedRLEnv):
+-    """Manager-based RL environment with the Dobot X1 symmetric reward/update ordering."""
++class DobotX1SymmManagerBasedRLEnv(SymmQuadrupedManagerBasedRLEnv):
++    """Manager-based RL environment for the Dobot X1 symmetric task."""
+
+     pass
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+index ae08363fe..22564d4d7 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+@@ -5,29 +5,28 @@
+
+ import os
+
+-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+-from isaaclab_physx.physics import PhysxCfg
+-from isaaclab_physx.sensors import ContactSensorCfg
+-
+ import isaaclab.sim as sim_utils
+-import isaaclab.terrains as terrain_gen
+ from isaaclab.actuators import IdealPDActuatorCfg
+-from isaaclab.envs import mdp as base_mdp
+-from isaaclab.managers import ObservationTermCfg as ObsTerm
+-from isaaclab.managers import RewardTermCfg as RewTerm
+-from isaaclab.managers import SceneEntityCfg
+-from isaaclab.managers import TerminationTermCfg as DoneTerm
+ from isaaclab.sim import SimulationCfg
+ from isaaclab.sim.converters import UrdfConverterCfg
+ from isaaclab.utils.configclass import configclass
+-from isaaclab.utils.noise import UniformNoiseCfg as Unoise
+
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.spawners import (
+     spawn_dobot_x1_symm_from_urdf,
+ )
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.flat_env_cfg import (
++    SymmQuadrupedPhysicsCfg,
++    configure_domain_randomization,
++    configure_flat_scene,
++    configure_policy_observations,
++    configure_rewards,
++    configure_terminations,
++    make_gait_velocity_command,
++    make_play_physics_cfg,
++    make_single_body_contact_sensor,
++)
+ from isaaclab_tasks.manager_based.locomotion.velocity.mdp import dobot_x1_symm as dobot_mdp
+-from isaaclab_tasks.utils import PresetCfg
+
+ from isaaclab_assets import ISAACLAB_ASSETS_EXT_DIR
+
+@@ -73,38 +72,9 @@ _DOBOT_X1_CALF_LINK_ORDER = [
+     "link_rear_left_calf",
+     "link_rear_right_calf",
+ ]
+-_DOBOT_X1_SYMM_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
+-    size=(160.0, 160.0),
+-    border_width=0.0,
+-    num_rows=1,
+-    num_cols=1,
+-    use_cache=False,
+-    sub_terrains={"flat": terrain_gen.MeshPlaneTerrainCfg(proportion=1.0)},
+-)
++_DOBOT_X1_FOOT_SENSOR_NAMES = ("contact_FL_foot", "contact_FR_foot", "contact_RL_foot", "contact_RR_foot")
+
+-
+-@configclass
+-class PhysicsCfg(PresetCfg):
+-    """Physics preset for the Dobot X1 symmetric flat task."""
+-
+-    default = PhysxCfg(
+-        gpu_max_rigid_patch_count=10 * 2**15,
+-        gpu_found_lost_pairs_capacity=2**22,
+-        gpu_found_lost_aggregate_pairs_capacity=2**27,
+-        gpu_total_aggregate_pairs_capacity=2**22,
+-    )
+-    newton_mjwarp = NewtonCfg(
+-        solver_cfg=MJWarpSolverCfg(
+-            njmax=65,
+-            nconmax=35,
+-            cone="pyramidal",
+-            impratio=1,
+-            integrator="implicitfast",
+-        ),
+-        num_substeps=1,
+-        debug_mode=False,
+-    )
+-    physx = default
++PhysicsCfg = SymmQuadrupedPhysicsCfg
+
+
+ @configclass
+@@ -117,12 +87,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+         super().__post_init__()
+
+         self.episode_length_s = 30.0
+-
+-        self.scene.terrain.terrain_type = "generator"
+-        self.scene.terrain.terrain_generator = _DOBOT_X1_SYMM_FLAT_TERRAIN_CFG
+-        self.scene.terrain.max_init_terrain_level = 0
+-        self.scene.terrain.visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.4, 0.4, 0.4))
+-        self.scene.sky_light.spawn = sim_utils.DomeLightCfg(intensity=900.0, color=(1.0, 1.0, 1.0))
++        configure_flat_scene(self)
+
+         self.scene.robot.spawn = sim_utils.UrdfFileCfg(
+             func=spawn_dobot_x1_symm_from_urdf,
+@@ -191,28 +156,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+         self.actions.joint_pos.preserve_order = True
+         self.actions.joint_pos.scale = 0.25
+
+-        self.commands.base_velocity = dobot_mdp.GaitVelocityCommandCfg(
+-            asset_name="robot",
+-            resampling_time_range=(10.0, 10.0),
+-            heading_command=False,
+-            heading_control_stiffness=0.5,
+-            rel_standing_envs=0.0,
+-            rel_heading_envs=1.0,
+-            min_xy_command_norm=0.2,
+-            resample_once_after_reset=True,
+-            resample_gait_once_after_reset=True,
+-            vel_xy_success_threshold=0.05,
+-            vel_xy_success_rel_threshold=0.25,
+-            vel_yaw_success_threshold=0.05,
+-            vel_yaw_success_rel_threshold=0.25,
+-            base_height_range=(0.35, 0.55),
+-            ranges=dobot_mdp.GaitVelocityCommandCfg.Ranges(
+-                lin_vel_x=(-2.0, 2.0),
+-                lin_vel_y=(0.0, 0.0),
+-                ang_vel_z=(0.0, 0.0),
+-                heading=(0.0, 0.0),
+-            ),
+-        )
++        self.commands.base_velocity = make_gait_velocity_command(dobot_mdp, base_height_range=(0.35, 0.55))
+
+         self._configure_dobot_x1_symm_observations()
+         self._configure_dobot_x1_symm_rewards()
+@@ -221,182 +165,53 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+
+     def _configure_dobot_x1_symm_contact_sensors(self) -> None:
+         """Configure contact sensors for the nested Dobot URDF link tree."""
+-        contact_sensor_kwargs = {
+-            "history_length": 3,
+-            "track_air_time": True,
+-        }
+-        self.scene.contact_trunk = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/link_trunk",
+-            **contact_sensor_kwargs,
++        self.scene.contact_trunk = make_single_body_contact_sensor("{ENV_REGEX_NS}/Robot/Geometry/link_trunk")
++        self.scene.contact_FL_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_front_left_hip/"
++            "link_front_left_thigh/link_front_left_calf/link_front_left_foot"
+         )
+-        self.scene.contact_FL_foot = ContactSensorCfg(
+-            prim_path=(
+-                "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_front_left_hip/"
+-                "link_front_left_thigh/link_front_left_calf/link_front_left_foot"
+-            ),
+-            **contact_sensor_kwargs,
++        self.scene.contact_FR_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_front_right_hip/"
++            "link_front_right_thigh/link_front_right_calf/link_front_right_foot"
+         )
+-        self.scene.contact_FR_foot = ContactSensorCfg(
+-            prim_path=(
+-                "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_front_right_hip/"
+-                "link_front_right_thigh/link_front_right_calf/link_front_right_foot"
+-            ),
+-            **contact_sensor_kwargs,
++        self.scene.contact_RL_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_rear_left_hip/"
++            "link_rear_left_thigh/link_rear_left_calf/link_rear_left_foot"
+         )
+-        self.scene.contact_RL_foot = ContactSensorCfg(
+-            prim_path=(
+-                "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_rear_left_hip/"
+-                "link_rear_left_thigh/link_rear_left_calf/link_rear_left_foot"
+-            ),
+-            **contact_sensor_kwargs,
+-        )
+-        self.scene.contact_RR_foot = ContactSensorCfg(
+-            prim_path=(
+-                "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_rear_right_hip/"
+-                "link_rear_right_thigh/link_rear_right_calf/link_rear_right_foot"
+-            ),
+-            **contact_sensor_kwargs,
++        self.scene.contact_RR_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/link_trunk/link_rear_right_hip/"
++            "link_rear_right_thigh/link_rear_right_calf/link_rear_right_foot"
+         )
+
+     def _configure_dobot_x1_symm_observations(self) -> None:
+         """Configure the 60D Dobot policy observation to match Go2 ordering."""
+-        policy = self.observations.policy
+-        legacy_joint_cfg = SceneEntityCfg("robot", joint_names=_DOBOT_X1_JOINT_ORDER, preserve_order=True)
+-
+-        policy.base_lin_vel = None
+-        policy.base_ang_vel = None
+-        policy.projected_gravity = ObsTerm(
+-            func=base_mdp.projected_gravity,
+-            noise=Unoise(n_min=-0.05, n_max=0.05),
+-        )
+-        policy.velocity_commands = ObsTerm(
+-            func=base_mdp.generated_commands,
+-            params={"command_name": "base_velocity"},
+-            scale=(2.0, 2.0, 0.25),
+-        )
+-        policy.joint_pos = ObsTerm(
+-            func=base_mdp.joint_pos_rel,
+-            noise=Unoise(n_min=-0.01, n_max=0.01),
+-            params={"asset_cfg": legacy_joint_cfg},
+-        )
+-        policy.joint_vel = ObsTerm(
+-            func=base_mdp.joint_vel_rel,
+-            noise=Unoise(n_min=-1.5, n_max=1.5),
+-            scale=0.05,
+-            params={"asset_cfg": legacy_joint_cfg},
+-        )
+-        policy.actions = ObsTerm(func=base_mdp.last_action)
+-        policy.height_scan = None
+-        policy.foot_phase_sin = ObsTerm(func=dobot_mdp.foot_phase_sin, params={"command_name": "base_velocity"})
+-        policy.foot_phase_cos = ObsTerm(func=dobot_mdp.foot_phase_cos, params={"command_name": "base_velocity"})
+-        policy.foot_theta_sin = ObsTerm(func=dobot_mdp.foot_theta_sin, params={"command_name": "base_velocity"})
+-        policy.foot_theta_cos = ObsTerm(func=dobot_mdp.foot_theta_cos, params={"command_name": "base_velocity"})
+-        policy.phase_ratios = ObsTerm(func=dobot_mdp.phase_ratios, params={"command_name": "base_velocity"})
++        configure_policy_observations(self, dobot_mdp, _DOBOT_X1_JOINT_ORDER)
+
+     def _configure_dobot_x1_symm_rewards(self) -> None:
+         """Configure Dobot rewards with the Go2 symmetric task layout."""
+-        self.rewards.track_lin_vel_xy_exp = None
+-        self.rewards.track_ang_vel_z_exp = None
+-        self.rewards.lin_vel_z_l2 = None
+-        self.rewards.ang_vel_xy_l2 = None
+-        self.rewards.dof_torques_l2 = None
+-        self.rewards.dof_acc_l2 = None
+-        self.rewards.action_rate_l2 = RewTerm(
+-            func=dobot_mdp.action_rate_exp_penalty,
+-            weight=0.05,
+-            params={"scale": 0.1},
+-        )
+-        self.rewards.feet_air_time = None
+-        self.rewards.flat_orientation_l2 = None
+-        self.rewards.dof_pos_limits = None
+-
+-        self.rewards.alive_bonus = RewTerm(func=dobot_mdp.alive_bonus, weight=1.0)
+-        self.rewards.cmd = RewTerm(
+-            func=dobot_mdp.command_tracking_penalty,
+-            weight=0.40,
+-            params={"command_name": "base_velocity"},
+-        )
+-        self.rewards.foot_periodicity = RewTerm(
+-            func=dobot_mdp.foot_periodicity_penalty,
+-            weight=0.30,
+-            params={
+-                "command_name": "base_velocity",
+-                "feet_cfg": SceneEntityCfg("robot", body_names=_DOBOT_X1_FOOT_LINK_ORDER, preserve_order=True),
+-                "foot_sensor_names": ("contact_FL_foot", "contact_FR_foot", "contact_RL_foot", "contact_RR_foot"),
+-                "foot_sensor_body_names": tuple(_DOBOT_X1_FOOT_LINK_ORDER),
+-            },
+-        )
+-        self.rewards.base_height = RewTerm(
+-            func=dobot_mdp.base_height_range_penalty,
+-            weight=0.30,
+-            params={"height_range": (0.35, 0.55)},
+-        )
+-        self.rewards.foot_clearance = RewTerm(
+-            func=dobot_mdp.foot_clearance_penalty,
+-            weight=0.10,
+-            params={
+-                "command_name": "base_velocity",
+-                "feet_cfg": SceneEntityCfg("robot", body_names=_DOBOT_X1_FOOT_LINK_ORDER, preserve_order=True),
+-            },
+-        )
+-        self.rewards.hip_action_penalty = RewTerm(func=dobot_mdp.hip_action_penalty, weight=0.15)
+-        self.rewards.morphological_symmetry = RewTerm(
+-            func=dobot_mdp.morphological_symmetry_penalty,
+-            weight=0.30,
+-            params={
+-                "command_name": "base_velocity",
+-                "joint_cfg": SceneEntityCfg("robot", joint_names=_DOBOT_X1_JOINT_ORDER, preserve_order=True),
+-            },
++        configure_rewards(
++            self,
++            dobot_mdp,
++            joint_names=_DOBOT_X1_JOINT_ORDER,
++            foot_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
++            foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
++            foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
++            base_height_range=(0.35, 0.55),
+         )
+-        self.rewards.smoothness = RewTerm(func=dobot_mdp.SmoothnessPenalty, weight=0.10)
+
+     def _configure_dobot_x1_symm_terminations(self) -> None:
+         """Configure Dobot reset and termination terms."""
+-        self.terminations.base_contact = DoneTerm(
+-            func=dobot_mdp.illegal_contact_any_sensor,
+-            params={"sensor_names": ("contact_trunk",), "threshold": 1.0},
+-        )
+-        self.terminations.base_height = DoneTerm(
+-            func=dobot_mdp.base_height_out_of_range,
+-            params={"height_range": (0.15, 0.65)},
+-        )
+-        self.terminations.base_orientation = DoneTerm(
+-            func=dobot_mdp.base_roll_pitch_out_of_range,
+-            params={"max_roll": 0.8, "max_pitch": 1.0},
+-        )
+-        self.terminations.calf_height = DoneTerm(
+-            func=dobot_mdp.body_height_below,
+-            params={
+-                "min_height": 0.08,
+-                "body_cfg": SceneEntityCfg("robot", body_names=_DOBOT_X1_CALF_LINK_ORDER, preserve_order=True),
+-            },
++        configure_terminations(
++            self,
++            dobot_mdp,
++            base_sensor_names=("contact_trunk",),
++            base_height_range=(0.15, 0.65),
++            calf_body_names=_DOBOT_X1_CALF_LINK_ORDER,
+         )
+
+     def _configure_dobot_x1_symm_domain_randomization(self) -> None:
+         """Configure Dobot domain randomization values."""
+-        self.events.physics_material.params["static_friction_range"] = (0.3, 2.0)
+-        self.events.physics_material.params["dynamic_friction_range"] = (0.3, 2.0)
+-        self.events.physics_material.params["make_consistent"] = True
+-
+-        self.events.add_base_mass.params["asset_cfg"].body_names = "link_trunk"
+-        self.events.add_base_mass.params["mass_distribution_params"] = (-1.5, 1.5)
+-        self.events.add_base_mass.params["operation"] = "add"
+-        self.events.add_base_mass.params["distribution"] = "uniform"
+-
+-        self.events.base_external_force_torque.params["asset_cfg"].body_names = "link_trunk"
+-        self.events.base_com = None
+-        self.events.reset_base.params["pose_range"] = {}
+-        self.events.reset_base.params["velocity_range"] = {
+-            "x": (-0.5, 0.5),
+-            "y": (-0.5, 0.5),
+-            "z": (-0.5, 0.5),
+-            "roll": (-0.5, 0.5),
+-            "pitch": (-0.5, 0.5),
+-            "yaw": (-0.5, 0.5),
+-        }
+-
+-        self.events.push_robot.interval_range_s = (15.0, 15.0)
+-        self.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
++        configure_domain_randomization(self, base_body_name="link_trunk")
+
+
+ @configclass
+@@ -408,12 +223,7 @@ class DobotX1SymmFlatEnvCfg_PLAY(DobotX1SymmFlatEnvCfg):
+
+         self.scene.num_envs = 1
+         self.scene.env_spacing = 2.5
+-        self.sim.physics = PhysxCfg(
+-            gpu_max_rigid_patch_count=2**15,
+-            gpu_found_lost_pairs_capacity=2**20,
+-            gpu_found_lost_aggregate_pairs_capacity=2**22,
+-            gpu_total_aggregate_pairs_capacity=2**20,
+-        )
++        self.sim.physics = make_play_physics_cfg()
+         self.viewer.eye = (0.0, -4.0, 1.5)
+         self.viewer.lookat = (0.3, 0.0, 0.45)
+         self.viewer.origin_type = "asset_root"
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/spawners.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/spawners.py
+index 0a1394739..89596c1a9 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/spawners.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/spawners.py
+@@ -3,12 +3,16 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Task-local spawners for the Dobot X1 symmetric task."""
++"""Task-local spawner aliases for the Dobot X1 symmetric task."""
+
+ from __future__ import annotations
+
+ from typing import TYPE_CHECKING
+
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.spawners import (
++    spawn_nested_urdf_with_contact_sensors,
++)
++
+ if TYPE_CHECKING:
+     from pxr import Usd
+
+@@ -23,35 +27,10 @@ def spawn_dobot_x1_symm_from_urdf(
+     **kwargs,
+ ) -> Usd.Prim:
+     """Spawn the Dobot X1 URDF and enable contact reporting on nested links."""
+-    from isaaclab.sim.spawners.from_files.from_files import spawn_from_urdf  # noqa: PLC0415
+-    from isaaclab.sim.utils import find_matching_prims  # noqa: PLC0415
+-
+-    activate_contact_sensors = cfg.activate_contact_sensors
+-    cfg.activate_contact_sensors = False
+-    prim = spawn_from_urdf(prim_path, cfg, translation=translation, orientation=orientation, **kwargs)
+-    cfg.activate_contact_sensors = activate_contact_sensors
+-    if activate_contact_sensors:
+-        robot_prims = find_matching_prims(prim_path) or [prim]
+-        for robot_prim in robot_prims:
+-            _activate_nested_rigid_body_contact_sensors(robot_prim, threshold=0.0)
+-    return prim
+-
+-
+-def _activate_nested_rigid_body_contact_sensors(prim: Usd.Prim, threshold: float = 0.0) -> None:
+-    """Activate contact reports on every rigid-body descendant in the imported tree."""
+-    from pxr import UsdPhysics  # noqa: PLC0415
+-
+-    from isaaclab.sim.utils import safe_set_attribute_on_usd_prim  # noqa: PLC0415
+-
+-    all_prims = [prim]
+-    while all_prims:
+-        child_prim = all_prims.pop(0)
+-        if child_prim.HasAPI(UsdPhysics.RigidBodyAPI):
+-            applied_schemas = child_prim.GetAppliedSchemas()
+-            if "PhysxRigidBodyAPI" not in applied_schemas:
+-                child_prim.AddAppliedSchema("PhysxRigidBodyAPI")
+-            if "PhysxContactReportAPI" not in applied_schemas:
+-                child_prim.AddAppliedSchema("PhysxContactReportAPI")
+-            safe_set_attribute_on_usd_prim(child_prim, "physxRigidBody:sleepThreshold", 0.0, camel_case=False)
+-            safe_set_attribute_on_usd_prim(child_prim, "physxContactReport:threshold", threshold, camel_case=False)
+-        all_prims += child_prim.GetChildren()
++    return spawn_nested_urdf_with_contact_sensors(
++        prim_path,
++        cfg,
++        translation=translation,
++        orientation=orientation,
++        **kwargs,
++    )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
+index 23400a9b0..845ebbe54 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
+@@ -4,11 +4,13 @@
+ # SPDX-License-Identifier: BSD-3-Clause
+
+ from isaaclab.utils.configclass import configclass
+-from isaaclab_rl.rsl_rl import RslRlSymmetryCfg
+
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.agents.rsl_rl_ppo_cfg import (
+     UnitreeGo2FlatPPORunnerCfg,
+ )
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.agents.rsl_rl_ppo_cfg import (
++    configure_symm_quadruped_ppo,
++)
+ from isaaclab_tasks.manager_based.locomotion.velocity.mdp import go2_symm as go2_symm_mdp
+
+
+@@ -19,26 +21,10 @@ class UnitreeGo2SymmFlatPPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
+     def __post_init__(self) -> None:
+         super().__post_init__()
+
+-        self.max_iterations = 5000
+-        self.save_interval = 1000
+-        self.experiment_name = "unitree_go2_symm_flat"
+-        self.clip_actions = None
+-        self.obs_groups = {"actor": ["policy"], "critic": ["policy"]}
+-        self.actor.hidden_dims = [512, 256, 128]
+-        self.critic.hidden_dims = [512, 256, 128]
+-        self.algorithm.class_name = (
+-            "isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.legacy_trs_ppo:LegacyTimeReversalPPO"
+-        )
+-        self.algorithm.entropy_coef = 0.01
+-        self.algorithm.symmetry_cfg = RslRlSymmetryCfg(
++        configure_symm_quadruped_ppo(
++            self,
++            experiment_name="unitree_go2_symm_flat",
+             use_data_augmentation=False,
+-            use_mirror_loss=True,
+             data_augmentation_func=go2_symm_mdp.compute_time_reversal_states,
+-            mirror_loss_coeff=0.1,
+-            use_legacy_time_reversal_regularization=True,
+             value_loss_coeff=0.05,
+-            min_abs_command_velocity=0.2,
+-            warmup_iterations=500,
+-            command_observation_index=3,
+-            command_observation_scale=2.0,
+         )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/env.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/env.py
+index aaca77a4c..bb66191e4 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/env.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/env.py
+@@ -3,76 +3,16 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Task-local environment behavior for the migrated Go2 IsaacGym task."""
++"""Go2 environment compatibility aliases for the shared symmetric quadruped env."""
+
+ from __future__ import annotations
+
+-import torch
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.env import (
++    SymmQuadrupedManagerBasedRLEnv,
++)
+
+-from isaaclab.envs import ManagerBasedRLEnv
+-from isaaclab.envs.common import VecEnvStepReturn
+
++class Go2SymmManagerBasedRLEnv(SymmQuadrupedManagerBasedRLEnv):
++    """Manager-based RL environment for the Go2 symmetric task."""
+
+-class Go2SymmManagerBasedRLEnv(ManagerBasedRLEnv):
+-    """Manager-based RL environment with the old Go2 reward/update ordering."""
+-
+-    def step(self, action: torch.Tensor) -> VecEnvStepReturn:
+-        """Execute one RL step using the migrated IsaacGym Go2 ordering."""
+-        self.action_manager.process_action(action.to(self.device))
+-
+-        self.recorder_manager.record_pre_step()
+-
+-        is_rendering = self.sim.is_rendering
+-
+-        if self._physics_handles_decimation:
+-            self._sim_step_counter += self.cfg.decimation
+-            self.action_manager.apply_action()
+-            self.scene.write_data_to_sim()
+-            self.sim.step(render=False)
+-            self.recorder_manager.record_post_physics_decimation_step()
+-            if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
+-                self.sim.render(skip_app_pumping=not self.render_enabled)
+-            self.scene.update(dt=self.step_dt)
+-        else:
+-            for _ in range(self.cfg.decimation):
+-                self._sim_step_counter += 1
+-                self.action_manager.apply_action()
+-                self.scene.write_data_to_sim()
+-                self.sim.step(render=False)
+-                self.recorder_manager.record_post_physics_decimation_step()
+-                if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
+-                    self.sim.render(skip_app_pumping=not self.render_enabled)
+-                self.scene.update(dt=self.physics_dt)
+-
+-        self.episode_length_buf += 1
+-        self.common_step_counter += 1
+-
+-        self.command_manager.compute(dt=self.step_dt)
+-        if "interval" in self.event_manager.available_modes:
+-            self.event_manager.apply(mode="interval", dt=self.step_dt)
+-
+-        self.reset_buf = self.termination_manager.compute()
+-        self.reset_terminated = self.termination_manager.terminated
+-        self.reset_time_outs = self.termination_manager.time_outs
+-
+-        self.reward_buf = torch.clamp(self.reward_manager.compute(dt=self.step_dt), min=0.0)
+-
+-        if len(self.recorder_manager.active_terms) > 0:
+-            self.obs_buf = self.observation_manager.compute()
+-            self.recorder_manager.record_post_step()
+-
+-        reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
+-        if len(reset_env_ids) > 0:
+-            self.recorder_manager.record_pre_reset(reset_env_ids)
+-
+-            self._reset_idx(reset_env_ids)
+-
+-            if self.render_enabled and is_rendering and self.has_rtx_sensors and self.cfg.num_rerenders_on_reset > 0:
+-                for _ in range(self.cfg.num_rerenders_on_reset):
+-                    self.sim.render()
+-
+-            self.recorder_manager.record_post_reset(reset_env_ids)
+-
+-        self.obs_buf = self.observation_manager.compute(update_history=True)
+-
+-        return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
++    pass
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
+index 5879f59b3..3a3f2f388 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
+@@ -5,27 +5,27 @@
+
+ import os
+
+-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+-from isaaclab_physx.physics import PhysxCfg
+ from isaaclab.actuators import IdealPDActuatorCfg
+-from isaaclab.envs import mdp as base_mdp
+-from isaaclab.managers import ObservationTermCfg as ObsTerm
+-from isaaclab.managers import RewardTermCfg as RewTerm
+-from isaaclab.managers import SceneEntityCfg
+-from isaaclab.managers import TerminationTermCfg as DoneTerm
+ import isaaclab.sim as sim_utils
+ from isaaclab.sim import SimulationCfg
+-import isaaclab.terrains as terrain_gen
+-from isaaclab_physx.sensors import ContactSensorCfg
+ from isaaclab.sim.converters import UrdfConverterCfg
+ from isaaclab.utils.configclass import configclass
+-from isaaclab.utils.noise import UniformNoiseCfg as Unoise
+ from isaaclab_assets import ISAACLAB_ASSETS_EXT_DIR
+
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.spawners import spawn_go2_symm_from_urdf
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.flat_env_cfg import (
++    SymmQuadrupedPhysicsCfg,
++    configure_domain_randomization,
++    configure_flat_scene,
++    configure_policy_observations,
++    configure_rewards,
++    configure_terminations,
++    make_gait_velocity_command,
++    make_play_physics_cfg,
++    make_single_body_contact_sensor,
++)
+ from isaaclab_tasks.manager_based.locomotion.velocity.mdp import go2_symm as go2_symm_mdp
+-from isaaclab_tasks.utils import PresetCfg
+
+ _GO2_SYMM_ASSET_DIR = os.path.join(ISAACLAB_ASSETS_EXT_DIR, "isaaclab_assets", "robots", "go2_symm")
+ _GO2_LEGGED_GYM_JOINT_ORDER = [
+@@ -42,38 +42,11 @@ _GO2_LEGGED_GYM_JOINT_ORDER = [
+     "RR_thigh_joint",
+     "RR_calf_joint",
+ ]
+-_GO2_SYMM_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
+-    size=(160.0, 160.0),
+-    border_width=0.0,
+-    num_rows=1,
+-    num_cols=1,
+-    use_cache=False,
+-    sub_terrains={"flat": terrain_gen.MeshPlaneTerrainCfg(proportion=1.0)},
+-)
+-
+-
+-@configclass
+-class PhysicsCfg(PresetCfg):
+-    """Physics preset for the 2048-env Go2 symmetric migration runs."""
++_GO2_FOOT_BODY_NAMES = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
++_GO2_CALF_BODY_NAMES = ["FL_calf", "FR_calf", "RL_calf", "RR_calf"]
++_GO2_FOOT_SENSOR_NAMES = ("contact_FL_foot", "contact_FR_foot", "contact_RL_foot", "contact_RR_foot")
+
+-    default = PhysxCfg(
+-        gpu_max_rigid_patch_count=10 * 2**15,
+-        gpu_found_lost_pairs_capacity=2**22,
+-        gpu_found_lost_aggregate_pairs_capacity=2**27,
+-        gpu_total_aggregate_pairs_capacity=2**22,
+-    )
+-    newton_mjwarp = NewtonCfg(
+-        solver_cfg=MJWarpSolverCfg(
+-            njmax=65,
+-            nconmax=35,
+-            cone="pyramidal",
+-            impratio=1,
+-            integrator="implicitfast",
+-        ),
+-        num_substeps=1,
+-        debug_mode=False,
+-    )
+-    physx = default
++PhysicsCfg = SymmQuadrupedPhysicsCfg
+
+
+ @configclass
+@@ -86,12 +59,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+         super().__post_init__()
+
+         self.episode_length_s = 30.0
+-
+-        self.scene.terrain.terrain_type = "generator"
+-        self.scene.terrain.terrain_generator = _GO2_SYMM_FLAT_TERRAIN_CFG
+-        self.scene.terrain.max_init_terrain_level = 0
+-        self.scene.terrain.visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.4, 0.4, 0.4))
+-        self.scene.sky_light.spawn = sim_utils.DomeLightCfg(intensity=900.0, color=(1.0, 1.0, 1.0))
++        configure_flat_scene(self)
+
+         self.scene.robot.spawn = sim_utils.UrdfFileCfg(
+             func=spawn_go2_symm_from_urdf,
+@@ -159,27 +127,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+         self.actions.joint_pos.preserve_order = True
+         self.actions.joint_pos.scale = 0.25
+
+-        self.commands.base_velocity = go2_symm_mdp.GaitVelocityCommandCfg(
+-            asset_name="robot",
+-            resampling_time_range=(10.0, 10.0),
+-            heading_command=False,
+-            heading_control_stiffness=0.5,
+-            rel_standing_envs=0.0,
+-            rel_heading_envs=1.0,
+-            min_xy_command_norm=0.2,
+-            resample_once_after_reset=True,
+-            resample_gait_once_after_reset=True,
+-            vel_xy_success_threshold=0.05,
+-            vel_xy_success_rel_threshold=0.25,
+-            vel_yaw_success_threshold=0.05,
+-            vel_yaw_success_rel_threshold=0.25,
+-            ranges=go2_symm_mdp.GaitVelocityCommandCfg.Ranges(
+-                lin_vel_x=(-2.0, 2.0),
+-                lin_vel_y=(0.0, 0.0),
+-                ang_vel_z=(0.0, 0.0),
+-                heading=(0.0, 0.0),
+-            ),
+-        )
++        self.commands.base_velocity = make_gait_velocity_command(go2_symm_mdp, base_height_range=(0.35, 0.45))
+
+         self._configure_go2_symm_observations()
+         self._configure_go2_symm_rewards()
+@@ -188,191 +136,56 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+
+     def _configure_go2_symm_contact_sensors(self) -> None:
+         """Configure contact sensors for the nested URDF link tree."""
+-        contact_sensor_kwargs = {
+-            "history_length": 3,
+-            "track_air_time": True,
+-        }
+-        self.scene.contact_base = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base",
+-            **contact_sensor_kwargs,
+-        )
+-        self.scene.contact_head_upper = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base/Head_upper",
+-            **contact_sensor_kwargs,
++        self.scene.contact_base = make_single_body_contact_sensor("{ENV_REGEX_NS}/Robot/Geometry/base")
++        self.scene.contact_head_upper = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/base/Head_upper"
+         )
+-        self.scene.contact_head_lower = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base/Head_upper/Head_lower",
+-            **contact_sensor_kwargs,
++        self.scene.contact_head_lower = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/base/Head_upper/Head_lower"
+         )
+-        self.scene.contact_FL_foot = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base/FL_hip/FL_thigh/FL_calf/FL_foot",
+-            **contact_sensor_kwargs,
++        self.scene.contact_FL_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/base/FL_hip/FL_thigh/FL_calf/FL_foot"
+         )
+-        self.scene.contact_FR_foot = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base/FR_hip/FR_thigh/FR_calf/FR_foot",
+-            **contact_sensor_kwargs,
++        self.scene.contact_FR_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/base/FR_hip/FR_thigh/FR_calf/FR_foot"
+         )
+-        self.scene.contact_RL_foot = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base/RL_hip/RL_thigh/RL_calf/RL_foot",
+-            **contact_sensor_kwargs,
++        self.scene.contact_RL_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/base/RL_hip/RL_thigh/RL_calf/RL_foot"
+         )
+-        self.scene.contact_RR_foot = ContactSensorCfg(
+-            prim_path="{ENV_REGEX_NS}/Robot/Geometry/base/RR_hip/RR_thigh/RR_calf/RR_foot",
+-            **contact_sensor_kwargs,
++        self.scene.contact_RR_foot = make_single_body_contact_sensor(
++            "{ENV_REGEX_NS}/Robot/Geometry/base/RR_hip/RR_thigh/RR_calf/RR_foot"
+         )
+
+     def _configure_go2_symm_observations(self) -> None:
+         """Configure the migrated 60D Go2 policy observation."""
+-        policy = self.observations.policy
+-        legacy_joint_cfg = SceneEntityCfg(
+-            "robot", joint_names=_GO2_LEGGED_GYM_JOINT_ORDER, preserve_order=True
+-        )
+-
+-        policy.base_lin_vel = None
+-        policy.base_ang_vel = None
+-        policy.projected_gravity = ObsTerm(
+-            func=base_mdp.projected_gravity,
+-            noise=Unoise(n_min=-0.05, n_max=0.05),
+-        )
+-        policy.velocity_commands = ObsTerm(
+-            func=base_mdp.generated_commands,
+-            params={"command_name": "base_velocity"},
+-            scale=(2.0, 2.0, 0.25),
+-        )
+-        policy.joint_pos = ObsTerm(
+-            func=base_mdp.joint_pos_rel,
+-            noise=Unoise(n_min=-0.01, n_max=0.01),
+-            params={"asset_cfg": legacy_joint_cfg},
+-        )
+-        policy.joint_vel = ObsTerm(
+-            func=base_mdp.joint_vel_rel,
+-            noise=Unoise(n_min=-1.5, n_max=1.5),
+-            scale=0.05,
+-            params={"asset_cfg": legacy_joint_cfg},
+-        )
+-        policy.actions = ObsTerm(func=base_mdp.last_action)
+-        policy.height_scan = None
+-        policy.foot_phase_sin = ObsTerm(func=go2_symm_mdp.foot_phase_sin, params={"command_name": "base_velocity"})
+-        policy.foot_phase_cos = ObsTerm(func=go2_symm_mdp.foot_phase_cos, params={"command_name": "base_velocity"})
+-        policy.foot_theta_sin = ObsTerm(func=go2_symm_mdp.foot_theta_sin, params={"command_name": "base_velocity"})
+-        policy.foot_theta_cos = ObsTerm(func=go2_symm_mdp.foot_theta_cos, params={"command_name": "base_velocity"})
+-        policy.phase_ratios = ObsTerm(func=go2_symm_mdp.phase_ratios, params={"command_name": "base_velocity"})
++        configure_policy_observations(self, go2_symm_mdp, _GO2_LEGGED_GYM_JOINT_ORDER)
+
+     def _configure_go2_symm_rewards(self) -> None:
+         """Configure the first migrated Go2 reward terms."""
+-        self.rewards.track_lin_vel_xy_exp = None
+-        self.rewards.track_ang_vel_z_exp = None
+-        self.rewards.lin_vel_z_l2 = None
+-        self.rewards.ang_vel_xy_l2 = None
+-        self.rewards.dof_torques_l2 = None
+-        self.rewards.dof_acc_l2 = None
+-        # self.rewards.action_rate_l2 = None
+-        self.rewards.action_rate_l2 = RewTerm(
+-            func=go2_symm_mdp.action_rate_exp_penalty,
+-            weight=0.05,
+-            params={"scale": 0.1},
++        configure_rewards(
++            self,
++            go2_symm_mdp,
++            joint_names=_GO2_LEGGED_GYM_JOINT_ORDER,
++            foot_body_names=_GO2_FOOT_BODY_NAMES,
++            foot_sensor_names=_GO2_FOOT_SENSOR_NAMES,
++            foot_sensor_body_names=_GO2_FOOT_BODY_NAMES,
++            base_height_range=(0.35, 0.45),
+         )
+-        self.rewards.feet_air_time = None
+-        self.rewards.flat_orientation_l2 = None
+-        self.rewards.dof_pos_limits = None
+-
+-        self.rewards.alive_bonus = RewTerm(func=go2_symm_mdp.alive_bonus, weight=1.0)
+-        self.rewards.cmd = RewTerm(
+-            func=go2_symm_mdp.command_tracking_penalty,
+-            weight=0.40,
+-            params={"command_name": "base_velocity"},
+-        )
+-        self.rewards.foot_periodicity = RewTerm(
+-            func=go2_symm_mdp.foot_periodicity_penalty,
+-            weight=0.30,
+-            params={
+-                "command_name": "base_velocity",
+-                "feet_cfg": SceneEntityCfg(
+-                    "robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"], preserve_order=True
+-                ),
+-                "foot_sensor_names": ("contact_FL_foot", "contact_FR_foot", "contact_RL_foot", "contact_RR_foot"),
+-                "foot_sensor_body_names": ("FL_foot", "FR_foot", "RL_foot", "RR_foot"),
+-            },
+-        )
+-        self.rewards.base_height = RewTerm(
+-            func=go2_symm_mdp.base_height_range_penalty,
+-            weight=0.30,
+-            params={"height_range": (0.35, 0.45)},
+-        )
+-        self.rewards.foot_clearance = RewTerm(
+-            func=go2_symm_mdp.foot_clearance_penalty,
+-            weight=0.10,
+-            params={
+-                "command_name": "base_velocity",
+-                "feet_cfg": SceneEntityCfg(
+-                    "robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"], preserve_order=True
+-                ),
+-            },
+-        )
+-        self.rewards.hip_action_penalty = RewTerm(func=go2_symm_mdp.hip_action_penalty, weight=0.15)
+-        self.rewards.morphological_symmetry = RewTerm(
+-            func=go2_symm_mdp.morphological_symmetry_penalty,
+-            weight=0.30,
+-            params={
+-                "command_name": "base_velocity",
+-                "joint_cfg": SceneEntityCfg(
+-                    "robot", joint_names=_GO2_LEGGED_GYM_JOINT_ORDER, preserve_order=True
+-                ),
+-            },
+-        )
+-        self.rewards.smoothness = RewTerm(func=go2_symm_mdp.SmoothnessPenalty, weight=0.10)
+
+     def _configure_go2_symm_terminations(self) -> None:
+         """Configure migrated Go2 reset and termination terms."""
+-        self.terminations.base_contact = DoneTerm(
+-            func=go2_symm_mdp.illegal_contact_any_sensor,
+-            params={"sensor_names": ("contact_base",), "threshold": 1.0},
+-        )
+-        self.terminations.base_height = DoneTerm(
+-            func=go2_symm_mdp.base_height_out_of_range,
+-            params={"height_range": (0.15, 0.45)},
+-        )
+-        self.terminations.base_orientation = DoneTerm(
+-            func=go2_symm_mdp.base_roll_pitch_out_of_range,
+-            params={"max_roll": 0.8, "max_pitch": 1.0},
+-        )
+-        self.terminations.head_contact = DoneTerm(
+-            func=go2_symm_mdp.illegal_contact_any_sensor,
+-            params={"sensor_names": ("contact_head_upper", "contact_head_lower"), "threshold": 1.0},
+-        )
+-        self.terminations.calf_height = DoneTerm(
+-            func=go2_symm_mdp.body_height_below,
+-            params={
+-                "min_height": 0.08,
+-                "body_cfg": SceneEntityCfg(
+-                    "robot", body_names=["FL_calf", "FR_calf", "RL_calf", "RR_calf"], preserve_order=True
+-                ),
+-            },
++        configure_terminations(
++            self,
++            go2_symm_mdp,
++            base_sensor_names=("contact_base",),
++            base_height_range=(0.15, 0.45),
++            calf_body_names=_GO2_CALF_BODY_NAMES,
++            additional_contact_terms={"head_contact": ("contact_head_upper", "contact_head_lower")},
+         )
+
+     def _configure_go2_symm_domain_randomization(self) -> None:
+         """Configure migrated Go2 domain randomization values."""
+-        self.events.physics_material.params["static_friction_range"] = (0.3, 2.0)
+-        self.events.physics_material.params["dynamic_friction_range"] = (0.3, 2.0)
+-        self.events.physics_material.params["make_consistent"] = True
+-
+-        self.events.add_base_mass.params["mass_distribution_params"] = (-1.5, 1.5)
+-        self.events.add_base_mass.params["operation"] = "add"
+-        self.events.add_base_mass.params["distribution"] = "uniform"
+-
+-        self.events.base_com = None
+-        self.events.reset_base.params["pose_range"] = {}
+-        self.events.reset_base.params["velocity_range"] = {
+-            "x": (-0.5, 0.5),
+-            "y": (-0.5, 0.5),
+-            "z": (-0.5, 0.5),
+-            "roll": (-0.5, 0.5),
+-            "pitch": (-0.5, 0.5),
+-            "yaw": (-0.5, 0.5),
+-        }
+-
+-        self.events.push_robot.interval_range_s = (15.0, 15.0)
+-        self.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
++        configure_domain_randomization(self)
+
+
+ @configclass
+@@ -384,12 +197,7 @@ class UnitreeGo2SymmFlatEnvCfg_PLAY(UnitreeGo2SymmFlatEnvCfg):
+
+         self.scene.num_envs = 1
+         self.scene.env_spacing = 2.5
+-        self.sim.physics = PhysxCfg(
+-            gpu_max_rigid_patch_count=2**15,
+-            gpu_found_lost_pairs_capacity=2**20,
+-            gpu_found_lost_aggregate_pairs_capacity=2**22,
+-            gpu_total_aggregate_pairs_capacity=2**20,
+-        )
++        self.sim.physics = make_play_physics_cfg()
+         self.viewer.eye = (0.0, -4.0, 1.4)
+         self.viewer.lookat = (0.3, 0.0, 0.35)
+         self.viewer.origin_type = "asset_root"
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/legacy_trs_ppo.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/legacy_trs_ppo.py
+index 72aa07346..b085c76e6 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/legacy_trs_ppo.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/legacy_trs_ppo.py
+@@ -3,270 +3,10 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Legacy Go2 time-reversal PPO regularization for RSL-RL."""
++"""Compatibility import for the shared legacy TRS PPO implementation."""
+
+-from __future__ import annotations
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.legacy_trs_ppo import (
++    LegacyTimeReversalPPO,
++)
+
+-import torch
+-import torch.nn as nn
+-from tensordict import TensorDict
+-
+-from rsl_rl.algorithms import PPO
+-
+-
+-class LegacyTimeReversalPPO(PPO):
+-    """PPO with the old Go2 TRS warmup, action, and value losses."""
+-
+-    _MIN_ACTOR_STD = 1.0e-6
+-    _MAX_ACTOR_STD = 10.0
+-
+-    def __init__(self, *args, **kwargs) -> None:
+-        super().__init__(*args, **kwargs)
+-        self.current_learning_iteration = 0
+-        self._legacy_update_count = 0
+-        self._clamp_actor_std()
+-
+-    def act(self, obs: TensorDict) -> torch.Tensor:
+-        """Sample actions after ensuring the scalar action std is valid."""
+-        self._clamp_actor_std()
+-        return super().act(obs)
+-
+-    def update(self) -> dict[str, float]:
+-        """Run PPO updates with optional legacy time-reversal regularization."""
+-        legacy_trs_enabled = self._legacy_trs_enabled()
+-        legacy_trs_active = legacy_trs_enabled and self.current_learning_iteration >= self._legacy_warmup_iterations()
+-
+-        mean_value_loss = 0
+-        mean_surrogate_loss = 0
+-        mean_entropy = 0
+-        mean_rnd_loss = 0 if self.rnd else None
+-        mean_symmetry_loss = 0 if self.symmetry else None
+-        mean_tr_value_loss = 0 if legacy_trs_enabled else None
+-
+-        if self.actor.is_recurrent or self.critic.is_recurrent:
+-            generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+-        else:
+-            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+-
+-        for batch in generator:
+-            original_batch_size = batch.observations.batch_size[0]
+-
+-            if self.normalize_advantage_per_mini_batch:
+-                with torch.no_grad():
+-                    batch.advantages = (batch.advantages - batch.advantages.mean()) / (batch.advantages.std() + 1e-8)
+-
+-            use_data_augmentation = legacy_trs_active and self.symmetry and self.symmetry["use_data_augmentation"]
+-            if use_data_augmentation:
+-                data_augmentation_func = self.symmetry["data_augmentation_func"]
+-                batch.observations, batch.actions = data_augmentation_func(
+-                    env=self.symmetry["_env"],
+-                    obs=batch.observations,
+-                    actions=batch.actions,
+-                )
+-                num_aug = int(batch.observations.batch_size[0] / original_batch_size)
+-                batch.old_actions_log_prob = batch.old_actions_log_prob.repeat(num_aug, 1)
+-                batch.values = batch.values.repeat(num_aug, 1)
+-                batch.advantages = batch.advantages.repeat(num_aug, 1)
+-                batch.returns = batch.returns.repeat(num_aug, 1)
+-
+-            self._clamp_actor_std()
+-            self.actor(
+-                batch.observations,
+-                masks=batch.masks,
+-                hidden_state=batch.hidden_states[0],
+-                stochastic_output=True,
+-            )
+-            actions_log_prob = self.actor.get_output_log_prob(batch.actions)
+-            values = self.critic(batch.observations, masks=batch.masks, hidden_state=batch.hidden_states[1])
+-            distribution_params = tuple(p[:original_batch_size] for p in self.actor.output_distribution_params)
+-            entropy = self.actor.output_entropy[:original_batch_size]
+-
+-            if self.desired_kl is not None and self.schedule == "adaptive":
+-                with torch.inference_mode():
+-                    kl = self.actor.get_kl_divergence(batch.old_distribution_params, distribution_params)
+-                    kl_mean = torch.mean(kl)
+-
+-                    if self.is_multi_gpu:
+-                        torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
+-                        kl_mean /= self.gpu_world_size
+-
+-                    if self.gpu_global_rank == 0:
+-                        if kl_mean > self.desired_kl * 2.0:
+-                            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+-                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+-                            self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+-
+-                    if self.is_multi_gpu:
+-                        lr_tensor = torch.tensor(self.learning_rate, device=self.device)
+-                        torch.distributed.broadcast(lr_tensor, src=0)
+-                        self.learning_rate = lr_tensor.item()
+-
+-                    for param_group in self.optimizer.param_groups:
+-                        param_group["lr"] = self.learning_rate
+-
+-            ratio = torch.exp(actions_log_prob - torch.squeeze(batch.old_actions_log_prob))
+-            surrogate = -torch.squeeze(batch.advantages) * ratio
+-            surrogate_clipped = -torch.squeeze(batch.advantages) * torch.clamp(
+-                ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+-            )
+-            surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
+-
+-            if self.use_clipped_value_loss:
+-                value_clipped = batch.values + (values - batch.values).clamp(-self.clip_param, self.clip_param)
+-                value_losses = (values - batch.returns).pow(2)
+-                value_losses_clipped = (value_clipped - batch.returns).pow(2)
+-                value_loss = torch.max(value_losses, value_losses_clipped).mean()
+-            else:
+-                value_loss = (batch.returns - values).pow(2).mean()
+-
+-            loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
+-
+-            symmetry_loss = torch.zeros((), device=self.device)
+-            tr_value_loss = torch.zeros((), device=self.device)
+-            if legacy_trs_active and self.symmetry:
+-                data_augmentation_func = self.symmetry["data_augmentation_func"]
+-                augmented_observations = batch.observations
+-                augmented_values = values
+-                if not use_data_augmentation:
+-                    augmented_observations, _ = data_augmentation_func(
+-                        obs=batch.observations, actions=None, env=self.symmetry["_env"]
+-                    )
+-                    augmented_values = self.critic(augmented_observations)
+-
+-                mean_actions = self.actor(augmented_observations.detach().clone())
+-                action_mean_orig = mean_actions[:original_batch_size]
+-                _, actions_mean_symm = data_augmentation_func(
+-                    obs=None, actions=action_mean_orig, env=self.symmetry["_env"]
+-                )
+-
+-                trs_mask = self._legacy_trs_mask(augmented_observations[:original_batch_size])
+-                symmetry_loss = self._masked_mse(
+-                    mean_actions[original_batch_size:],
+-                    actions_mean_symm.detach()[original_batch_size:],
+-                    trs_mask,
+-                )
+-                tr_value_loss = self._masked_mse(
+-                    augmented_values[original_batch_size:],
+-                    augmented_values[:original_batch_size].detach(),
+-                    trs_mask,
+-                )
+-
+-                if self.symmetry["use_mirror_loss"]:
+-                    loss += self.symmetry["mirror_loss_coeff"] * symmetry_loss
+-                value_loss_coeff = float(self.symmetry.get("value_loss_coeff", 0.0))
+-                if value_loss_coeff > 0.0:
+-                    loss += value_loss_coeff * tr_value_loss
+-
+-            elif self.symmetry:
+-                symmetry_loss = symmetry_loss.detach()
+-
+-            if self.rnd:
+-                with torch.no_grad():
+-                    rnd_state = self.rnd.get_rnd_state(batch.observations[:original_batch_size])
+-                    rnd_state = self.rnd.state_normalizer(rnd_state)
+-                predicted_embedding = self.rnd.predictor(rnd_state)
+-                target_embedding = self.rnd.target(rnd_state).detach()
+-                rnd_loss = torch.nn.MSELoss()(predicted_embedding, target_embedding)
+-
+-            self.optimizer.zero_grad()
+-            loss.backward()
+-            if self.rnd:
+-                self.rnd_optimizer.zero_grad()
+-                rnd_loss.backward()
+-
+-            if self.is_multi_gpu:
+-                self.reduce_parameters()
+-
+-            nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+-            nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+-            self.optimizer.step()
+-            self._clamp_actor_std()
+-            if self.rnd_optimizer:
+-                self.rnd_optimizer.step()
+-
+-            mean_value_loss += value_loss.item()
+-            mean_surrogate_loss += surrogate_loss.item()
+-            mean_entropy += entropy.mean().item()
+-            if mean_rnd_loss is not None:
+-                mean_rnd_loss += rnd_loss.item()
+-            if mean_symmetry_loss is not None:
+-                mean_symmetry_loss += symmetry_loss.item()
+-            if mean_tr_value_loss is not None:
+-                mean_tr_value_loss += tr_value_loss.item()
+-
+-        num_updates = self.num_learning_epochs * self.num_mini_batches
+-        mean_value_loss /= num_updates
+-        mean_surrogate_loss /= num_updates
+-        mean_entropy /= num_updates
+-        if mean_rnd_loss is not None:
+-            mean_rnd_loss /= num_updates
+-        if mean_symmetry_loss is not None:
+-            mean_symmetry_loss /= num_updates
+-        if mean_tr_value_loss is not None:
+-            mean_tr_value_loss /= num_updates
+-
+-        self.storage.clear()
+-        self._legacy_update_count += 1
+-        self.current_learning_iteration = self._legacy_update_count
+-
+-        loss_dict = {
+-            "value": mean_value_loss,
+-            "surrogate": mean_surrogate_loss,
+-            "entropy": mean_entropy,
+-        }
+-        if self.rnd:
+-            loss_dict["rnd"] = mean_rnd_loss
+-        if self.symmetry:
+-            loss_dict["symmetry"] = mean_symmetry_loss
+-        if mean_tr_value_loss is not None:
+-            loss_dict["tr_value"] = mean_tr_value_loss
+-
+-        return loss_dict
+-
+-    def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
+-        """Load algorithm state and keep the TRS warmup counter aligned when possible."""
+-        load_iteration = super().load(loaded_dict, load_cfg, strict)
+-        if load_iteration and "iter" in loaded_dict:
+-            self.current_learning_iteration = int(loaded_dict["iter"])
+-            self._legacy_update_count = self.current_learning_iteration
+-        return load_iteration
+-
+-    def _legacy_trs_enabled(self) -> bool:
+-        if self.symmetry is None:
+-            return False
+-        if not self.symmetry.get("use_legacy_time_reversal_regularization", False):
+-            return False
+-        return (
+-            self.symmetry["use_data_augmentation"]
+-            or self.symmetry["use_mirror_loss"]
+-            or float(self.symmetry.get("value_loss_coeff", 0.0)) > 0.0
+-        )
+-
+-    def _legacy_warmup_iterations(self) -> int:
+-        if self.symmetry is None:
+-            return 0
+-        return int(self.symmetry.get("warmup_iterations", 0))
+-
+-    def _legacy_trs_mask(self, observations) -> torch.Tensor:
+-        policy_obs = observations["policy"]
+-        command_index = int(self.symmetry.get("command_observation_index", 3))
+-        command_scale = float(self.symmetry.get("command_observation_scale", 1.0))
+-        min_abs_command = float(self.symmetry.get("min_abs_command_velocity", 0.0))
+-        command = policy_obs[:, command_index] / command_scale
+-        return (torch.abs(command) >= min_abs_command).unsqueeze(-1).to(dtype=policy_obs.dtype)
+-
+-    @staticmethod
+-    def _masked_mse(prediction: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+-        mask = mask.expand_as(prediction)
+-        denom = mask.sum().clamp_min(1.0)
+-        return ((prediction - target).pow(2) * mask).sum() / denom
+-
+-    def _clamp_actor_std(self) -> None:
+-        """Keep RSL-RL's scalar Gaussian std parameter positive and finite."""
+-        distribution = getattr(self.actor, "distribution", None)
+-        std_param = getattr(distribution, "std_param", None)
+-        if std_param is None:
+-            return
+-        with torch.no_grad():
+-            std_param.nan_to_num_(nan=self._MIN_ACTOR_STD, posinf=self._MAX_ACTOR_STD, neginf=self._MIN_ACTOR_STD)
+-            std_param.clamp_(min=self._MIN_ACTOR_STD, max=self._MAX_ACTOR_STD)
++__all__ = ["LegacyTimeReversalPPO"]
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/spawners.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/spawners.py
+index 536602cc9..599a44772 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/spawners.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/spawners.py
+@@ -3,12 +3,16 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Task-local spawners for the migrated Go2 symmetric task."""
++"""Task-local spawner aliases for the Go2 symmetric task."""
+
+ from __future__ import annotations
+
+ from typing import TYPE_CHECKING
+
++from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.spawners import (
++    spawn_nested_urdf_with_contact_sensors,
++)
++
+ if TYPE_CHECKING:
+     from pxr import Usd
+
+@@ -22,37 +26,11 @@ def spawn_go2_symm_from_urdf(
+     orientation: tuple[float, float, float, float] | None = None,
+     **kwargs,
+ ) -> Usd.Prim:
+-    """Spawn the migrated Go2 URDF and enable contact reporting on nested links."""
+-    from isaaclab.sim.spawners.from_files.from_files import spawn_from_urdf  # noqa: PLC0415
+-    from isaaclab.sim.utils import find_matching_prims  # noqa: PLC0415
+-
+-    activate_contact_sensors = cfg.activate_contact_sensors
+-    cfg.activate_contact_sensors = False
+-    prim = spawn_from_urdf(prim_path, cfg, translation=translation, orientation=orientation, **kwargs)
+-    cfg.activate_contact_sensors = activate_contact_sensors
+-    if activate_contact_sensors:
+-        robot_prims = find_matching_prims(prim_path) or [prim]
+-        for robot_prim in robot_prims:
+-            _activate_nested_rigid_body_contact_sensors(robot_prim, threshold=0.0)
+-    return prim
+-
+-
+-def _activate_nested_rigid_body_contact_sensors(prim: Usd.Prim, threshold: float = 0.0) -> None:
+-    """Activate contact reports on every rigid-body descendant in the imported tree."""
+-    from isaaclab.sim.utils import safe_set_attribute_on_usd_prim  # noqa: PLC0415
+-    from pxr import UsdPhysics  # noqa: PLC0415
+-
+-    all_prims = [prim]
+-    while all_prims:
+-        child_prim = all_prims.pop(0)
+-        if child_prim.HasAPI(UsdPhysics.RigidBodyAPI):
+-            applied_schemas = child_prim.GetAppliedSchemas()
+-            if "PhysxRigidBodyAPI" not in applied_schemas:
+-                child_prim.AddAppliedSchema("PhysxRigidBodyAPI")
+-            if "PhysxContactReportAPI" not in applied_schemas:
+-                child_prim.AddAppliedSchema("PhysxContactReportAPI")
+-            safe_set_attribute_on_usd_prim(child_prim, "physxRigidBody:sleepThreshold", 0.0, camel_case=False)
+-            safe_set_attribute_on_usd_prim(
+-                child_prim, "physxContactReport:threshold", threshold, camel_case=False
+-            )
+-        all_prims += child_prim.GetChildren()
++    """Spawn the Go2 URDF and enable contact reporting on nested links."""
++    return spawn_nested_urdf_with_contact_sensors(
++        prim_path,
++        cfg,
++        translation=translation,
++        orientation=orientation,
++        **kwargs,
++    )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+index 80ee6d83f..bba3696b2 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+@@ -3,7 +3,7 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Dobot X1 symmetric gait terms adapted from the Go2 symmetric task."""
++"""Dobot X1 adapter for shared symmetric quadruped MDP terms."""
+
+ from __future__ import annotations
+
+@@ -13,63 +13,38 @@ import torch
+
+ from isaaclab.managers import SceneEntityCfg
+
+-from isaaclab_tasks.manager_based.locomotion.velocity.mdp import go2_symm as _go2_symm
++from isaaclab_tasks.manager_based.locomotion.velocity.mdp import symm_quadruped as _symm_quadruped
++from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import *  # noqa: F401, F403
+
+ if TYPE_CHECKING:
+-    from isaaclab.assets import Articulation
+     from isaaclab.envs import ManagerBasedRLEnv
+
+
+-GaitVelocityCommand = _go2_symm.GaitVelocityCommand
+-GaitVelocityCommandCfg = _go2_symm.GaitVelocityCommandCfg
+-SmoothnessPenalty = _go2_symm.SmoothnessPenalty
+-action_rate_exp_penalty = _go2_symm.action_rate_exp_penalty
+-alive_bonus = _go2_symm.alive_bonus
+-base_height_out_of_range = _go2_symm.base_height_out_of_range
+-base_height_range_penalty = _go2_symm.base_height_range_penalty
+-base_roll_pitch_out_of_range = _go2_symm.base_roll_pitch_out_of_range
+-body_height_below = _go2_symm.body_height_below
+-command_tracking_penalty = _go2_symm.command_tracking_penalty
+-compute_time_reversal_states = _go2_symm.compute_time_reversal_states
+-foot_clearance_penalty = _go2_symm.foot_clearance_penalty
+-foot_periodicity_penalty = _go2_symm.foot_periodicity_penalty
+-foot_phase_cos = _go2_symm.foot_phase_cos
+-foot_phase_sin = _go2_symm.foot_phase_sin
+-foot_theta_cos = _go2_symm.foot_theta_cos
+-foot_theta_sin = _go2_symm.foot_theta_sin
+-hip_action_penalty = _go2_symm.hip_action_penalty
+-illegal_contact_any_sensor = _go2_symm.illegal_contact_any_sensor
+-phase_ratios = _go2_symm.phase_ratios
+-time_reverse_actions = _go2_symm.time_reverse_actions
+-time_reverse_observations = _go2_symm.time_reverse_observations
+-
+-DOBOT_X1_SYMM_LEGGED_GYM_LEG_JOINT_IDS = {
+-    "FL": [0, 1, 2],
+-    "FR": [3, 4, 5],
+-    "RL": [6, 7, 8],
+-    "RR": [9, 10, 11],
+-}
+-DOBOT_X1_SYMM_LEG_PHASE_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
++DOBOT_X1_SYMM_LEGGED_GYM_LEG_JOINT_IDS = _symm_quadruped.SYMM_QUADRUPED_LEG_JOINT_IDS
++"""Leg joint indices for the Dobot X1 logical FL, FR, RL, RR order."""
++
++DOBOT_X1_SYMM_LEG_PHASE_INDEX = _symm_quadruped.SYMM_QUADRUPED_LEG_PHASE_INDEX
++"""Gait phase indices for the Dobot X1 logical FL, FR, RL, RR order."""
++
+ DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS = (
+     (1.0, 1.0, 1.0),
+     (1.0, 1.0, 1.0),
+     (1.0, -1.0, -1.0),
+     (1.0, -1.0, -1.0),
+ )
++"""Per-leg signs mapping Dobot joints into the shared logical quadruped convention."""
++
+ DOBOT_X1_SYMM_JOINT_RANGES = (1.3264, 5.236, 5.06)
++"""Dobot X1 hip, thigh, and calf joint ranges [rad]."""
+
+
+ def morphological_symmetry_penalty(
+-    env: ManagerBasedRLEnv,
++    env: "ManagerBasedRLEnv",
+     command_name: str,
+     joint_cfg: SceneEntityCfg,
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+ ) -> torch.Tensor:
+-    """Penalty for Dobot joint symmetry in Go2 logical leg coordinates.
+-
+-    Dobot rear thigh and calf default positions have the opposite sign from the front
+-    legs. This term maps the rear pitch joints into the Go2 logical convention before
+-    applying the same phase-weighted leg-pair comparisons as the Go2 symmetric task.
++    """Penalty for Dobot joint symmetry in shared logical quadruped coordinates.
+
+     Args:
+         env: The environment instance.
+@@ -80,34 +55,13 @@ def morphological_symmetry_penalty(
+     Returns:
+         The negative morphology symmetry penalty.
+     """
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    joint_pos = asset.data.joint_pos.torch[:, joint_cfg.joint_ids]
+-
+-    logical_signs = torch.tensor(DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS, dtype=torch.float32, device=env.device)
+-    joint_pos = joint_pos.reshape(joint_pos.shape[0], 4, 3) * logical_signs.unsqueeze(0)
+-    joint_pos = joint_pos.reshape(joint_pos.shape[0], 12)
+-    joint_range = torch.tensor(DOBOT_X1_SYMM_JOINT_RANGES, dtype=torch.float32, device=env.device)
+-
+-    def morph_sym_error(tag_a: str, tag_b: str) -> torch.Tensor:
+-        sign = torch.tensor([-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0], device=env.device)
+-        phase_a = gait_command.foot_thetas[:, DOBOT_X1_SYMM_LEG_PHASE_INDEX[tag_a]]
+-        phase_b = gait_command.foot_thetas[:, DOBOT_X1_SYMM_LEG_PHASE_INDEX[tag_b]]
+-        phase_delta = torch.atan2(torch.sin(phase_a - phase_b), torch.cos(phase_a - phase_b))
+-        phase_weight = torch.exp(-((phase_delta / 0.25) ** 2)).unsqueeze(-1)
+-        joint_a = joint_pos[:, DOBOT_X1_SYMM_LEGGED_GYM_LEG_JOINT_IDS[tag_a]]
+-        joint_b = joint_pos[:, DOBOT_X1_SYMM_LEGGED_GYM_LEG_JOINT_IDS[tag_b]]
+-        error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b) / (joint_range.unsqueeze(0) + 1.0e-6)
+-        error = error * phase_weight
+-        weights = torch.softmax(error / 0.5, dim=-1)
+-        return torch.sum(weights * error, dim=-1)
+-
+-    error_sum = (
+-        morph_sym_error("FL", "FR")
+-        + morph_sym_error("RL", "RR")
+-        + morph_sym_error("FL", "RL")
+-        + morph_sym_error("FR", "RR")
+-        + morph_sym_error("FL", "RR")
+-        + morph_sym_error("RL", "FR")
++    return _symm_quadruped.morphological_symmetry_penalty(
++        env,
++        command_name=command_name,
++        joint_cfg=joint_cfg,
++        asset_cfg=asset_cfg,
++        leg_joint_ids=DOBOT_X1_SYMM_LEGGED_GYM_LEG_JOINT_IDS,
++        leg_phase_index=DOBOT_X1_SYMM_LEG_PHASE_INDEX,
++        logical_joint_signs=DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
++        joint_ranges=DOBOT_X1_SYMM_JOINT_RANGES,
+     )
+-    return -(1.0 - torch.exp(-5.0 * error_sum / 6.0))
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
+index 031cfdb3e..3e93fcff5 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
+@@ -3,776 +3,15 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+
+-"""Go2 symmetric gait terms migrated from the IsaacGym project."""
++"""Go2 compatibility layer for shared symmetric quadruped MDP terms."""
+
+ from __future__ import annotations
+
+-from collections.abc import Sequence
+-from dataclasses import MISSING
+-from typing import TYPE_CHECKING
++from isaaclab_tasks.manager_based.locomotion.velocity.mdp import symm_quadruped as _symm_quadruped
++from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import *  # noqa: F401, F403
+
+-import torch
+-from tensordict import TensorDict
++GO2_LEGGED_GYM_HIP_ACTION_IDS = _symm_quadruped.SYMM_QUADRUPED_HIP_ACTION_IDS
++"""Hip action indices for the legacy Go2 action order."""
+
+-import isaaclab.utils.math as math_utils
+-from isaaclab.managers import CommandTerm, CommandTermCfg, ManagerTermBase, SceneEntityCfg
+-from isaaclab.managers.manager_term_cfg import RewardTermCfg
+-from isaaclab.utils.configclass import configclass
+-from isaaclab.utils.math import euler_xyz_from_quat
+-
+-if TYPE_CHECKING:
+-    from isaaclab.assets import Articulation
+-    from isaaclab.envs import ManagerBasedRLEnv
+-
+-
+-GO2_LEGGED_GYM_HIP_ACTION_IDS = [0, 3, 6, 9]
+-GO2_LEGGED_GYM_LEG_JOINT_IDS = {
+-    "FL": [0, 1, 2],
+-    "FR": [3, 4, 5],
+-    "RL": [6, 7, 8],
+-    "RR": [9, 10, 11],
+-}
+-
+-
+-@configclass
+-class GaitVelocityCommandCfg(CommandTermCfg):
+-    """Velocity command with Go2 gait phase parameters."""
+-
+-    class_type: type["GaitVelocityCommand"] | str = (
+-        "isaaclab_tasks.manager_based.locomotion.velocity.mdp.go2_symm:GaitVelocityCommand"
+-    )
+-
+-    asset_name: str = MISSING
+-    """Name of the robot asset for which commands are generated."""
+-
+-    heading_command: bool = False
+-    """Whether to sample a heading target and convert it to yaw velocity."""
+-
+-    heading_control_stiffness: float = 1.0
+-    """Scale factor for converting heading error to yaw velocity."""
+-
+-    rel_standing_envs: float = 0.0
+-    """Probability of sampling a standing command."""
+-
+-    rel_heading_envs: float = 1.0
+-    """Probability of using heading control when :attr:`heading_command` is enabled."""
+-
+-    heading_ang_vel_clip: tuple[float, float] = (-1.0, 1.0)
+-    """Yaw velocity clip [rad/s] used for heading control."""
+-
+-    min_xy_command_norm: float = 0.0
+-    """Minimum sampled XY command norm [m/s]; smaller commands are zeroed."""
+-
+-    resample_once_after_reset: bool = False
+-    """Whether velocity commands resample only once after the episode reset."""
+-
+-    @configclass
+-    class Ranges:
+-        """Velocity command ranges."""
+-
+-        lin_vel_x: tuple[float, float] = MISSING
+-        """Linear x velocity range [m/s]."""
+-
+-        lin_vel_y: tuple[float, float] = MISSING
+-        """Linear y velocity range [m/s]."""
+-
+-        ang_vel_z: tuple[float, float] = MISSING
+-        """Yaw velocity range [rad/s]."""
+-
+-        heading: tuple[float, float] | None = None
+-        """Heading range [rad]."""
+-
+-    ranges: Ranges = MISSING
+-    """Distribution ranges for velocity commands."""
+-
+-    vel_xy_success_threshold: float = 0.05
+-    """Per-episode near-zero XY velocity error success threshold [m/s]."""
+-
+-    vel_xy_success_rel_threshold: float = 0.25
+-    """Per-episode relative XY velocity error success threshold."""
+-
+-    vel_yaw_success_threshold: float = 0.05
+-    """Per-episode near-zero yaw velocity error success threshold [rad/s]."""
+-
+-    vel_yaw_success_rel_threshold: float = 0.25
+-    """Per-episode relative yaw velocity error success threshold."""
+-
+-    gait_period: float = 0.45
+-    """Fallback gait period [s]."""
+-
+-    duty_factor: float = 0.45
+-    """Fallback stance phase ratio."""
+-
+-    resampling_time_gait: float = 20.0
+-    """Time between gait parameter resampling [s]."""
+-
+-    resample_gait_once_after_reset: bool = False
+-    """Whether gait parameters resample only once after the episode reset."""
+-
+-    calculate_from_sampling_curve: bool = True
+-    """Whether to derive period and duty factor from commanded forward speed."""
+-
+-    add_noise_period: bool = True
+-    """Whether to add command-speed-dependent noise to sampled gait period and duty factor."""
+-
+-    add_noise_theta: bool = True
+-    """Whether to add small integer-cycle noise to sampled foot phase offsets."""
+-
+-    noise_level_theta: int = 2
+-    """Integer noise range used for foot phase offsets."""
+-
+-    noise_scale_theta: float = 0.001
+-    """Phase offset noise scale."""
+-
+-    kappa: float = 16.0
+-    """Smoothness coefficient for stance/swing indicator shaping."""
+-
+-    base_height_range: tuple[float, float] = (0.35, 0.45)
+-    """Nominal base height range [m] used by the old period/duty-factor curve."""
+-
+-    init_foot_thetas: tuple[tuple[float, float, float, float], ...] = (
+-        (0.0, 0.5, 0.5, 0.0),
+-        (0.0, 0.0, 0.5, 0.5),
+-        (0.13, -0.13, 0.5, 0.5),
+-        (-0.13, 0.13, 0.5, 0.5),
+-        (-0.13, 0.13, 0.63, 0.37),
+-        (0.13, -0.13, 0.63, 0.37),
+-    )
+-    """Foot phase offsets for FL, FR, RL, and RR."""
+-
+-
+-class GaitVelocityCommand(CommandTerm):
+-    """Velocity command generator with sampled symmetric gait clocks."""
+-
+-    cfg: GaitVelocityCommandCfg
+-
+-    def __init__(self, cfg: GaitVelocityCommandCfg, env: ManagerBasedRLEnv):
+-        super().__init__(cfg, env)
+-
+-        self.robot: Articulation = env.scene[cfg.asset_name]
+-        self.vel_command_b = torch.zeros(self.num_envs, 3, device=self.device)
+-        self.heading_target = torch.zeros(self.num_envs, device=self.device)
+-        self.is_heading_env = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+-        self.is_standing_env = torch.zeros_like(self.is_heading_env)
+-        self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
+-        self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+-        self.metrics["success_rate"] = torch.zeros(self.num_envs, device=self.device)
+-        self.metrics["success_threshold_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
+-        self.metrics["success_threshold_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+-        self._error_xy_sum = torch.zeros(self.num_envs, device=self.device)
+-        self._error_yaw_sum = torch.zeros(self.num_envs, device=self.device)
+-        self._step_count = torch.zeros(self.num_envs, device=self.device)
+-
+-        self.init_foot_thetas = torch.tensor(cfg.init_foot_thetas, dtype=torch.float32, device=self.device)
+-        self.foot_thetas = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self.device)
+-        self.duty_factors = torch.full((self.num_envs,), cfg.duty_factor, dtype=torch.float32, device=self.device)
+-        self.gait_periods = torch.full((self.num_envs,), cfg.gait_period, dtype=torch.float32, device=self.device)
+-        self.kappa = torch.full((self.num_envs,), cfg.kappa, dtype=torch.float32, device=self.device)
+-        self.gait_time_left = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+-        self.gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+-
+-        self.metrics["gait_period"] = torch.zeros(self.num_envs, device=self.device)
+-        self.metrics["duty_factor"] = torch.zeros(self.num_envs, device=self.device)
+-
+-        self.cfg.cmd_kind = self.cfg.cmd_kind or "command/body/velocity"
+-        self.cfg.element_names = self.cfg.element_names or ["lin_vel_x", "lin_vel_y", "ang_vel_z"]
+-
+-    @property
+-    def command(self) -> torch.Tensor:
+-        """Desired base velocity command in the base frame."""
+-        return self.vel_command_b
+-
+-    def compute(self, dt: float):
+-        self._update_metrics()
+-        self.time_left -= dt
+-        resample_env_ids = (self.time_left <= 0.0).nonzero().flatten()
+-        if len(resample_env_ids) > 0:
+-            if self.cfg.resample_once_after_reset:
+-                allowed_env_ids = resample_env_ids[self.command_counter[resample_env_ids] <= 1]
+-                if len(allowed_env_ids) > 0:
+-                    self._resample(allowed_env_ids)
+-                exhausted_env_ids = resample_env_ids[self.command_counter[resample_env_ids] > 1]
+-                if len(exhausted_env_ids) > 0:
+-                    self.time_left[exhausted_env_ids] = torch.inf
+-            else:
+-                self._resample(resample_env_ids)
+-        self._update_command()
+-
+-        if self.cfg.resampling_time_gait <= 0.0:
+-            return
+-        self.gait_time_left -= dt
+-        env_ids = (self.gait_time_left <= 0.0).nonzero(as_tuple=False).flatten()
+-        if len(env_ids) > 0:
+-            if self.cfg.resample_gait_once_after_reset:
+-                allowed_env_ids = env_ids[self.gait_counter[env_ids] <= 1]
+-                if len(allowed_env_ids) > 0:
+-                    self._resample_gait(allowed_env_ids)
+-                exhausted_env_ids = env_ids[self.gait_counter[env_ids] > 1]
+-                if len(exhausted_env_ids) > 0:
+-                    self.gait_time_left[exhausted_env_ids] = torch.inf
+-            else:
+-                self._resample_gait(env_ids)
+-
+-    def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, float]:
+-        if env_ids is None:
+-            env_ids = slice(None)
+-
+-        denom = self._step_count[env_ids].clamp_min(1.0)
+-        mean_error_xy = self._error_xy_sum[env_ids] / denom
+-        mean_error_yaw = self._error_yaw_sum[env_ids] / denom
+-        command = self.vel_command_b[env_ids]
+-        xy_success_threshold = self.cfg.vel_xy_success_threshold + self.cfg.vel_xy_success_rel_threshold * torch.linalg.norm(
+-            command[:, :2], dim=-1
+-        )
+-        yaw_success_threshold = self.cfg.vel_yaw_success_threshold + self.cfg.vel_yaw_success_rel_threshold * torch.abs(
+-            command[:, 2]
+-        )
+-        self.metrics["error_vel_xy"][env_ids] = mean_error_xy
+-        self.metrics["error_vel_yaw"][env_ids] = mean_error_yaw
+-        self.metrics["success_threshold_vel_xy"][env_ids] = xy_success_threshold
+-        self.metrics["success_threshold_vel_yaw"][env_ids] = yaw_success_threshold
+-        self.metrics["success_rate"][env_ids] = (
+-            (mean_error_xy < xy_success_threshold) & (mean_error_yaw < yaw_success_threshold)
+-        ).float()
+-
+-        extras = super().reset(env_ids)
+-        self._env.extras.setdefault("log", {})["Metrics/success_rate"] = extras.pop("success_rate")
+-        self._error_xy_sum[env_ids] = 0.0
+-        self._error_yaw_sum[env_ids] = 0.0
+-        self._step_count[env_ids] = 0.0
+-        self.gait_counter[env_ids] = 0
+-        self._resample_gait(env_ids)
+-        return extras
+-
+-    def foot_phases(self) -> torch.Tensor:
+-        """Foot phases for FL, FR, RL, and RR in cycle units."""
+-        phase_ratio = self._env.episode_length_buf.to(torch.float32) * self._env.step_dt / self.gait_periods
+-        phase = _wrap_phase(phase_ratio.unsqueeze(-1) + self.foot_thetas)
+-        phase_tr = _wrap_phase(-(phase_ratio.unsqueeze(-1) + self.foot_thetas))
+-        return torch.where(self.command[:, 0:1] >= 0.0, phase, phase_tr)
+-
+-    def phase_ratios(self) -> torch.Tensor:
+-        """Swing and stance phase ratios."""
+-        return torch.stack((1.0 - self.duty_factors, self.duty_factors), dim=-1)
+-
+-    def periodic_force_weights(self) -> torch.Tensor:
+-        """Swing-force penalty weights for FL, FR, RL, and RR."""
+-        return _von_mises_periodic_property(self.foot_phases(), self.duty_factors, self.kappa, c_swing=-1.0, c_stance=0.0)
+-
+-    def periodic_speed_weights(self) -> torch.Tensor:
+-        """Stance-speed penalty weights for FL, FR, RL, and RR."""
+-        return _von_mises_periodic_property(self.foot_phases(), self.duty_factors, self.kappa, c_swing=0.0, c_stance=-1.0)
+-
+-    def _resample_gait(self, env_ids: Sequence[int]):
+-        if isinstance(env_ids, slice):
+-            env_ids_tensor = torch.arange(self.num_envs, device=self.device)
+-        else:
+-            env_ids_tensor = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+-        if len(env_ids_tensor) == 0:
+-            return
+-
+-        choices = torch.randint(
+-            low=0, high=self.init_foot_thetas.shape[0], size=(len(env_ids_tensor),), device=self.device
+-        )
+-        self.foot_thetas[env_ids_tensor] = self.init_foot_thetas[choices]
+-
+-        if self.cfg.add_noise_theta:
+-            theta_noise = torch.randint(
+-                low=-self.cfg.noise_level_theta,
+-                high=self.cfg.noise_level_theta,
+-                size=(len(env_ids_tensor), 4),
+-                device=self.device,
+-            ).to(torch.float32)
+-            self.foot_thetas[env_ids_tensor] += theta_noise * self.cfg.noise_scale_theta
+-
+-        if self.cfg.calculate_from_sampling_curve:
+-            cmd_x = self.command[env_ids_tensor, 0]
+-            self.gait_periods[env_ids_tensor] = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
+-            self.duty_factors[env_ids_tensor] = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(
+-                min=0.1, max=0.9
+-            )
+-        else:
+-            self.gait_periods[env_ids_tensor] = self.cfg.gait_period
+-            self.duty_factors[env_ids_tensor] = self.cfg.duty_factor
+-
+-        self.kappa[env_ids_tensor] = self.cfg.kappa
+-        self.gait_time_left[env_ids_tensor] = self.cfg.resampling_time_gait
+-        self.gait_counter[env_ids_tensor] += 1
+-        self.metrics["gait_period"][env_ids_tensor] = self.gait_periods[env_ids_tensor]
+-        self.metrics["duty_factor"][env_ids_tensor] = self.duty_factors[env_ids_tensor]
+-
+-    def _update_metrics(self):
+-        error_xy = torch.linalg.norm(self.vel_command_b[:, :2] - self.robot.data.root_lin_vel_b.torch[:, :2], dim=-1)
+-        error_yaw = torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_ang_vel_b.torch[:, 2])
+-        self._error_xy_sum += error_xy
+-        self._error_yaw_sum += error_yaw
+-        self._step_count += 1.0
+-
+-    def _resample_command(self, env_ids: Sequence[int]):
+-        r = torch.empty(len(env_ids), device=self.device)
+-        self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
+-        self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
+-        self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
+-        if self.cfg.min_xy_command_norm > 0.0:
+-            command_norm = torch.linalg.norm(self.vel_command_b[env_ids, :2], dim=1)
+-            self.vel_command_b[env_ids, :2] *= (command_norm > self.cfg.min_xy_command_norm).unsqueeze(1)
+-        if self.cfg.heading_command:
+-            self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
+-            self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
+-        self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
+-
+-    def _update_command(self):
+-        if self.cfg.heading_command:
+-            env_ids = self.is_heading_env.nonzero(as_tuple=False).flatten()
+-            heading_error = math_utils.wrap_to_pi(
+-                self.heading_target[env_ids] - self.robot.data.heading_w.torch[env_ids]
+-            )
+-            self.vel_command_b[env_ids, 2] = torch.clip(
+-                self.cfg.heading_control_stiffness * heading_error,
+-                min=self.cfg.heading_ang_vel_clip[0],
+-                max=self.cfg.heading_ang_vel_clip[1],
+-            )
+-        standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
+-        self.vel_command_b[standing_env_ids, :] = 0.0
+-
+-    def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+-        lower_bound, upper_bound = self.cfg.base_height_range
+-        length = torch.tensor((lower_bound + upper_bound) * 0.5, device=self.device, dtype=torch.float32)
+-        gravity = torch.tensor(9.81, device=self.device, dtype=torch.float32)
+-        velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
+-        random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
+-        period_star = 2.55 * torch.exp(-0.975 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
+-        return period_star * torch.sqrt(length / gravity)
+-
+-    def _compute_duty_factor_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+-        lower_bound, upper_bound = self.cfg.base_height_range
+-        length = torch.tensor((lower_bound + upper_bound) * 0.5, device=self.device, dtype=torch.float32)
+-        gravity = torch.tensor(9.81, device=self.device, dtype=torch.float32)
+-        velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
+-        random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
+-        return 0.5588 * torch.exp(-0.681 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
+-
+-
+-def foot_phase_sin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+-    """Sine of the commanded foot phases."""
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    return torch.sin(2.0 * torch.pi * gait_command.foot_phases())
+-
+-
+-def foot_phase_cos(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+-    """Cosine of the commanded foot phases."""
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    return torch.cos(2.0 * torch.pi * gait_command.foot_phases())
+-
+-
+-def foot_theta_sin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+-    """Sine of the sampled foot phase offsets."""
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    return torch.sin(2.0 * torch.pi * gait_command.foot_thetas)
+-
+-
+-def foot_theta_cos(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+-    """Cosine of the sampled foot phase offsets."""
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    return torch.cos(2.0 * torch.pi * gait_command.foot_thetas)
+-
+-
+-def phase_ratios(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+-    """Swing and stance phase ratios."""
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    return gait_command.phase_ratios()
+-
+-
+-def alive_bonus(env: ManagerBasedRLEnv) -> torch.Tensor:
+-    """Constant alive reward."""
+-    return torch.ones(env.num_envs, device=env.device)
+-
+-
+-def command_tracking_penalty(
+-    env: ManagerBasedRLEnv,
+-    command_name: str,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Old shaped command tracking penalty."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    command = env.command_manager.get_command(command_name)
+-    x_error = torch.abs(command[:, 0] - asset.data.root_lin_vel_b.torch[:, 0])
+-    y_error = torch.abs(command[:, 1] - asset.data.root_lin_vel_b.torch[:, 1])
+-    yaw_error = torch.abs(command[:, 2] - asset.data.root_ang_vel_b.torch[:, 2])
+-    x_penalty = 1.0 - torch.exp(-2.0 * x_error)
+-    y_penalty = 1.0 - torch.exp(-10.0 * y_error)
+-    yaw_penalty = 1.0 - torch.exp(-5.0 * yaw_error)
+-    return -(x_penalty + y_penalty + yaw_penalty)
+-
+-
+-def base_height_range_penalty(
+-    env: ManagerBasedRLEnv,
+-    height_range: tuple[float, float],
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Penalty for base height outside the configured range."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    lower_bound, upper_bound = height_range
+-    deviation = torch.clamp(lower_bound - asset.data.root_pos_w.torch[:, 2], min=0.0)
+-    deviation += torch.clamp(asset.data.root_pos_w.torch[:, 2] - upper_bound, min=0.0)
+-    return -(1.0 - torch.exp(-5.0 * deviation))
+-
+-
+-def foot_periodicity_penalty(
+-    env: ManagerBasedRLEnv,
+-    command_name: str,
+-    feet_cfg: SceneEntityCfg,
+-    foot_sensor_names: Sequence[str] | None = None,
+-    foot_sensor_body_names: Sequence[str] | None = None,
+-    force_scale: float = 0.001,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Penalty for foot contact in swing and foot speed in stance."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    reward = torch.zeros(env.num_envs, device=env.device)
+-    if foot_sensor_names is not None:
+-        foot_forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
+-        reward += torch.sum(
+-            (1.0 - torch.exp(-force_scale * foot_forces)) * gait_command.periodic_force_weights(), dim=-1
+-        )
+-    foot_speeds = torch.linalg.norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
+-    reward += torch.sum((1.0 - torch.exp(-2.0 * foot_speeds)) * gait_command.periodic_speed_weights(), dim=-1)
+-    return reward
+-
+-
+-def contact_collision_count(
+-    env: ManagerBasedRLEnv,
+-    sensor_cfg: SceneEntityCfg,
+-    threshold: float = 0.1,
+-) -> torch.Tensor:
+-    """Count selected contact bodies whose force magnitude exceeds a threshold."""
+-    contact_sensor = env.scene.sensors[sensor_cfg.name]
+-    contact_forces = contact_sensor.data.net_forces_w_history.torch[:, :, sensor_cfg.body_ids, :]
+-    contact_force_norms = torch.linalg.norm(contact_forces, dim=-1).max(dim=1)[0]
+-    return torch.sum((contact_force_norms > threshold).float(), dim=-1)
+-
+-
+-def illegal_contact_any_sensor(
+-    env: ManagerBasedRLEnv,
+-    sensor_names: Sequence[str],
+-    threshold: float = 1.0,
+-) -> torch.Tensor:
+-    """Terminate when any named single-body contact sensor exceeds the force threshold."""
+-    contact = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+-    for sensor_name in sensor_names:
+-        contact_sensor = env.scene.sensors[sensor_name]
+-        contact_forces = contact_sensor.data.net_forces_w_history.torch
+-        force_norms = torch.linalg.norm(contact_forces, dim=-1).max(dim=1)[0]
+-        contact |= torch.any(force_norms > threshold, dim=1)
+-    return contact
+-
+-
+-def foot_clearance_penalty(
+-    env: ManagerBasedRLEnv,
+-    command_name: str,
+-    feet_cfg: SceneEntityCfg,
+-    min_height: float = 0.04,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Penalty for insufficient foot clearance during commanded swing phases."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    foot_z = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2]
+-    swing_ratio = (1.0 - gait_command.duty_factors).unsqueeze(-1).clamp_min(1.0e-6)
+-    swing_subphase = (gait_command.foot_phases() / swing_ratio).clamp(0.0, 1.0)
+-    mid_swing_weight = 0.5 + 0.5 * torch.sin(torch.pi * swing_subphase)
+-    shortfall = torch.relu(min_height - foot_z)
+-    clearance_penalty = 1.0 - torch.exp(-20.0 * shortfall * mid_swing_weight)
+-
+-    command = env.command_manager.get_command(command_name)
+-    current_x_speed = torch.abs(asset.data.root_lin_vel_b.torch[:, 0])
+-    desired_x_speed = torch.abs(command[:, 0]).clamp_min(1.0e-3)
+-    velocity_coeff = torch.sigmoid(5.0 * (current_x_speed / (desired_x_speed * 0.5) - 1.0)).clamp(0.0, 1.0)
+-    return torch.sum(clearance_penalty * gait_command.periodic_force_weights(), dim=-1) * velocity_coeff
+-
+-
+-def hip_action_penalty(env: ManagerBasedRLEnv, tau: float = 0.5) -> torch.Tensor:
+-    """Penalty on large hip actions using the old softmax shaping."""
+-    hip_actions = env.action_manager.action[:, GO2_LEGGED_GYM_HIP_ACTION_IDS]
+-    hip_abs = torch.abs(hip_actions)
+-    weights = torch.softmax(hip_abs / tau, dim=-1)
+-    hip_action_magnitude = torch.sum(weights * hip_abs, dim=-1)
+-    return -(1.0 - torch.exp(-0.5 * hip_action_magnitude))
+-
+-
+-def _base_stability_gate(
+-    env: ManagerBasedRLEnv,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-    height_threshold: float = 0.25,
+-    height_scale: float = 20.0,
+-    orientation_scale: float = 2.0,
+-) -> torch.Tensor:
+-    """Soft gate that activates penalties once the base is tall and upright."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    base_height = asset.data.root_pos_w.torch[:, 2]
+-    roll, pitch, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+-    height_gate = torch.sigmoid(height_scale * (base_height - height_threshold))
+-    upright_gate = torch.exp(-orientation_scale * (torch.square(roll) + torch.square(pitch)))
+-    return torch.clamp(height_gate * upright_gate, 0.0, 1.0)
+-
+-
+-def action_rate_exp_penalty(
+-    env: ManagerBasedRLEnv,
+-    scale: float = 1.0,
+-    use_stability_gate: bool = True,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Penalty on action changes using bounded exponential shaping.
+-
+-    Args:
+-        env: The environment instance.
+-        scale: Exponential scale applied to the mean squared action difference.
+-        use_stability_gate: Whether to soften the penalty while the robot is unstable.
+-        asset_cfg: The robot asset used for the stability gate.
+-
+-    Returns:
+-        The negative action-rate penalty.
+-    """
+-    action_diff = env.action_manager.action - env.action_manager.prev_action
+-    action_rate = torch.mean(torch.square(action_diff), dim=-1)
+-    penalty = 1.0 - torch.exp(-scale * action_rate)
+-    if use_stability_gate:
+-        penalty = penalty * _base_stability_gate(env, asset_cfg=asset_cfg)
+-    return -penalty
+-
+-
+-def morphological_symmetry_penalty(
+-    env: ManagerBasedRLEnv,
+-    command_name: str,
+-    joint_cfg: SceneEntityCfg,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Old Go2 joint morphology symmetry penalty adapted to Isaac Lab joint order."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    joint_pos = asset.data.joint_pos.torch[:, joint_cfg.joint_ids]
+-    joint_range = torch.tensor([96.0, 290.0, 108.0], dtype=torch.float32, device=env.device) * torch.pi / 180.0
+-    leg_phase_index = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
+-
+-    def morph_sym_error(tag_a: str, tag_b: str) -> torch.Tensor:
+-        sign = torch.tensor([-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0], device=env.device)
+-        phase_a = gait_command.foot_thetas[:, leg_phase_index[tag_a]]
+-        phase_b = gait_command.foot_thetas[:, leg_phase_index[tag_b]]
+-        phase_delta = torch.atan2(torch.sin(phase_a - phase_b), torch.cos(phase_a - phase_b))
+-        phase_weight = torch.exp(-((phase_delta / 0.25) ** 2)).unsqueeze(-1)
+-        joint_a = joint_pos[:, GO2_LEGGED_GYM_LEG_JOINT_IDS[tag_a]]
+-        joint_b = joint_pos[:, GO2_LEGGED_GYM_LEG_JOINT_IDS[tag_b]]
+-        error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b) / (joint_range.unsqueeze(0) + 1.0e-6)
+-        error = error * phase_weight
+-        weights = torch.softmax(error / 0.5, dim=-1)
+-        return torch.sum(weights * error, dim=-1)
+-
+-    error_sum = (
+-        morph_sym_error("FL", "FR")
+-        + morph_sym_error("RL", "RR")
+-        + morph_sym_error("FL", "RL")
+-        + morph_sym_error("FR", "RR")
+-        + morph_sym_error("FL", "RR")
+-        + morph_sym_error("RL", "FR")
+-    )
+-    return -(1.0 - torch.exp(-5.0 * error_sum / 6.0))
+-
+-
+-class SmoothnessPenalty(ManagerTermBase):
+-    """Torque-difference smoothness penalty."""
+-
+-    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+-        super().__init__(cfg, env)
+-        asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
+-        asset: Articulation = env.scene[asset_cfg.name]
+-        self._last_torques = torch.zeros_like(asset.data.applied_torque.torch)
+-        self._has_last_torques = torch.zeros(
+-            self._last_torques.shape[0], dtype=torch.bool, device=self._last_torques.device
+-        )
+-
+-    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+-        if env_ids is None:
+-            env_ids = slice(None)
+-        self._has_last_torques[env_ids] = False
+-
+-    def __call__(
+-        self,
+-        env: ManagerBasedRLEnv,
+-        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-        scale: float = 0.1,
+-        use_stability_gate: bool = True,
+-    ) -> torch.Tensor:
+-        asset: Articulation = env.scene[asset_cfg.name]
+-        torques = asset.data.applied_torque.torch
+-        torque_diff = torch.sum(torch.abs(torques - self._last_torques), dim=-1)
+-        torque_diff = torch.where(self._has_last_torques, torque_diff, torch.zeros_like(torque_diff))
+-        self._last_torques[:] = torques
+-        self._has_last_torques[:] = True
+-
+-        penalty = 1.0 - torch.exp(-scale * torque_diff)
+-        if use_stability_gate:
+-            penalty = penalty * _base_stability_gate(env, asset_cfg=asset_cfg)
+-        return -penalty
+-
+-
+-def base_height_out_of_range(
+-    env: ManagerBasedRLEnv,
+-    height_range: tuple[float, float],
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Terminate when base height is outside the configured range."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    base_height = asset.data.root_pos_w.torch[:, 2]
+-    return torch.logical_or(base_height < height_range[0], base_height > height_range[1])
+-
+-
+-def base_roll_pitch_out_of_range(
+-    env: ManagerBasedRLEnv,
+-    max_roll: float,
+-    max_pitch: float,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Terminate when base roll or pitch exceeds configured limits."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    roll, pitch, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+-    return torch.logical_or(torch.abs(roll) > max_roll, torch.abs(pitch) > max_pitch)
+-
+-
+-def body_height_below(
+-    env: ManagerBasedRLEnv,
+-    min_height: float,
+-    body_cfg: SceneEntityCfg,
+-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+-) -> torch.Tensor:
+-    """Terminate when any selected body falls below a world height."""
+-    asset: Articulation = env.scene[asset_cfg.name]
+-    return torch.any(asset.data.body_pos_w.torch[:, body_cfg.body_ids, 2] < min_height, dim=-1)
+-
+-
+-def _collect_single_body_contact_force_norms(
+-    env: ManagerBasedRLEnv,
+-    sensor_names: Sequence[str],
+-    expected_body_names: Sequence[str] | None = None,
+-) -> torch.Tensor:
+-    if expected_body_names is not None and len(expected_body_names) != len(sensor_names):
+-        raise RuntimeError(
+-            f"Expected {len(sensor_names)} contact sensor body names, got {len(expected_body_names)}."
+-        )
+-    contact_forces = []
+-    for index, sensor_name in enumerate(sensor_names):
+-        sensor = env.scene.sensors[sensor_name]
+-        if sensor.num_sensors != 1:
+-            raise RuntimeError(
+-                f"Expected contact sensor '{sensor_name}' to resolve exactly one body, got {sensor.num_sensors}."
+-            )
+-        if expected_body_names is not None:
+-            expected_body_name = expected_body_names[index]
+-            body_names = getattr(sensor, "body_names", [])
+-            if body_names != [expected_body_name]:
+-                raise RuntimeError(
+-                    f"Expected contact sensor '{sensor_name}' to resolve body '{expected_body_name}', got {body_names}."
+-                )
+-        force_norm = torch.linalg.norm(sensor.data.net_forces_w_history.torch, dim=-1).max(dim=1)[0]
+-        contact_forces.append(force_norm[:, 0])
+-    return torch.stack(contact_forces, dim=-1)
+-
+-
+-@torch.no_grad()
+-def compute_time_reversal_states(
+-    env: ManagerBasedRLEnv,
+-    obs: TensorDict | None = None,
+-    actions: torch.Tensor | None = None,
+-):
+-    """Augment states using the old Go2 time-reversal transform."""
+-    if obs is not None:
+-        batch_size = obs.batch_size[0]
+-        obs_aug = obs.repeat(2)
+-        obs_aug["policy"][:batch_size] = obs["policy"][:]
+-        obs_aug["policy"][batch_size:] = time_reverse_observations(obs["policy"])
+-    else:
+-        obs_aug = None
+-
+-    if actions is not None:
+-        batch_size = actions.shape[0]
+-        repeat_dims = (2,) + (1,) * (actions.ndim - 1)
+-        actions_aug = actions.repeat(repeat_dims)
+-        actions_aug[:batch_size] = actions[:]
+-        actions_aug[batch_size:] = time_reverse_actions(actions)
+-    else:
+-        actions_aug = None
+-
+-    return obs_aug, actions_aug
+-
+-
+-def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
+-    """Time-reverse the 60D Go2-Symm policy observation."""
+-    obs_tr = obs.clone()
+-    obs_tr[:, 3:6] = -obs[:, 3:6]
+-    obs_tr[:, 6:18] = obs[:, 6:18]
+-    obs_tr[:, 18:30] = -obs[:, 18:30]
+-    obs_tr[:, 30:42] = obs[:, 30:42]
+-    obs_tr[:, 42:46] = -obs[:, 42:46]
+-    obs_tr[:, 46:50] = obs[:, 46:50]
+-    obs_tr[:, 50:54] = -obs[:, 50:54]
+-    obs_tr[:, 54:58] = obs[:, 54:58]
+-    obs_tr[:, 58:60] = obs[:, 58:60]
+-    return obs_tr
+-
+-
+-def time_reverse_actions(actions: torch.Tensor) -> torch.Tensor:
+-    """Time-reverse the Go2 joint-position action offsets.
+-
+-    The policy action is a target joint-position offset [m or rad, depending on joint type].
+-    Under time reversal, joint positions are even, so the transform is the identity.
+-    """
+-    return actions.clone()
+-
+-
+-def _wrap_phase(x: torch.Tensor) -> torch.Tensor:
+-    return torch.remainder(x, 1.0)
+-
+-
+-def _smooth_swing_indicator(phi: torch.Tensor, duty_factor: torch.Tensor, kappa: torch.Tensor) -> torch.Tensor:
+-    swing_end = (1.0 - duty_factor).unsqueeze(-1)
+-    return torch.sigmoid((swing_end - phi) * kappa.unsqueeze(-1))
+-
+-
+-def _von_mises_periodic_property(
+-    phi: torch.Tensor,
+-    duty_factor: torch.Tensor,
+-    kappa: torch.Tensor,
+-    c_swing: float,
+-    c_stance: float,
+-) -> torch.Tensor:
+-    """Evaluate the old Von Mises periodic property function."""
+-    import numpy as np  # noqa: PLC0415
+-    from scipy.stats import vonmises_line  # noqa: PLC0415
+-
+-    phi_np = phi.detach().cpu().numpy()
+-    duty_factor_np = duty_factor.detach().cpu().numpy()[..., None]
+-    kappa_np = kappa.detach().cpu().numpy()[..., None]
+-
+-    swing_start = np.zeros_like(duty_factor_np)
+-    swing_end = 1.0 - duty_factor_np
+-    stance_start = swing_end
+-    stance_end = np.ones_like(duty_factor_np)
+-
+-    swing_prob = _von_mises_phase_indicator(phi_np, swing_start, swing_end, kappa_np, vonmises_line)
+-    stance_prob = _von_mises_phase_indicator(phi_np, stance_start, stance_end, kappa_np, vonmises_line)
+-    values = c_swing * swing_prob + c_stance * stance_prob
+-    return torch.as_tensor(values, dtype=phi.dtype, device=phi.device)
+-
+-
+-def _von_mises_phase_indicator(
+-    phi,
+-    start,
+-    end,
+-    kappa,
+-    vonmises_line,
+-):
+-    import numpy as np  # noqa: PLC0415
+-
+-    bounds = np.stack([start, end, start - 1.0, end - 1.0, start + 1.0, end + 1.0], axis=0)
+-    probs = vonmises_line.cdf(x=2.0 * np.pi * phi[None], loc=2.0 * np.pi * bounds, kappa=kappa[None])
+-    return probs[0] * (1.0 - probs[1]) + probs[2] * (1.0 - probs[3]) + probs[4] * (1.0 - probs[5])
++GO2_LEGGED_GYM_LEG_JOINT_IDS = _symm_quadruped.SYMM_QUADRUPED_LEG_JOINT_IDS
++"""Leg joint indices for the legacy Go2 joint order."""

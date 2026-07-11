@@ -62,16 +62,8 @@ _build
 !logs/
 !logs/rsl_rl/
 logs/rsl_rl/*
-!logs/rsl_rl/unitree_go2_symm_flat/
-logs/rsl_rl/unitree_go2_symm_flat/*
-!logs/rsl_rl/unitree_go2_symm_flat/Good_Runs/
-!logs/rsl_rl/unitree_go2_symm_flat/Good_Runs/**
-!logs/rsl_rl/dobot_x1_symm_flat/
-logs/rsl_rl/dobot_x1_symm_flat/*
-!logs/rsl_rl/dobot_x1_symm_flat/2026-07-09_14-34-53_dobot_no_trs/
-!logs/rsl_rl/dobot_x1_symm_flat/2026-07-09_14-34-53_dobot_no_trs/**
-!logs/rsl_rl/dobot_x1_symm_flat/2026-07-10_14-30-46_no_trs/
-!logs/rsl_rl/dobot_x1_symm_flat/2026-07-10_14-30-46_no_trs/**
+!logs/rsl_rl/good_runs/
+!logs/rsl_rl/good_runs/**
 
 # Pre-Trained Checkpoints
 /.pretrained_checkpoints/
@@ -101,6 +93,8 @@ logs/rsl_rl/dobot_x1_symm_flat/*
 !source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/__init__.py
 !source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/__init__.py
 !source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/__init__.py
+!source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/__init__.py
+!source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/__init__.py
 
 # Isaac Lab CI environments in native mode
 **/_isaaclab_install_ci_*

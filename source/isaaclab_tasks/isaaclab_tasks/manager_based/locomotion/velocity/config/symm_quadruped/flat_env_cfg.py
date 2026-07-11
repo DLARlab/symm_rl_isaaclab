@@ -1,0 +1,285 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+"""Shared flat-environment helpers for symmetric quadruped locomotion tasks."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_physx.physics import PhysxCfg
+from isaaclab_physx.sensors import ContactSensorCfg
+
+import isaaclab.sim as sim_utils
+import isaaclab.terrains as terrain_gen
+from isaaclab.envs import mdp as base_mdp
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
+
+from isaaclab_tasks.utils import PresetCfg
+
+SYMM_QUADRUPED_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
+    size=(160.0, 160.0),
+    border_width=0.0,
+    num_rows=1,
+    num_cols=1,
+    use_cache=False,
+    sub_terrains={"flat": terrain_gen.MeshPlaneTerrainCfg(proportion=1.0)},
+)
+"""Shared flat terrain generator used by symmetric quadruped tasks."""
+
+
+@configclass
+class SymmQuadrupedPhysicsCfg(PresetCfg):
+    """Physics preset for symmetric quadruped flat locomotion runs."""
+
+    default = PhysxCfg(
+        gpu_max_rigid_patch_count=10 * 2**15,
+        gpu_found_lost_pairs_capacity=2**22,
+        gpu_found_lost_aggregate_pairs_capacity=2**27,
+        gpu_total_aggregate_pairs_capacity=2**22,
+    )
+    newton_mjwarp = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            njmax=65,
+            nconmax=35,
+            cone="pyramidal",
+            impratio=1,
+            integrator="implicitfast",
+        ),
+        num_substeps=1,
+        debug_mode=False,
+    )
+    physx = default
+
+
+def configure_flat_scene(env_cfg) -> None:
+    """Apply the shared flat terrain and lighting setup."""
+    env_cfg.scene.terrain.terrain_type = "generator"
+    env_cfg.scene.terrain.terrain_generator = SYMM_QUADRUPED_FLAT_TERRAIN_CFG
+    env_cfg.scene.terrain.max_init_terrain_level = 0
+    env_cfg.scene.terrain.visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.4, 0.4, 0.4))
+    env_cfg.scene.sky_light.spawn = sim_utils.DomeLightCfg(intensity=900.0, color=(1.0, 1.0, 1.0))
+
+
+def make_single_body_contact_sensor(prim_path: str) -> ContactSensorCfg:
+    """Create a single-body contact sensor for nested URDF link paths."""
+    return ContactSensorCfg(
+        prim_path=prim_path,
+        history_length=3,
+        track_air_time=True,
+    )
+
+
+def make_gait_velocity_command(
+    mdp_module,
+    *,
+    base_height_range: tuple[float, float] = (0.35, 0.45),
+):
+    """Create the shared forward-velocity gait command config."""
+    return mdp_module.GaitVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(10.0, 10.0),
+        heading_command=False,
+        heading_control_stiffness=0.5,
+        rel_standing_envs=0.0,
+        rel_heading_envs=1.0,
+        min_xy_command_norm=0.2,
+        resample_once_after_reset=True,
+        resample_gait_once_after_reset=True,
+        vel_xy_success_threshold=0.05,
+        vel_xy_success_rel_threshold=0.25,
+        vel_yaw_success_threshold=0.05,
+        vel_yaw_success_rel_threshold=0.25,
+        base_height_range=base_height_range,
+        ranges=mdp_module.GaitVelocityCommandCfg.Ranges(
+            lin_vel_x=(-2.0, 2.0),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_z=(0.0, 0.0),
+            heading=(0.0, 0.0),
+        ),
+    )
+
+
+def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str]) -> None:
+    """Configure the shared 60D symmetric quadruped policy observation."""
+    policy = env_cfg.observations.policy
+    ordered_joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
+
+    policy.base_lin_vel = None
+    policy.base_ang_vel = None
+    policy.projected_gravity = ObsTerm(
+        func=base_mdp.projected_gravity,
+        noise=Unoise(n_min=-0.05, n_max=0.05),
+    )
+    policy.velocity_commands = ObsTerm(
+        func=base_mdp.generated_commands,
+        params={"command_name": "base_velocity"},
+        scale=(2.0, 2.0, 0.25),
+    )
+    policy.joint_pos = ObsTerm(
+        func=base_mdp.joint_pos_rel,
+        noise=Unoise(n_min=-0.01, n_max=0.01),
+        params={"asset_cfg": ordered_joint_cfg},
+    )
+    policy.joint_vel = ObsTerm(
+        func=base_mdp.joint_vel_rel,
+        noise=Unoise(n_min=-1.5, n_max=1.5),
+        scale=0.05,
+        params={"asset_cfg": ordered_joint_cfg},
+    )
+    policy.actions = ObsTerm(func=base_mdp.last_action)
+    policy.height_scan = None
+    policy.foot_phase_sin = ObsTerm(func=mdp_module.foot_phase_sin, params={"command_name": "base_velocity"})
+    policy.foot_phase_cos = ObsTerm(func=mdp_module.foot_phase_cos, params={"command_name": "base_velocity"})
+    policy.foot_theta_sin = ObsTerm(func=mdp_module.foot_theta_sin, params={"command_name": "base_velocity"})
+    policy.foot_theta_cos = ObsTerm(func=mdp_module.foot_theta_cos, params={"command_name": "base_velocity"})
+    policy.phase_ratios = ObsTerm(func=mdp_module.phase_ratios, params={"command_name": "base_velocity"})
+
+
+def configure_rewards(
+    env_cfg,
+    mdp_module,
+    *,
+    joint_names: Sequence[str],
+    foot_body_names: Sequence[str],
+    foot_sensor_names: Sequence[str],
+    foot_sensor_body_names: Sequence[str],
+    base_height_range: tuple[float, float],
+) -> None:
+    """Configure the shared symmetric quadruped reward layout."""
+    env_cfg.rewards.track_lin_vel_xy_exp = None
+    env_cfg.rewards.track_ang_vel_z_exp = None
+    env_cfg.rewards.lin_vel_z_l2 = None
+    env_cfg.rewards.ang_vel_xy_l2 = None
+    env_cfg.rewards.dof_torques_l2 = None
+    env_cfg.rewards.dof_acc_l2 = None
+    env_cfg.rewards.action_rate_l2 = RewTerm(
+        func=mdp_module.action_rate_exp_penalty,
+        weight=0.05,
+        params={"scale": 0.1},
+    )
+    env_cfg.rewards.feet_air_time = None
+    env_cfg.rewards.flat_orientation_l2 = None
+    env_cfg.rewards.dof_pos_limits = None
+
+    feet_cfg = SceneEntityCfg("robot", body_names=list(foot_body_names), preserve_order=True)
+    joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
+    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=1.0)
+    env_cfg.rewards.cmd = RewTerm(
+        func=mdp_module.command_tracking_penalty,
+        weight=0.40,
+        params={"command_name": "base_velocity"},
+    )
+    env_cfg.rewards.foot_periodicity = RewTerm(
+        func=mdp_module.foot_periodicity_penalty,
+        weight=0.30,
+        params={
+            "command_name": "base_velocity",
+            "feet_cfg": feet_cfg,
+            "foot_sensor_names": tuple(foot_sensor_names),
+            "foot_sensor_body_names": tuple(foot_sensor_body_names),
+        },
+    )
+    env_cfg.rewards.base_height = RewTerm(
+        func=mdp_module.base_height_range_penalty,
+        weight=0.30,
+        params={"height_range": base_height_range},
+    )
+    env_cfg.rewards.foot_clearance = RewTerm(
+        func=mdp_module.foot_clearance_penalty,
+        weight=0.10,
+        params={"command_name": "base_velocity", "feet_cfg": feet_cfg},
+    )
+    env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.15)
+    env_cfg.rewards.morphological_symmetry = RewTerm(
+        func=mdp_module.morphological_symmetry_penalty,
+        weight=0.30,
+        params={"command_name": "base_velocity", "joint_cfg": joint_cfg},
+    )
+    env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
+
+
+def configure_terminations(
+    env_cfg,
+    mdp_module,
+    *,
+    base_sensor_names: Sequence[str],
+    base_height_range: tuple[float, float],
+    calf_body_names: Sequence[str],
+    additional_contact_terms: dict[str, Sequence[str]] | None = None,
+) -> None:
+    """Configure the shared symmetric quadruped termination layout."""
+    env_cfg.terminations.base_contact = DoneTerm(
+        func=mdp_module.illegal_contact_any_sensor,
+        params={"sensor_names": tuple(base_sensor_names), "threshold": 1.0},
+    )
+    env_cfg.terminations.base_height = DoneTerm(
+        func=mdp_module.base_height_out_of_range,
+        params={"height_range": base_height_range},
+    )
+    env_cfg.terminations.base_orientation = DoneTerm(
+        func=mdp_module.base_roll_pitch_out_of_range,
+        params={"max_roll": 0.8, "max_pitch": 1.0},
+    )
+    for term_name, sensor_names in (additional_contact_terms or {}).items():
+        setattr(
+            env_cfg.terminations,
+            term_name,
+            DoneTerm(
+                func=mdp_module.illegal_contact_any_sensor,
+                params={"sensor_names": tuple(sensor_names), "threshold": 1.0},
+            ),
+        )
+    env_cfg.terminations.calf_height = DoneTerm(
+        func=mdp_module.body_height_below,
+        params={
+            "min_height": 0.08,
+            "body_cfg": SceneEntityCfg("robot", body_names=list(calf_body_names), preserve_order=True),
+        },
+    )
+
+
+def configure_domain_randomization(env_cfg, *, base_body_name: str | None = None) -> None:
+    """Configure shared symmetric quadruped domain randomization values."""
+    env_cfg.events.physics_material.params["static_friction_range"] = (0.3, 2.0)
+    env_cfg.events.physics_material.params["dynamic_friction_range"] = (0.3, 2.0)
+    env_cfg.events.physics_material.params["make_consistent"] = True
+
+    if base_body_name is not None:
+        env_cfg.events.add_base_mass.params["asset_cfg"].body_names = base_body_name
+        env_cfg.events.base_external_force_torque.params["asset_cfg"].body_names = base_body_name
+    env_cfg.events.add_base_mass.params["mass_distribution_params"] = (-1.5, 1.5)
+    env_cfg.events.add_base_mass.params["operation"] = "add"
+    env_cfg.events.add_base_mass.params["distribution"] = "uniform"
+
+    env_cfg.events.base_com = None
+    env_cfg.events.reset_base.params["pose_range"] = {}
+    env_cfg.events.reset_base.params["velocity_range"] = {
+        "x": (-0.5, 0.5),
+        "y": (-0.5, 0.5),
+        "z": (-0.5, 0.5),
+        "roll": (-0.5, 0.5),
+        "pitch": (-0.5, 0.5),
+        "yaw": (-0.5, 0.5),
+    }
+
+    env_cfg.events.push_robot.interval_range_s = (15.0, 15.0)
+    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
+
+
+def make_play_physics_cfg() -> PhysxCfg:
+    """Create the reduced-capacity PhysX config used by one-env play tasks."""
+    return PhysxCfg(
+        gpu_max_rigid_patch_count=2**15,
+        gpu_found_lost_pairs_capacity=2**20,
+        gpu_found_lost_aggregate_pairs_capacity=2**22,
+        gpu_total_aggregate_pairs_capacity=2**20,
+    )

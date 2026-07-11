@@ -1,59 +1,58 @@
-# DLARlab Symmetric RL Isaac Lab Backup
+# DLARlab Symmetric RL Isaac Lab Workspace
 
 ## Overview
 
-This repository is an Isaac Lab 3.0.0 beta 2 workspace with the DLARlab
-quadruped symmetric locomotion work backed up on top of the upstream Isaac Lab
-tree. It contains the code, robot assets, convenience launchers, and selected
-training artifacts for:
+This repository is an Isaac Lab 3.0.0 beta 2 workspace with DLARlab symmetric
+quadruped locomotion tasks and selected good runs. The current implementation
+uses one shared symmetric-quadruped task layer for multiple robots:
 
-- Unitree Go2 symmetric gait training migrated from the old IsaacGym project.
-- Dobot X1 symmetric flat locomotion training built from the same Go2 task
-  structure.
+- Unitree Go2 symmetric flat locomotion.
+- Dobot X1 symmetric flat locomotion.
 - Legacy time-reversal symmetry regularization for RSL-RL PPO.
-- Curated checkpoints, exported TorchScript/ONNX policies, TensorBoard event
-  files, and frozen training parameter YAMLs for the good runs.
+- Shared train, play, record, ablation, compare, and TensorBoard launchers.
 
-## Requirements/Environment Setup
+The goal of the structure is to make Go2 and X1 consistent now, while keeping
+the path open for more quadruped robots later.
 
-Known working local setup:
+## Requirements
+
+Known working setup:
 
 - Windows PowerShell or Ubuntu bash.
 - NVIDIA GPU and driver compatible with Isaac Sim 6.0.0/6.0.1.
-- Conda environment named `go2_symm_rl_lab`.
-- Isaac Lab checkout at the repository root.
-- Isaac Sim binary available through the local `_isaac_sim` folder or through
-  the Isaac Sim environment expected by this Isaac Lab branch.
+- Conda environment named `symm_rl_isaaclab`.
+- Isaac Sim available through this Isaac Lab checkout's `_isaac_sim` folder or
+  the Isaac Sim environment expected by this branch.
 
-Fresh clone setup:
+Fresh clone:
 
 ```powershell
 git clone https://github.com/DLARlab/symm_rl_isaaclab.git
 cd symm_rl_isaaclab
-conda env create -n go2_symm_rl_lab -f environment.yml
-conda activate go2_symm_rl_lab
+conda env create -n symm_rl_isaaclab -f environment.yml
+conda activate symm_rl_isaaclab
 ```
 
-If the conda environment already exists, activate it instead:
+Existing checkout:
 
 ```powershell
-cd D:\go2_symm_rl_lab
-conda activate go2_symm_rl_lab
+cd D:\symm_rl_isaaclab
+conda activate symm_rl_isaaclab
 ```
 
-Check that the wrapper is using the expected Python:
+Check the IsaacLab Python:
 
 ```powershell
 .\isaaclab.bat -p -c "import sys; print(sys.executable)"
 ```
 
-On Linux, use:
+Linux equivalent:
 
 ```bash
 ./isaaclab.sh -p -c "import sys; print(sys.executable)"
 ```
 
-Verify the custom tasks are registered:
+Verify the custom task registrations:
 
 ```powershell
 .\isaaclab.bat -p -c "import gymnasium as gym; import isaaclab_tasks; print([s.id for s in gym.registry.values() if 'Go2-Symm' in s.id or 'Dobot-X1-Symm' in s.id])"
@@ -68,234 +67,322 @@ Isaac-Velocity-Flat-Dobot-X1-Symm-v0
 Isaac-Velocity-Flat-Dobot-X1-Symm-Play-v0
 ```
 
-## What We Added
+## Current Structure
 
-### Go2 Symmetric Task
-
-- Added the `Isaac-Velocity-Flat-Unitree-Go2-Symm-v0` and play task
-  registrations.
-- Migrated the Go2 URDF/mesh asset into `source/isaaclab_assets`.
-- Built a manager-based flat velocity task with 12 joint position actions,
-  flat terrain, Go2 PD gains, domain randomization, reset logic, and 30 second
-  episodes.
-- Recreated the old 60D policy observation layout:
-  projected gravity, command, joint position, joint velocity, last action,
-  gait phase sine/cosine, gait theta sine/cosine, and swing/stance ratios.
-- Added `GaitVelocityCommand` to sample command-conditioned gait phase, period,
-  and duty factor.
-- Added migrated rewards for command tracking, foot periodicity, base height,
-  foot clearance, hip action, morphology symmetry, torque/action smoothness,
-  and alive bonus.
-- Added nested URDF contact-sensor support and task-local spawners so the foot
-  sensors work on the imported URDF hierarchy.
-
-### Dobot X1 Symmetric Task
-
-- Added the `Isaac-Velocity-Flat-Dobot-X1-Symm-v0` and play task
-  registrations.
-- Added Dobot X1/`dobot_quad_v2` URDF and mesh assets.
-- Reused the Go2 gait-command and time-reversal observation/action layout while
-  remapping Dobot joint names, default positions, foot links, calf links, and
-  morphology symmetry signs.
-- Configured Dobot-specific PD gains, action scale, contact sensors, base
-  height ranges, termination thresholds, and domain randomization.
-
-### RSL-RL / Symmetry
-
-- Added legacy time-reversal fields to `RslRlSymmetryCfg`.
-- Added `LegacyTimeReversalPPO`, which restores warmup-gated policy mirror loss
-  and value consistency loss semantics from the old project.
-- Added Go2 and Dobot PPO configs that point to the legacy TRS PPO class.
-- Added `--print_gait_info` and `--print_gait_info_interval` to RSL-RL play for
-  live gait diagnostics when the environment exposes gait command data.
-
-## Code Layout
-
-Main task configs:
+Shared MDP and task logic:
 
 ```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/
+  symm_quadruped.py      Shared gait command, observation/action transforms,
+                         rewards, terminations, and symmetry helpers.
+  go2_symm.py            Go2 compatibility adapter over shared MDP logic.
+  dobot_x1_symm.py       X1 adapter and X1 morphology constants.
 ```
 
-MDP functions:
+Shared config layer:
 
 ```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/
+  symm_quadruped/
+    env.py               Shared ManagerBasedRLEnv subclass.
+    flat_env_cfg.py      Shared scene, terrain, observation, reward,
+                         termination, and randomization builders.
+    spawners.py          Shared nested URDF/contact-sensor spawning helper.
+    time_reversal_ppo.py Shared time-reversal PPO implementation.
+    agents/
+      rsl_rl_ppo_cfg.py  Shared PPO/TRS runner configuration helper.
 ```
 
-Legacy TRS PPO:
+Robot-specific config layers:
 
 ```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/legacy_trs_ppo.py
-source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/
+  go2_symm/
+    __init__.py
+    flat_env_cfg.py
+    env.py
+    spawners.py
+    agents/rsl_rl_ppo_cfg.py
+
+  dobot_x1_symm/
+    __init__.py
+    flat_env_cfg.py
+    env.py
+    spawners.py
+    agents/rsl_rl_ppo_cfg.py
 ```
 
-Robot assets:
+Robot-specific files should mainly contain assets, joint order, default joint
+positions, body names, contact sensor names, actuator gains, base height ranges,
+task registrations, and experiment names.
+
+Assets:
 
 ```text
 source/isaaclab_assets/isaaclab_assets/robots/go2_symm/
 source/isaaclab_assets/isaaclab_assets/robots/dobot_quad_v2/
 ```
 
-Convenience wrappers:
+Shared utility scripts:
 
 ```text
-scripts/go2_symm/
+scripts/symm_locomotion/
+  symm_cli.py
+  symm_locomotion.sh/ps1
+  train.py/sh/ps1
+  play.py/sh/ps1
+  record.py/sh/ps1
+  ablation.py/sh/ps1
+  compare.py/sh/ps1
+  tensorboard.py/sh/ps1
 ```
 
-## Good Runs Included
+## Script Usage
 
-The repository intentionally tracks only selected run artifacts. Routine logs
-remain ignored by `.gitignore`.
+Use `scripts/symm_locomotion` for normal work.
 
-Go2 no-TRS baseline:
+Windows PowerShell:
 
-```text
-logs/rsl_rl/unitree_go2_symm_flat/Good_Runs/2026-07-07_00-11-14_no_trs/
+```powershell
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
+.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
+.\scripts\symm_locomotion\compare.ps1 --robots go2 x1
+.\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
 ```
 
-Go2 TRS auxiliary run:
+Ubuntu/bash:
 
-```text
-logs/rsl_rl/unitree_go2_symm_flat/Good_Runs/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed/
+```bash
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 4096 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
+bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
+bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --video-length 400 --gif
+bash scripts/symm_locomotion/compare.sh --robots go2 x1
+bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 ```
 
-Dobot X1 no-TRS runs:
+Direct Python style:
 
-```text
-logs/rsl_rl/dobot_x1_symm_flat/2026-07-09_14-34-53_dobot_no_trs/
-logs/rsl_rl/dobot_x1_symm_flat/2026-07-10_14-30-46_no_trs/
+```bash
+python scripts/symm_locomotion/train.py --robot go2 --iterations 30000 --no-trs
+python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
 ```
 
-Each backed-up run includes:
+Generic launcher style:
 
-- `model_0.pt` through `model_9999.pt`.
-- `exported/policy.pt`.
-- `exported/policy.onnx` and `exported/policy.onnx.data`.
-- `params/agent.yaml`.
-- `params/env.yaml`.
-- TensorBoard `events.out.tfevents...` file.
-- A `git/go2_symm_rl_lab.diff` snapshot when the training run captured one.
+```powershell
+.\scripts\symm_locomotion\symm_locomotion.ps1 train --robot go2 --smoke --dry-run
+```
 
-Use `model_9999.pt` or the exported policy files as the default artifact for
-playback unless you are comparing intermediate checkpoints.
+```bash
+bash scripts/symm_locomotion/symm_locomotion.sh train --robot x1 --smoke --dry-run
+```
+
+All commands accept `--dry-run` to print the resolved Isaac Lab command without
+running it. Extra Isaac Lab/Hydra overrides can be passed after `--`.
 
 ## Training
 
-Direct Go2 training:
+Good no-TRS baselines:
 
 ```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 256 --max_iterations 5000
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
 ```
 
-Direct Dobot X1 training:
+TRS/mirror-loss runs:
 
 ```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 256 --max_iterations 5000
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --mirror 0.1
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --mirror 0.1
 ```
 
-Convenience Go2 wrappers:
+One-iteration smoke runs:
 
 ```powershell
-.\scripts\go2_symm\train.bat --iterations 10000 --mirror 0.1
-.\scripts\go2_symm\train.bat --no-trs --iterations 10000
-.\scripts\go2_symm\ablation.bat --iterations 10000 --seeds 1
+.\scripts\symm_locomotion\train.ps1 --robot go2 --smoke --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --smoke --no-trs
 ```
 
-Linux examples:
+Linux background runs:
 
 ```bash
-bash scripts/go2_symm/train.sh --iterations 10000 --mirror 0.1
-bash scripts/go2_symm/train.sh --no-trs --iterations 10000
-bash scripts/go2_symm/ablation.sh --iterations 10000 --seeds 1
+bash scripts/symm_locomotion/train.sh --nohup --robot go2 --iterations 30000 --no-trs
+bash scripts/symm_locomotion/ablation.sh --nohup --robot x1 --iterations 10000 --seeds 1 2 3
 ```
 
-Resume a specific run:
+`--no-trs` forwards:
 
-```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 256 --resume --load_run Good_Runs/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed --checkpoint model_9999.pt
+```text
+agent.algorithm.symmetry_cfg.use_data_augmentation=False
+agent.algorithm.symmetry_cfg.use_mirror_loss=False
+agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0
+agent.algorithm.symmetry_cfg.value_loss_coeff=0.0
 ```
 
-For Dobot X1, replace the task and run folder:
+Direct IsaacLab commands still work:
 
 ```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 256 --resume --load_run 2026-07-10_14-30-46_no_trs --checkpoint model_9999.pt
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 4096 --max_iterations 30000
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 4096 --max_iterations 30000
 ```
 
-## Playing Policies
+## Playing and Recording
 
-Go2 GUI play from a backed-up run:
+Latest checkpoints:
 
 ```powershell
-.\isaaclab.bat play --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0 --num_envs 1 --load_run Good_Runs/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed --checkpoint model_9999.pt --real-time --viz kit --rendering_mode balanced --kit_args="--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false" --print_gait_info
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 ```
 
-Dobot X1 GUI play:
+Specific run and model:
 
 ```powershell
-.\isaaclab.bat play --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-Play-v0 --num_envs 1 --load_run 2026-07-10_14-30-46_no_trs --checkpoint model_9999.pt --real-time --viz kit --rendering_mode balanced --kit_args="--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
+.\scripts\symm_locomotion\play.ps1 --robot go2 --run good_runs/unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs --model 9999
+.\scripts\symm_locomotion\play.ps1 --robot x1 --run good_runs/dobot_x1_symm_flat/2026-07-11_02-59-13_no_trs --model 9999
 ```
 
-Headless Go2 video:
+Record videos:
 
 ```powershell
-.\isaaclab.bat play --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0 --num_envs 1 --video --video_length 400 --load_run Good_Runs/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed --checkpoint model_9999.pt
+.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
+.\scripts\symm_locomotion\record.ps1 --robot x1 --checkpoint latest --video-length 400 --gif
+```
+
+## Logs and Good Runs
+
+Routine experiment directories:
+
+```text
+logs/rsl_rl/unitree_go2_symm_flat/
+logs/rsl_rl/dobot_x1_symm_flat/
+```
+
+Selected backed-up runs are copied under:
+
+```text
+logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs/
+logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed/
+logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-07-11_02-59-13_no_trs/
+```
+
+Only files under `logs/rsl_rl/good_runs/` are tracked by Git. Leave routine
+training outputs in the robot-specific experiment directories unless a run is
+curated and copied into `good_runs`.
+
+Compare recent runs:
+
+```powershell
+.\scripts\symm_locomotion\compare.ps1 --robots go2 x1 --limit 5
+```
+
+Open TensorBoard:
+
+```powershell
+.\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1 --port 6006
 ```
 
 ## How To Modify
 
-Change velocity ranges, terrain, reset thresholds, reward weights, and domain
-randomization in:
+Shared behavior belongs in:
 
 ```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
 ```
 
-Change gait command sampling, observation terms, time reversal transforms, and
-reward math in:
+Use shared files for:
+
+- Gait command behavior and sampling.
+- Time-reversal observation/action transforms.
+- Reward and termination math that should apply to all symmetric quadrupeds.
+- Observation layout.
+- Domain randomization shared by all robots.
+- PPO/TRS defaults shared by all robots.
+- Script behavior that can be selected by `--robot`.
+
+Robot-specific behavior belongs in:
 
 ```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/go2_symm.py
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+config/go2_symm/
+config/dobot_x1_symm/
+mdp/go2_symm.py
+mdp/dobot_x1_symm.py
 ```
 
-Change PPO hyperparameters and TRS coefficients in:
+Use robot files for:
 
-```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+- URDF/USD asset paths.
+- Joint order and default positions.
+- Foot, calf, base, and contact sensor names.
+- Actuator gains and action scale.
+- Robot-specific base height ranges and termination thresholds.
+- Morphology signs/ranges when the shared symmetry defaults do not match.
+- Task IDs and experiment names.
+
+Avoid copying a whole robot folder when adding a new robot. Start with a small
+robot-specific config that calls the shared `symm_quadruped` builders.
+
+## Adding a New Robot
+
+1. Add robot assets under `source/isaaclab_assets/isaaclab_assets/robots/`.
+2. Create `config/<robot>_symm/__init__.py` and register train/play Gym tasks.
+3. Create `config/<robot>_symm/flat_env_cfg.py` with only robot-specific asset,
+   joint, actuator, contact, and height-range definitions.
+4. Create `config/<robot>_symm/agents/rsl_rl_ppo_cfg.py` by calling
+   `configure_symm_quadruped_ppo(...)`.
+5. Create `mdp/<robot>_symm.py` only for morphology constants/adapters that
+   differ from the shared defaults.
+6. Add a `RobotSpec` entry in `scripts/symm_locomotion/symm_cli.py`.
+7. Add a dry-run CLI test for the new robot.
+
+Before training, run:
+
+```powershell
+python scripts/symm_locomotion/train.py --robot <robot> --smoke --dry-run --no-conda-run
+python scripts/symm_locomotion/play.py --robot <robot> --dry-run --no-conda-run
 ```
 
-Change URDF conversion or nested contact setup in:
+Then run a one-iteration IsaacLab smoke train.
 
-```text
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/spawners.py
-source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/spawners.py
-source/isaaclab_physx/isaaclab_physx/sensors/contact_sensor/contact_sensor.py
-```
+## Improving Safely
 
-Generated USD cache folders under the robot asset directories are intentionally
-ignored. They can be regenerated from the tracked URDF and mesh assets.
+When changing shared logic:
+
+- First verify Go2 and X1 still resolve the same task IDs and log directories.
+- Keep public adapters such as `mdp/go2_symm.py` unless there is a planned
+  deprecation.
+- Keep observation/action order stable unless retraining all policies is
+  intentional.
+- Add parameters to shared helpers instead of hard-coding one robot's names.
+- Run the CLI dry-run tests before launching expensive simulation.
+- Run at least one Go2 and one X1 smoke train after reward, command, or config
+  changes.
 
 ## Verification
 
-Compile the custom files:
+Lightweight checks:
 
 ```powershell
-.\isaaclab.bat -p -m py_compile source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\go2_symm\flat_env_cfg.py source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\go2_symm\spawners.py source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\mdp\go2_symm.py source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\go2_symm\legacy_trs_ppo.py source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\dobot_x1_symm\flat_env_cfg.py source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\config\dobot_x1_symm\spawners.py source\isaaclab_tasks\isaaclab_tasks\manager_based\locomotion\velocity\mdp\dobot_x1_symm.py
+python -m py_compile scripts\symm_locomotion\symm_cli.py scripts\symm_locomotion\train.py scripts\symm_locomotion\play.py scripts\symm_locomotion\record.py scripts\symm_locomotion\ablation.py scripts\symm_locomotion\compare.py scripts\symm_locomotion\tensorboard.py
+python scripts\symm_locomotion\train.py --robot go2 --smoke --dry-run --no-conda-run
+python scripts\symm_locomotion\train.py --robot x1 --smoke --dry-run --no-conda-run
+python scripts\symm_locomotion\compare.py --robots go2 x1 --limit 1 --dry-run --no-conda-run
 ```
 
-Run a one-iteration smoke train:
+Conda/IsaacLab tests:
 
 ```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 1 --headless --max_iterations 1
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 1 --headless --max_iterations 1
+conda run --no-capture-output -n symm_rl_isaaclab .\isaaclab.bat -p -m pytest source\isaaclab_tasks\test\test_go2_symm_time_reversal.py source\isaaclab_tasks\test\test_symm_quadruped_time_reversal_ppo.py source\isaaclab_tasks\test\test_symm_locomotion_cli.py
 ```
 
-Run formatting and lint checks before committing or pushing:
+Full pre-commit before committing or pushing:
 
 ```powershell
 .\isaaclab.bat -f
@@ -304,7 +391,7 @@ Run formatting and lint checks before committing or pushing:
 ## Notes
 
 - Keep the old IsaacGym project separate from this Isaac Lab migration.
-- Add future curated artifacts by naming the run in `.gitignore`; do not commit
-  every experiment under `logs/`.
+- Keep routine logs ignored; add only curated runs under
+  `logs/rsl_rl/good_runs/` intentionally.
 - Do not edit generated changelog outputs directly. Add changelog fragments
-  under `source/<package>/changelog.d/`.
+  under `source/<package>/changelog.d/` when needed.

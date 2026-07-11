@@ -3,16 +3,17 @@
 ## Overview
 
 This repository backs up the DLARlab Go2 and Dobot X1 symmetric locomotion
-training work on top of Isaac Lab 3.0.0 beta 2. It includes the custom task
-code, robot URDF/mesh assets, legacy time-reversal symmetry PPO support,
-convenience launch scripts, and selected good training runs.
+training work on top of Isaac Lab 3.0.0 beta 2. The current layout uses a
+shared symmetric-quadruped task/config/script layer for both robots, with
+robot-specific files kept small for assets, joint names, body names, actuator
+settings, and morphology constants.
 
 ## Requirements/Environment Setup
 
 Known working setup:
 
 - NVIDIA GPU with drivers compatible with Isaac Sim 6.0.0/6.0.1.
-- Conda environment named `go2_symm_rl_lab`.
+- Conda environment named `symm_rl_isaaclab`.
 - Windows PowerShell or Ubuntu bash.
 - Isaac Sim available to this Isaac Lab checkout, either through `_isaac_sim`
   or the Isaac Sim environment expected by this branch.
@@ -22,8 +23,8 @@ Fresh clone:
 ```powershell
 git clone https://github.com/DLARlab/symm_rl_isaaclab.git
 cd symm_rl_isaaclab
-conda env create -n go2_symm_rl_lab -f environment.yml
-conda activate go2_symm_rl_lab
+conda env create -n symm_rl_isaaclab -f environment.yml
+conda activate symm_rl_isaaclab
 .\isaaclab.bat -p -c "import gymnasium as gym; import isaaclab_tasks; print([s.id for s in gym.registry.values() if 'Go2-Symm' in s.id or 'Dobot-X1-Symm' in s.id])"
 ```
 
@@ -31,17 +32,41 @@ Linux uses the same commands with `./isaaclab.sh` instead of
 `.\isaaclab.bat`.
 
 Detailed project documentation is in
-[README_SYMM_RL_ISAACLAB.md](README_SYMM_RL_ISAACLAB.md). The older
-Go2-only migration notes are kept in
-[README_GO2_SYMM_ISAACLAB.md](README_GO2_SYMM_ISAACLAB.md).
+[README_SYMM_RL_ISAACLAB.md](README_SYMM_RL_ISAACLAB.md).
+
+Shared utility scripts live under:
+
+```text
+scripts/symm_locomotion/
+```
+
+Quick usage:
+
+```powershell
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --no-trs
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
+```
+
+Linux equivalents:
+
+```bash
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --no-trs
+bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
+bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
+```
 
 The selected run artifacts are backed up under:
 
 ```text
-logs/rsl_rl/unitree_go2_symm_flat/Good_Runs/
-logs/rsl_rl/dobot_x1_symm_flat/2026-07-09_14-34-53_dobot_no_trs/
-logs/rsl_rl/dobot_x1_symm_flat/2026-07-10_14-30-46_no_trs/
+logs/rsl_rl/good_runs/
 ```
+
+Only runs copied under `logs/rsl_rl/good_runs/` are tracked by Git. Routine
+experiment output under the robot-specific `logs/rsl_rl/<experiment>/`
+directories stays ignored.
 
 ---
 
