@@ -48,6 +48,79 @@ def test_train_dry_run_uses_selected_robot_task(capsys):
     assert " 1" in captured.out
 
 
+def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+
+    for robot in ("go2", "x1"):
+        args = parser.parse_args(["record", "--robot", robot, "--no-conda-run"])
+        args.robot_spec = symm_cli.get_robot(args.robot)
+        command, resolved_checkpoint = symm_cli.record_lab_args(args, [])
+
+        video_length_index = command.index("--video_length") + 1
+        assert command[video_length_index] == "1500"
+        assert resolved_checkpoint == checkpoint
+
+
+def test_record_video_length_override_is_preserved(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+    args = parser.parse_args(["record", "--robot", "go2", "--video-length", "400", "--no-conda-run"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command, _ = symm_cli.record_lab_args(args, [])
+
+    video_length_index = command.index("--video_length") + 1
+    assert command[video_length_index] == "400"
+
+
+def test_play_and_record_enable_rollout_plots_by_default(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+
+    for subcommand in ("play", "record"):
+        args = parser.parse_args([subcommand, "--robot", "go2", "--no-conda-run"])
+        args.robot_spec = symm_cli.get_robot(args.robot)
+        command = symm_cli.play_lab_args(args, []) if subcommand == "play" else symm_cli.record_lab_args(args, [])[0]
+
+        assert "--symm_rollout_plots" in command
+        plot_env_index = command.index("--symm_rollout_plot_env_index") + 1
+        assert command[plot_env_index] == "0"
+        plot_max_steps = command.index("--symm_rollout_plot_max_steps") + 1
+        assert command[plot_max_steps] == "1500"
+
+
+def test_rollout_plots_can_be_disabled_or_redirected(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+
+    disabled_args = parser.parse_args(["record", "--robot", "x1", "--no-plots", "--no-conda-run"])
+    disabled_args.robot_spec = symm_cli.get_robot(disabled_args.robot)
+    disabled_command, _ = symm_cli.record_lab_args(disabled_args, [])
+    assert "--symm_rollout_plots" not in disabled_command
+
+    plots_dir = tmp_path / "plots"
+    redirected_args = parser.parse_args(
+        ["play", "--robot", "x1", "--plots_dir", str(plots_dir), "--plot_env_index", "2", "--no-conda-run"]
+    )
+    redirected_args.robot_spec = symm_cli.get_robot(redirected_args.robot)
+    redirected_command = symm_cli.play_lab_args(redirected_args, [])
+    assert redirected_command[redirected_command.index("--symm_rollout_plots_dir") + 1] == str(plots_dir)
+    assert redirected_command[redirected_command.index("--symm_rollout_plot_env_index") + 1] == "2"
+
+
 def test_compare_handles_missing_log_directories(capsys):
     symm_cli = _load_symm_cli()
 

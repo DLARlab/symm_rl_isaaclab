@@ -28,7 +28,7 @@ Windows PowerShell:
 .\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
-.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
+.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
 .\scripts\symm_locomotion\compare.ps1 --robots go2 x1
 .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
 ```
@@ -40,7 +40,7 @@ bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 
 bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
-bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --video-length 400 --gif
+bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
 bash scripts/symm_locomotion/compare.sh --robots go2 x1
 bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 ```
@@ -109,6 +109,27 @@ selected robot experiment directory. You can also use:
 --model 9999
 --checkpoint PATH_TO_MODEL_PT
 ```
+
+Recordings are 30 seconds by default (1,500 environment steps at 50 Hz).
+Pass `--video-length` to override the length in environment steps.
+
+Play and record save the following rollout diagnostics under the selected
+checkpoint run's `plots/play/` directory by default:
+
+```text
+sim_data.npz
+figure1_linear_velocities_and_position.png
+figure2_E_C_frc_and_contact_forces.png
+figure3_E_C_spd_and_foot_velocities.png
+figure4_agg_E_C_frc_vs_contact.png
+```
+
+These reproduce the IsaacGym rollout plots for measured versus desired base
+velocity/position, `E_C_frc` versus foot contact force, and `E_C_spd` versus
+foot speed. Use `--no-plots` to disable them, `--plots_dir PATH` to override
+the output directory, or `--plot_env_index INDEX` to select another environment.
+Plot collection is limited to 30 seconds by default; use
+`--plot_duration SECONDS` to change the window.
 
 Relative `--run` values are resolved under the selected robot's routine log
 directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated

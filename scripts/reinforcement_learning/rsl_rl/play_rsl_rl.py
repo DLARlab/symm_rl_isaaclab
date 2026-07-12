@@ -79,6 +79,29 @@ parser.add_argument(
     default=50,
     help="Number of play steps between gait information terminal prints.",
 )
+parser.add_argument(
+    "--symm_rollout_plots",
+    action="store_true",
+    default=False,
+    help="Save symmetric quadruped rollout plots and sampled data after play.",
+)
+parser.add_argument(
+    "--symm_rollout_plots_dir",
+    default=None,
+    help="Directory for symmetric rollout plots. Defaults to <run>/plots/play.",
+)
+parser.add_argument(
+    "--symm_rollout_plot_env_index",
+    type=int,
+    default=0,
+    help="Environment index sampled by symmetric rollout plots.",
+)
+parser.add_argument(
+    "--symm_rollout_plot_max_steps",
+    type=int,
+    default=None,
+    help="Maximum number of steps sampled by symmetric rollout plots.",
+)
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
 args_cli, remaining_args = setup_preset_cli(parser)
@@ -280,6 +303,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
         dt = env.unwrapped.step_dt
+        rollout_plotter = None
+        if args_cli.symm_rollout_plots:
+            from symm_rollout_plotter import SymmetricRolloutPlotter
+
+            plots_dir = args_cli.symm_rollout_plots_dir or os.path.join(log_dir, "plots", "play")
+            rollout_plotter = SymmetricRolloutPlotter(
+                env.unwrapped,
+                output_dir=plots_dir,
+                env_index=args_cli.symm_rollout_plot_env_index,
+                max_samples=args_cli.symm_rollout_plot_max_steps,
+            )
 
         # reset environment
         obs = env.get_observations()
@@ -301,6 +335,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     else:
                         policy_nn.reset(dones)
 
+                if rollout_plotter is not None:
+                    rollout_plotter.record()
+
                 timestep += 1
                 if args_cli.print_gait_info and timestep % gait_info_interval == 0:
                     gait_info = _format_symmetric_gait_info(env)
@@ -314,10 +351,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 if args_cli.real_time and sleep_time > 0:
                     time.sleep(sleep_time)
 
-            # close the simulator
-            env.close()
         except KeyboardInterrupt:
             pass
+        finally:
+            if rollout_plotter is not None:
+                rollout_plotter.save()
+            env.close()
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ DEFAULT_MIRROR_LOSS_COEFF = 0.1
 DEFAULT_TR_VALUE_COEFF = 0.05
 DEFAULT_TR_WARMUP_ITERATIONS = 500
 DEFAULT_TR_MIN_ABS_CMD_VEL = 0.2
+DEFAULT_VIDEO_DURATION_S = 30.0
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
 
 
@@ -34,6 +35,7 @@ class RobotSpec:
     train_task: str
     play_task: str
     experiment_name: str
+    step_dt: float
 
 
 ROBOT_SPECS = {
@@ -43,6 +45,7 @@ ROBOT_SPECS = {
         train_task="Isaac-Velocity-Flat-Unitree-Go2-Symm-v0",
         play_task="Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0",
         experiment_name="unitree_go2_symm_flat",
+        step_dt=0.02,
     ),
     "x1": RobotSpec(
         key="x1",
@@ -50,6 +53,7 @@ ROBOT_SPECS = {
         train_task="Isaac-Velocity-Flat-Dobot-X1-Symm-v0",
         play_task="Isaac-Velocity-Flat-Dobot-X1-Symm-Play-v0",
         experiment_name="dobot_x1_symm_flat",
+        step_dt=0.02,
     ),
 }
 ROBOT_ALIASES = {
@@ -338,10 +342,55 @@ def add_checkpoint_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=None, help="Checkpoint iteration or file name inside the run.")
 
 
+def add_rollout_plot_args(parser: argparse.ArgumentParser) -> None:
+    """Add symmetric rollout plotting options."""
+    parser.add_argument(
+        "--plots",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Save velocity, position, gait-weight, foot-force, and foot-speed plots.",
+    )
+    parser.add_argument("--plots_dir", "--plots-dir", default=None, help="Override the rollout plot output directory.")
+    parser.add_argument(
+        "--plot_env_index",
+        "--plot-env-index",
+        type=int,
+        default=0,
+        help="Environment index sampled for rollout plots.",
+    )
+    parser.add_argument(
+        "--plot_duration",
+        "--plot-duration",
+        type=float,
+        default=DEFAULT_VIDEO_DURATION_S,
+        help="Maximum plotted rollout duration in seconds.",
+    )
+
+
+def rollout_plot_lab_args(args: argparse.Namespace) -> list[str]:
+    """Build Isaac Lab arguments for symmetric rollout plotting."""
+    if not args.plots:
+        return []
+    max_steps = round(args.plot_duration / args.robot_spec.step_dt)
+    if max_steps < 1:
+        raise ValueError("Plot duration must be positive.")
+    command = [
+        "--symm_rollout_plots",
+        "--symm_rollout_plot_env_index",
+        str(args.plot_env_index),
+        "--symm_rollout_plot_max_steps",
+        str(max_steps),
+    ]
+    if args.plots_dir:
+        command += ["--symm_rollout_plots_dir", args.plots_dir]
+    return command
+
+
 def add_play_args(parser: argparse.ArgumentParser) -> None:
     """Add play command options."""
     add_common_args(parser)
     add_checkpoint_args(parser)
+    add_rollout_plot_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
     parser.add_argument("--kit-args", "--kit_args", default=None)
@@ -391,15 +440,22 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         command += ["--kit_args", kit_args]
     if args.print_gait:
         command += ["--print_gait_info", "--print_gait_info_interval", str(args.print_gait_interval)]
-    return command + extra
+    return command + rollout_plot_lab_args(args) + extra
 
 
 def add_record_args(parser: argparse.ArgumentParser) -> None:
     """Add record command options."""
     add_common_args(parser)
     add_checkpoint_args(parser)
+    add_rollout_plot_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
-    parser.add_argument("--video-length", "--video_length", type=int, default=400)
+    parser.add_argument(
+        "--video-length",
+        "--video_length",
+        type=int,
+        default=None,
+        help="Recording length in environment steps. Defaults to 30 seconds for the selected robot.",
+    )
     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
     parser.add_argument("--kit-args", "--kit_args", default=None)
     parser.add_argument("--viewer", action="store_true", help="Show the Kit viewer while recording.")
@@ -413,6 +469,11 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
     checkpoint = resolve_checkpoint(args)
     print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
     kit_args = default_kit_args() if args.kit_args is None else args.kit_args
+    video_length = (
+        args.video_length
+        if args.video_length is not None
+        else round(DEFAULT_VIDEO_DURATION_S / args.robot_spec.step_dt)
+    )
     command = [
         "play",
         "--rl_library",
@@ -425,7 +486,7 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
         str(checkpoint),
         "--video",
         "--video_length",
-        str(args.video_length),
+        str(video_length),
         "--rendering_mode",
         args.rendering_mode,
     ]
@@ -433,7 +494,7 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
         command += ["--viz", "kit", "--real-time"]
     if kit_args:
         command += ["--kit_args", kit_args]
-    return command + extra, checkpoint
+    return command + rollout_plot_lab_args(args) + extra, checkpoint
 
 
 def add_ablation_args(parser: argparse.ArgumentParser) -> None:
