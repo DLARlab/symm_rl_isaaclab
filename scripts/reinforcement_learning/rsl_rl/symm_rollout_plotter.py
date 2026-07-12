@@ -78,9 +78,7 @@ class SymmetricRolloutPlotter:
 
         self._foot_body_ids, matched_body_names = self._robot.find_bodies(foot_body_names, preserve_order=True)
         if matched_body_names != foot_body_names:
-            raise ValueError(
-                f"Foot body order mismatch: expected {foot_body_names}, resolved {matched_body_names}."
-            )
+            raise ValueError(f"Foot body order mismatch: expected {foot_body_names}, resolved {matched_body_names}.")
 
         root_position = self._robot.data.root_pos_w.torch[env_index, :2].detach().cpu().numpy()
         self._desired_position = root_position.astype(np.float64, copy=True)
@@ -104,13 +102,17 @@ class SymmetricRolloutPlotter:
             return
         env_index = self._env_index
         command = self._command_term.command[env_index].detach().cpu()
-        true_velocity = torch.stack(
-            (
-                self._robot.data.root_lin_vel_b.torch[env_index, 0],
-                self._robot.data.root_lin_vel_b.torch[env_index, 1],
-                self._robot.data.root_ang_vel_b.torch[env_index, 2],
+        true_velocity = (
+            torch.stack(
+                (
+                    self._robot.data.root_lin_vel_b.torch[env_index, 0],
+                    self._robot.data.root_lin_vel_b.torch[env_index, 1],
+                    self._robot.data.root_ang_vel_b.torch[env_index, 2],
+                )
             )
-        ).detach().cpu()
+            .detach()
+            .cpu()
+        )
         root_position = self._robot.data.root_pos_w.torch[env_index, :2].detach().cpu()
 
         self._desired_heading += float(command[2]) * self._step_dt
@@ -137,12 +139,8 @@ class SymmetricRolloutPlotter:
         self._data["desired_lin_vel"].append(command.numpy())
         self._data["base_positions"].append(root_position.numpy())
         self._data["desired_positions"].append(self._desired_position.copy())
-        self._data["E_C_frc"].append(
-            self._command_term.periodic_force_weights()[env_index].detach().cpu().numpy()
-        )
-        self._data["E_C_spd"].append(
-            self._command_term.periodic_speed_weights()[env_index].detach().cpu().numpy()
-        )
+        self._data["E_C_frc"].append(self._command_term.periodic_force_weights()[env_index].detach().cpu().numpy())
+        self._data["E_C_spd"].append(self._command_term.periodic_speed_weights()[env_index].detach().cpu().numpy())
         self._data["foot_forces"].append(torch.stack(contact_forces).numpy())
         self._data["foot_velocities"].append(torch.linalg.norm(foot_velocity, dim=-1).detach().cpu().numpy())
 
