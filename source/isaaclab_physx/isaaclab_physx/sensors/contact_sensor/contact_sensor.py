@@ -326,8 +326,7 @@ class ContactSensor(BaseContactSensor):
             body_path_glob = body_path_glob.replace(".*", "*")
             if "/envs/env_*" in body_path_glob:
                 body_paths_glob.extend(
-                    body_path_glob.replace("/envs/env_*", f"/envs/env_{env_id}")
-                    for env_id in range(self._num_envs)
+                    body_path_glob.replace("/envs/env_*", f"/envs/env_{env_id}") for env_id in range(self._num_envs)
                 )
             else:
                 body_paths_glob.append(body_path_glob)

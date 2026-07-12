@@ -14,6 +14,11 @@ x1     Dobot X1
 Aliases are also accepted: `unitree-go2`, `unitree_go2`, `dobot`,
 `dobot-x1`, and `dobot_x1`.
 
+Complete the repository setup in the root [README](../../README.md#requirements)
+before using these launchers. In particular, rerun `isaaclab.bat -i core` or
+`./isaaclab.sh -i core` after copying or moving the checkout so editable
+package paths do not continue pointing at the old workspace.
+
 ## Quick Commands
 
 Windows PowerShell:

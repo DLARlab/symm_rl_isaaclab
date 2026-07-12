@@ -3,6 +3,13 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+exclude: |
+  (?x)^(
+    logs/rsl_rl/good_runs/|
+    source/isaaclab_assets/isaaclab_assets/robots/go2_symm/(dae|urdf)/|
+    source/isaaclab_assets/isaaclab_assets/robots/dobot_quad_v2/
+  )
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10

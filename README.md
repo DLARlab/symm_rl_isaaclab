@@ -40,6 +40,20 @@ cd D:\symm_rl_isaaclab
 conda activate symm_rl_isaaclab
 ```
 
+Install the core Isaac Lab packages after cloning. Rerun this command whenever
+the checkout is copied or moved so the editable package paths point at the
+current workspace:
+
+```powershell
+.\isaaclab.bat -i core
+```
+
+Linux equivalent:
+
+```bash
+./isaaclab.sh -i core
+```
+
 Check the IsaacLab Python:
 
 ```powershell
