@@ -264,15 +264,15 @@ def configure_domain_randomization(env_cfg, *, base_body_name: str | None = None
     env_cfg.events.reset_base.params["pose_range"] = {}
     env_cfg.events.reset_base.params["velocity_range"] = {
         "x": (-0.5, 0.5),
-        "y": (-0.5, 0.5),
+        "y": (0.0, 0.0),
         "z": (-0.5, 0.5),
         "roll": (-0.5, 0.5),
         "pitch": (-0.5, 0.5),
-        "yaw": (-0.5, 0.5),
+        "yaw": (0.0, 0.0),
     }
 
     env_cfg.events.push_robot.interval_range_s = (15.0, 15.0)
-    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
+    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (0.0, 0.0)}
 
 
 def make_play_physics_cfg() -> PhysxCfg:
