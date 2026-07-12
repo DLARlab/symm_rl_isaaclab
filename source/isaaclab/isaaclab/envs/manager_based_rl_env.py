@@ -83,6 +83,10 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             cfg.video_recorder.env_render_mode = render_mode
             cfg.video_recorder.eye = tuple(float(x) for x in cfg.viewer.eye)
             cfg.video_recorder.lookat = tuple(float(x) for x in cfg.viewer.lookat)
+            cfg.video_recorder.origin_type = cfg.viewer.origin_type
+            cfg.video_recorder.env_index = cfg.viewer.env_index
+            cfg.video_recorder.asset_name = cfg.viewer.asset_name
+            cfg.video_recorder.body_name = cfg.viewer.body_name
 
         # initialize the base class to setup the scene.
         super().__init__(cfg=cfg)

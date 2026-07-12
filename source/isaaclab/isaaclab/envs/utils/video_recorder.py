@@ -19,8 +19,8 @@ to ignore active visualizers and record from the physics/renderer stack.
 
 Camera sync when a visualizer drives the backend: construction copies the visualizer config's
 ``eye`` / ``lookat`` into the recorder config; each :meth:`~VideoRecorder.render_rgb_array`
-call then re-reads the Newton viewer's live ``camera.pos/pitch/yaw``. Kit video uses the
-configured ``eye`` / ``lookat`` at construction time.
+call then re-reads the Newton viewer's live ``camera.pos/pitch/yaw``. Scene-relative camera
+origins are recomputed before every frame so recorded views track moving assets like the play viewer.
 
 See :mod:`video_recorder_cfg` for configuration.
 """
@@ -175,7 +175,7 @@ class VideoRecorder:
         if cfg.env_render_mode == "rgb_array":
             backend_source = getattr(cfg, "backend_source", "visualizer")
             self._backend, self._matched_visualizer = _resolve_video_backend(scene, backend_source)
-            if self._matched_visualizer is not None:
+            if self._matched_visualizer is not None and getattr(cfg, "origin_type", "world") == "world":
                 _sync_camera_from_visualizer(scene, self._matched_visualizer, cfg)
             if self._backend == "newton_gl":
                 try:
@@ -243,13 +243,48 @@ class VideoRecorder:
         target = (pos[0] + dx, pos[1] + dy, pos[2] + dz)
         self._capture.update_camera(pos, target)
 
+    def _sync_tracking_camera(self) -> None:
+        """Update the recording camera from its configured scene-relative origin."""
+        origin_type = getattr(self.cfg, "origin_type", "world")
+        env_index = getattr(self.cfg, "env_index", 0)
+        if env_index < 0 or env_index >= self._scene.num_envs:
+            raise ValueError(
+                f"Video recorder env_index {env_index} is outside the valid range [0, {self._scene.num_envs - 1}]."
+            )
+
+        if origin_type == "env":
+            origin = self._scene.env_origins[env_index]
+        elif origin_type in ("asset_root", "asset_body"):
+            asset_name = getattr(self.cfg, "asset_name", None)
+            if asset_name is None:
+                raise ValueError(f"Video recorder origin type '{origin_type}' requires an asset_name.")
+            asset = self._scene[asset_name]
+            if origin_type == "asset_root":
+                origin = asset.data.root_pos_w.torch[env_index]
+            else:
+                body_name = getattr(self.cfg, "body_name", None)
+                if body_name is None:
+                    raise ValueError("Video recorder origin type 'asset_body' requires a body_name.")
+                body_ids, _ = asset.find_bodies(body_name)
+                if len(body_ids) != 1:
+                    raise ValueError(f"Video recorder body_name '{body_name}' must match exactly one body.")
+                origin = asset.data.body_pos_w.torch[env_index, body_ids[0]]
+        else:
+            return
+
+        origin = origin.detach().cpu()
+        position = tuple(float(origin[index]) + self.cfg.eye[index] for index in range(3))
+        target = tuple(float(origin[index]) + self.cfg.lookat[index] for index in range(3))
+        self._capture.update_camera(position, target)
+
     def render_rgb_array(self) -> np.ndarray | None:
         """Return an RGB frame for the resolved backend. Fails if backend is unavailable."""
         if self._backend is None or self._capture is None:
             return None
-        if self._matched_visualizer == "newton":
+        if getattr(self.cfg, "origin_type", "world") != "world":
+            self._sync_tracking_camera()
+        elif self._matched_visualizer == "newton":
             # Newton GL camera state lives in the capture object and must be synced each frame
             # to follow interactive viewer movement.
             self._sync_newton_camera()
-        # Kit capture uses the configured eye/lookat applied to the recording camera at construction time.
         return self._capture.render_rgb_array()

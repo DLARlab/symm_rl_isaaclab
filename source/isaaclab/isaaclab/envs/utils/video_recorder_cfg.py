@@ -33,7 +33,7 @@ class VideoRecorderCfg:
     """
 
     eye: tuple[float, float, float] = (7.5, 7.5, 7.5)
-    """Perspective camera position in world space (metres).
+    """Perspective camera position [m] relative to :attr:`origin_type`.
 
     Direct RL / MARL and manager-based RL environments overwrite this from
     :attr:`~isaaclab.envs.common.ViewerCfg.eye` before recording so ``--video`` matches the
@@ -41,7 +41,22 @@ class VideoRecorderCfg:
     """
 
     lookat: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    """Perspective camera look-at target in world space (metres). Set from ``ViewerCfg.lookat`` at env init."""
+    """Perspective camera look-at target [m] relative to :attr:`origin_type`."""
+
+    origin_type: Literal["world", "env", "asset_root", "asset_body"] = "world"
+    """Frame in which :attr:`eye` and :attr:`lookat` are defined.
+
+    Recording tracks moving ``"asset_root"`` and ``"asset_body"`` origins on every frame.
+    """
+
+    env_index: int = 0
+    """Environment index used by non-world camera origins."""
+
+    asset_name: str | None = None
+    """Scene asset used by ``"asset_root"`` and ``"asset_body"`` camera origins."""
+
+    body_name: str | None = None
+    """Asset body used by the ``"asset_body"`` camera origin."""
 
     backend_source: Literal["visualizer", "renderer"] = "visualizer"
     """Source used to resolve the video capture backend.

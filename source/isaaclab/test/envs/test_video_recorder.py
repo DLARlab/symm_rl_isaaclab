@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+import torch
 
 from isaaclab.envs.utils import video_recorder as _video_recorder_module
 from isaaclab.envs.utils.video_recorder import VideoRecorder, _resolve_video_backend, _sync_camera_from_visualizer
@@ -21,6 +22,10 @@ _DEFAULT_CFG = dict(
     env_render_mode="rgb_array",
     eye=(7.5, 7.5, 7.5),
     lookat=(0.0, 0.0, 0.0),
+    origin_type="world",
+    env_index=0,
+    asset_name=None,
+    body_name=None,
     backend_source="visualizer",
     window_width=1280,
     window_height=720,
@@ -119,6 +124,24 @@ def test_init_no_visualizer_skips_camera_sync():
     scene = MagicMock()
     cfg = SimpleNamespace(**_DEFAULT_CFG)
     with patch.object(_video_recorder_module, "_resolve_video_backend", return_value=("kit", None)):
+        with patch.object(_video_recorder_module, "_sync_camera_from_visualizer") as mock_sync:
+            with patch.dict(
+                sys.modules,
+                {
+                    "isaaclab_physx.video_recording": MagicMock(),
+                    "isaaclab_physx.video_recording.isaacsim_kit_perspective_video": MagicMock(),
+                    "isaaclab_physx.video_recording.isaacsim_kit_perspective_video_cfg": MagicMock(),
+                },
+            ):
+                VideoRecorder(cfg, scene)
+    mock_sync.assert_not_called()
+
+
+def test_init_tracking_camera_preserves_viewer_offsets():
+    """Scene-relative cameras keep task viewer offsets instead of visualizer world poses."""
+    scene = MagicMock()
+    cfg = SimpleNamespace(**{**_DEFAULT_CFG, "origin_type": "asset_root", "asset_name": "robot"})
+    with patch.object(_video_recorder_module, "_resolve_video_backend", return_value=("kit", "kit")):
         with patch.object(_video_recorder_module, "_sync_camera_from_visualizer") as mock_sync:
             with patch.dict(
                 sys.modules,
@@ -300,6 +323,57 @@ def test_render_rgb_array_calls_capture_each_step():
     for _ in range(3):
         recorder.render_rgb_array()
     assert recorder._capture.render_rgb_array.call_count == 3
+
+
+def test_render_rgb_array_tracks_asset_root():
+    """Scene-relative recording camera follows the selected asset root."""
+    recorder = _create_recorder(
+        _backend="kit",
+        origin_type="asset_root",
+        asset_name="robot",
+        eye=(0.0, -4.0, 1.4),
+        lookat=(0.3, 0.0, 0.35),
+    )
+    recorder._scene.num_envs = 1
+    asset = MagicMock()
+    asset.data.root_pos_w.torch = torch.tensor([[2.0, 3.0, 0.5]])
+    recorder._scene.__getitem__.return_value = asset
+
+    recorder.render_rgb_array()
+
+    recorder._scene.__getitem__.assert_called_once_with("robot")
+    recorder._capture.update_camera.assert_called_once_with((2.0, -1.0, 1.9), (2.3, 3.0, 0.85))
+
+
+def test_render_rgb_array_updates_tracking_camera_each_frame():
+    """Moving camera pose is recomputed before every captured frame."""
+    recorder = _create_recorder(
+        _backend="kit",
+        origin_type="asset_root",
+        asset_name="robot",
+        eye=(0.0, -4.0, 1.4),
+        lookat=(0.3, 0.0, 0.35),
+    )
+    recorder._scene.num_envs = 1
+    asset = MagicMock()
+    asset.data.root_pos_w.torch = torch.tensor([[0.0, 0.0, 0.0]])
+    recorder._scene.__getitem__.return_value = asset
+
+    recorder.render_rgb_array()
+    asset.data.root_pos_w.torch = torch.tensor([[1.0, 0.0, 0.0]])
+    recorder.render_rgb_array()
+
+    assert recorder._capture.update_camera.call_args_list[0].args[0] == (0.0, -4.0, 1.4)
+    assert recorder._capture.update_camera.call_args_list[1].args[0] == (1.0, -4.0, 1.4)
+
+
+def test_render_rgb_array_keeps_world_camera_fixed():
+    """World-relative recording cameras do not receive tracking updates."""
+    recorder = _create_recorder(_backend="kit", origin_type="world")
+
+    recorder.render_rgb_array()
+
+    recorder._capture.update_camera.assert_not_called()
 
 
 def test_render_rgb_array_calls_sync_newton_camera_when_newton_visualizer():

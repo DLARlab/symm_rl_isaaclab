@@ -23,6 +23,27 @@ class IsaacsimKitPerspectiveVideo:
         self._rgb_annotator = None
         self._render_product = None
 
+    def update_camera(
+        self,
+        position: tuple[float, float, float],
+        target: tuple[float, float, float],
+    ) -> None:
+        """Update the recording camera position and target.
+
+        Args:
+            position: Camera position [m].
+            target: Camera look-at target [m].
+        """
+        from isaacsim.core.rendering_manager import ViewportManager
+
+        self.cfg.eye = position
+        self.cfg.lookat = target
+        ViewportManager.set_camera_view(
+            self.cfg.camera_prim_path,
+            eye=list(position),
+            target=list(target),
+        )
+
     def render_rgb_array(self) -> np.ndarray:
         """Return one RGB frame. Blank frame during warmup; raises on other failures."""
         import omni.kit.app
@@ -32,13 +53,7 @@ class IsaacsimKitPerspectiveVideo:
 
         h, w = self.cfg.window_height, self.cfg.window_width
         if self._rgb_annotator is None:
-            from isaacsim.core.rendering_manager import ViewportManager
-
-            ViewportManager.set_camera_view(
-                self.cfg.camera_prim_path,
-                eye=list(self.cfg.eye),
-                target=list(self.cfg.lookat),
-            )
+            self.update_camera(self.cfg.eye, self.cfg.lookat)
             self._render_product = rep.create.render_product(self.cfg.camera_prim_path, (w, h))
             self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
             self._rgb_annotator.attach([self._render_product])
