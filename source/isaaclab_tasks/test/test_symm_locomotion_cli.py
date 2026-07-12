@@ -58,3 +58,15 @@ def test_compare_handles_missing_log_directories(capsys):
     assert "robot" in captured.out
     assert "go2" in captured.out
     assert "x1" in captured.out
+
+
+def test_tensorboard_dry_run_uses_python_module(capsys):
+    symm_cli = _load_symm_cli()
+
+    result = symm_cli.main(["tensorboard", "--robots", "go2", "x1", "--dry-run", "--no-conda-run"])
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "-m tensorboard.main" in captured.out
+    assert "logs" in captured.out
+    assert "rsl_rl" in captured.out

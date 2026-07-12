@@ -1,22 +1,28 @@
-# DLARlab Symmetric RL Isaac Lab Backup
+# DLARlab Symmetric RL Isaac Lab Workspace
 
 ## Overview
 
-This repository backs up the DLARlab Go2 and Dobot X1 symmetric locomotion
-training work on top of Isaac Lab 3.0.0 beta 2. The current layout uses a
-shared symmetric-quadruped task/config/script layer for both robots, with
-robot-specific files kept small for assets, joint names, body names, actuator
-settings, and morphology constants.
+This repository is an Isaac Lab 3.0.0 workspace with DLARlab symmetric
+quadruped locomotion tasks and selected good runs. The current implementation
+uses one shared symmetric-quadruped task layer for multiple robots:
 
-## Requirements/Environment Setup
+- Unitree Go2 symmetric flat locomotion.
+- Dobot X1 symmetric flat locomotion.
+- Time-reversal symmetry regularization for RSL-RL PPO.
+- Shared train, play, record, ablation, compare, and TensorBoard launchers.
+
+The goal of the structure is to make Go2 and X1 consistent now, while keeping
+the path open for more quadruped robots later.
+
+## Requirements
 
 Known working setup:
 
-- NVIDIA GPU with drivers compatible with Isaac Sim 6.0.0/6.0.1.
-- Conda environment named `symm_rl_isaaclab`.
 - Windows PowerShell or Ubuntu bash.
-- Isaac Sim available to this Isaac Lab checkout, either through `_isaac_sim`
-  or the Isaac Sim environment expected by this branch.
+- NVIDIA GPU and driver compatible with Isaac Sim 6.0.0/6.0.1.
+- Conda environment named `symm_rl_isaaclab`.
+- Isaac Sim available through this Isaac Lab checkout's `_isaac_sim` folder or
+  the Isaac Sim environment expected by this branch.
 
 Fresh clone:
 
@@ -25,217 +31,413 @@ git clone https://github.com/DLARlab/symm_rl_isaaclab.git
 cd symm_rl_isaaclab
 conda env create -n symm_rl_isaaclab -f environment.yml
 conda activate symm_rl_isaaclab
+```
+
+Existing checkout:
+
+```powershell
+cd D:\symm_rl_isaaclab
+conda activate symm_rl_isaaclab
+```
+
+Check the IsaacLab Python:
+
+```powershell
+.\isaaclab.bat -p -c "import sys; print(sys.executable)"
+```
+
+Linux equivalent:
+
+```bash
+./isaaclab.sh -p -c "import sys; print(sys.executable)"
+```
+
+Verify the custom task registrations:
+
+```powershell
 .\isaaclab.bat -p -c "import gymnasium as gym; import isaaclab_tasks; print([s.id for s in gym.registry.values() if 'Go2-Symm' in s.id or 'Dobot-X1-Symm' in s.id])"
 ```
 
-Linux uses the same commands with `./isaaclab.sh` instead of
-`.\isaaclab.bat`.
+Expected task IDs:
 
-Detailed project documentation is in
-[README_SYMM_RL_ISAACLAB.md](README_SYMM_RL_ISAACLAB.md).
+```text
+Isaac-Velocity-Flat-Unitree-Go2-Symm-v0
+Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0
+Isaac-Velocity-Flat-Dobot-X1-Symm-v0
+Isaac-Velocity-Flat-Dobot-X1-Symm-Play-v0
+```
 
-Shared utility scripts live under:
+## Current Structure
+
+Shared MDP and task logic:
+
+```text
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/
+  symm_quadruped.py      Shared gait command, observation/action transforms,
+                         rewards, terminations, and symmetry helpers.
+  go2_symm.py            Go2 compatibility adapter over shared MDP logic.
+  dobot_x1_symm.py       X1 adapter and X1 morphology constants.
+```
+
+Shared config layer:
+
+```text
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/
+  symm_quadruped/
+    env.py               Shared ManagerBasedRLEnv subclass.
+    flat_env_cfg.py      Shared scene, terrain, observation, reward,
+                         termination, and randomization builders.
+    spawners.py          Shared nested URDF/contact-sensor spawning helper.
+    time_reversal_ppo.py Shared time-reversal PPO implementation.
+    agents/
+      rsl_rl_ppo_cfg.py  Shared PPO/TRS runner configuration helper.
+```
+
+Robot-specific config layers:
+
+```text
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/
+  go2_symm/
+    __init__.py
+    flat_env_cfg.py
+    env.py
+    spawners.py
+    agents/rsl_rl_ppo_cfg.py
+
+  dobot_x1_symm/
+    __init__.py
+    flat_env_cfg.py
+    env.py
+    spawners.py
+    agents/rsl_rl_ppo_cfg.py
+```
+
+Robot-specific files should mainly contain assets, joint order, default joint
+positions, body names, contact sensor names, actuator gains, base height ranges,
+task registrations, and experiment names.
+
+Assets:
+
+```text
+source/isaaclab_assets/isaaclab_assets/robots/go2_symm/
+source/isaaclab_assets/isaaclab_assets/robots/dobot_quad_v2/
+```
+
+Shared utility scripts:
 
 ```text
 scripts/symm_locomotion/
+  symm_cli.py
+  symm_locomotion.sh/ps1
+  train.py/sh/ps1
+  play.py/sh/ps1
+  record.py/sh/ps1
+  ablation.py/sh/ps1
+  compare.py/sh/ps1
+  tensorboard.py/sh/ps1
 ```
 
-Quick usage:
+## Script Usage
+
+Use `scripts/symm_locomotion` for normal work.
+
+Windows PowerShell:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
+.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
+.\scripts\symm_locomotion\compare.ps1 --robots go2 x1
+.\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
+```
+
+Ubuntu/bash:
+
+```bash
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 4096 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
+bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
+bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --video-length 400 --gif
+bash scripts/symm_locomotion/compare.sh --robots go2 x1
+bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
+```
+
+Direct Python style from an activated environment:
+
+```bash
+python scripts/symm_locomotion/train.py --robot go2 --iterations 30000 --no-trs
+python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
+```
+
+Generic launcher style:
+
+```powershell
+.\scripts\symm_locomotion\symm_locomotion.ps1 train --robot go2 --smoke --dry-run
+```
+
+```bash
+bash scripts/symm_locomotion/symm_locomotion.sh train --robot x1 --smoke --dry-run
+```
+
+All commands accept `--dry-run` to print the resolved Isaac Lab command without
+running it. Extra Isaac Lab/Hydra overrides can be passed after `--`.
+
+## Training
+
+Good no-TRS baselines:
+
+```powershell
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+```
+
+TRS/mirror-loss runs:
+
+```powershell
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --mirror 0.1
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --mirror 0.1
+```
+
+One-iteration smoke runs:
+
+```powershell
+.\scripts\symm_locomotion\train.ps1 --robot go2 --smoke --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --smoke --no-trs
+```
+
+Linux background runs:
+
+```bash
+bash scripts/symm_locomotion/train.sh --nohup --robot go2 --iterations 30000 --no-trs
+bash scripts/symm_locomotion/ablation.sh --nohup --robot x1 --iterations 10000 --seeds 1 2 3
+```
+
+`--no-trs` forwards:
+
+```text
+agent.algorithm.symmetry_cfg.use_data_augmentation=False
+agent.algorithm.symmetry_cfg.use_mirror_loss=False
+agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0
+agent.algorithm.symmetry_cfg.value_loss_coeff=0.0
+```
+
+Direct IsaacLab commands still work:
+
+```powershell
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 4096 --max_iterations 30000
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 4096 --max_iterations 30000
+```
+
+## Playing and Recording
+
+Latest checkpoints:
+
+```powershell
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 ```
 
-Linux equivalents:
+Specific routine run and model:
 
-```bash
-bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --no-trs
-bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --no-trs
-bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
-bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
+```powershell
+.\scripts\symm_locomotion\play.ps1 --robot go2 --run 2026-07-11_20-53-43_more_trs_lr1e4_fixed --model 9999
+.\scripts\symm_locomotion\play.ps1 --robot x1 --run 2026-07-11_20-53-48_more_trs_lr1e4_fixed --model 9999
 ```
 
-The selected run artifacts are backed up under:
+`--run` is resolved under the selected robot's routine experiment directory,
+for example `logs/rsl_rl/unitree_go2_symm_flat/`. To play a curated
+`good_runs` checkpoint, pass the checkpoint path directly:
+
+```powershell
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-07-07_00-11-14_no_trs\model_9999.pt
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs\dobot_x1_symm_flat\2026-07-11_02-59-13_no_trs\model_9999.pt
+```
+
+Record videos:
+
+```powershell
+.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
+.\scripts\symm_locomotion\record.ps1 --robot x1 --checkpoint latest --video-length 400 --gif
+```
+
+## Logs and Good Runs
+
+Routine experiment directories:
 
 ```text
-logs/rsl_rl/good_runs/
+logs/rsl_rl/unitree_go2_symm_flat/
+logs/rsl_rl/dobot_x1_symm_flat/
 ```
 
-Only runs copied under `logs/rsl_rl/good_runs/` are tracked by Git. Routine
-experiment output under the robot-specific `logs/rsl_rl/<experiment>/`
-directories stays ignored.
+Selected backed-up runs are copied under:
 
----
+```text
+logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs/
+logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed/
+logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-07-11_02-59-13_no_trs/
+```
 
-![Isaac Lab](docs/source/_static/isaaclab.jpg)
+Only files under `logs/rsl_rl/good_runs/` are tracked by Git. Leave routine
+training outputs in the robot-specific experiment directories unless a run is
+curated and copied into `good_runs`.
 
----
+Compare recent runs:
 
-# Isaac Lab 3.0.0 Beta 2
+```powershell
+.\scripts\symm_locomotion\compare.ps1 --robots go2 x1 --limit 5
+```
 
-[![IsaacSim](https://img.shields.io/badge/IsaacSim-6.0.1-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
-[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://docs.python.org/3/whatsnew/3.12.html)
-[![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/22.04/)
-[![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
-[![pre-commit](https://img.shields.io/github/actions/workflow/status/isaac-sim/IsaacLab/pre-commit.yaml?logo=pre-commit&logoColor=white&label=pre-commit&color=brightgreen)](https://github.com/isaac-sim/IsaacLab/actions/workflows/pre-commit.yaml)
-[![docs status](https://img.shields.io/github/actions/workflow/status/isaac-sim/IsaacLab/docs.yaml?label=docs&color=brightgreen)](https://github.com/isaac-sim/IsaacLab/actions/workflows/docs.yaml)
-[![License](https://img.shields.io/badge/license-BSD--3-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![License](https://img.shields.io/badge/license-Apache--2.0-yellow.svg)](https://opensource.org/license/apache-2-0)
+Open TensorBoard:
 
-> [!NOTE]
-> Local symmetric RL migration guide:
-> [README_SYMM_RL_ISAACLAB.md](README_SYMM_RL_ISAACLAB.md).
+```powershell
+.\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1 --port 6006
+```
 
+On Windows, TensorBoard is launched through `python -m tensorboard.main` and
+uses the shared `logs/rsl_rl/` root when multiple robots are selected. On
+Linux/macOS, the launcher uses named robot log directories.
 
-This branch is a development branch for Isaac Sim 6.0, which is currently only available through the Isaac Sim [GitHub repo](https://github.com/isaac-sim/IsaacSim).
-For installation, please refer to the Isaac Sim GitHub repo to build the latest Isaac Sim branch, and follow the binary installation method in the
-Isaac Lab documentation for Isaac Lab installation.
+## How To Modify
 
-> [!WARNING]
-> A recent breaking change on the Isaac Lab `release/3.0.0-beta2` branch is not compatible with the `develop` branch of Isaac Sim on GitHub.
-> To run Isaac Lab with Isaac Sim's GitHub `develop` branch, use Isaac Lab commit [`f0234a82e432e2a0b0f0a26ca3c5b59e527ddaaa`](https://github.com/isaac-sim/IsaacLab/commit/f0234a82e432e2a0b0f0a26ca3c5b59e527ddaaa) or an earlier commit.
-> Alternatively, use the Isaac Lab [`v3.0.0-beta`](https://github.com/isaac-sim/IsaacLab/tree/v3.0.0-beta) tag.
+Shared behavior belongs in:
 
-Note that this branch is currently under active development and may experience breaking changes or error messages.
-Performance issues and regressions may also be observed in some use cases.
+```text
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+```
 
+Use shared files for:
 
-**Isaac Lab** is a GPU-accelerated, open-source framework designed to unify and simplify robotics research workflows,
-such as reinforcement learning, imitation learning, and motion planning. Built on [NVIDIA Isaac Sim](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html),
-it combines fast and accurate physics and sensor simulation, making it an ideal choice for sim-to-real
-transfer in robotics.
+- Gait command behavior and sampling.
+- Time-reversal observation/action transforms.
+- Reward and termination math that should apply to all symmetric quadrupeds.
+- Observation layout.
+- Domain randomization shared by all robots.
+- PPO/TRS defaults shared by all robots.
+- Script behavior that can be selected by `--robot`.
 
-Isaac Lab provides developers with a range of essential features for accurate sensor simulation, such as RTX-based
-cameras, LIDAR, or contact sensors. The framework's GPU acceleration enables users to run complex simulations and
-computations faster, which is key for iterative processes like reinforcement learning and data-intensive tasks.
-Moreover, Isaac Lab can run locally or be distributed across the cloud, offering flexibility for large-scale deployments.
+Robot-specific behavior belongs in:
 
-A detailed description of Isaac Lab can be found in our [arXiv paper](https://arxiv.org/abs/2511.04831).
+```text
+config/go2_symm/
+config/dobot_x1_symm/
+mdp/go2_symm.py
+mdp/dobot_x1_symm.py
+```
 
-## Key Features
+Use robot files for:
 
-Isaac Lab offers a comprehensive set of tools and environments designed to facilitate robot learning:
+- URDF/USD asset paths.
+- Joint order and default positions.
+- Foot, calf, base, and contact sensor names.
+- Actuator gains and action scale.
+- Robot-specific base height ranges and termination thresholds.
+- Morphology signs/ranges when the shared symmetry defaults do not match.
+- Task IDs and experiment names.
 
-- **Robots**: A diverse collection of robots, from manipulators, quadrupeds, to humanoids, with more than 16 commonly available models.
-- **Environments**: Ready-to-train implementations of more than 30 environments, which can be trained with popular reinforcement learning frameworks such as RSL RL, SKRL, RL Games, or Stable Baselines. We also support multi-agent reinforcement learning.
-- **Physics**: Rigid bodies, articulated systems, deformable objects
-- **Sensors**: RGB/depth/segmentation cameras, camera annotations, IMU, contact sensors, ray casters.
+Avoid copying a whole robot folder when adding a new robot. Start with a small
+robot-specific config that calls the shared `symm_quadruped` builders.
 
+## Adding a New Robot
 
-## Getting Started
+1. Add robot assets under `source/isaaclab_assets/isaaclab_assets/robots/`.
+2. Create `config/<robot>_symm/__init__.py` and register train/play Gym tasks.
+3. Create `config/<robot>_symm/flat_env_cfg.py` with only robot-specific asset,
+   joint, actuator, contact, and height-range definitions.
+4. Create `config/<robot>_symm/agents/rsl_rl_ppo_cfg.py` by calling
+   `configure_symm_quadruped_ppo(...)`.
+5. Create `mdp/<robot>_symm.py` only for morphology constants/adapters that
+   differ from the shared defaults.
+6. Add a `RobotSpec` entry in `scripts/symm_locomotion/symm_cli.py`.
+7. Add a dry-run CLI test for the new robot.
 
-### Documentation
+Before training, run:
 
-Our [documentation page](https://isaac-sim.github.io/IsaacLab) provides everything you need to get started, including
-detailed tutorials and step-by-step guides. Follow these links to learn more about:
+```powershell
+.\isaaclab.bat -p scripts\symm_locomotion\train.py --robot <robot> --smoke --dry-run --no-conda-run
+.\isaaclab.bat -p scripts\symm_locomotion\play.py --robot <robot> --dry-run --no-conda-run
+```
 
-- [Installation steps](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/setup/installation/index.html#local-installation)
-- [Reinforcement learning](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/overview/reinforcement-learning/rl_existing_scripts.html)
-- [Tutorials](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/tutorials/index.html)
-- [Available environments](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/overview/environments.html)
+Then run a one-iteration IsaacLab smoke train.
 
-## Performance Dashboard
+## Improving Safely
 
-We continuously benchmark Isaac Lab across different physics backends, renderers, and data types.
-The **[Isaac Lab Performance Dashboard](https://nvidia.github.io/omniperf/)** provides interactive
-charts showing preset comparison results, performance history, and environment scaling data from
-our internal CI/CD benchmarks.
+When changing shared logic:
 
-## Isaac Sim Version Dependency
+- First verify Go2 and X1 still resolve the same task IDs and log directories.
+- Keep public adapters such as `mdp/go2_symm.py` unless there is a planned
+  deprecation.
+- Keep observation/action order stable unless retraining all policies is
+  intentional.
+- Add parameters to shared helpers instead of hard-coding one robot's names.
+- Run the CLI dry-run tests before launching expensive simulation.
+- Run at least one Go2 and one X1 smoke train after reward, command, or config
+  changes.
 
-Isaac Lab is built on top of Isaac Sim and requires specific versions of Isaac Sim that are compatible with each
-release of Isaac Lab. Below, we outline the recent Isaac Lab releases and GitHub branches and their corresponding
-dependency versions for Isaac Sim.
+## Verification
 
-| Isaac Lab Version             | Isaac Sim Version         |
-| ----------------------------- | ------------------------- |
-| `release/3.0.0-beta2` branch  | Isaac Sim 6.0.0 / 6.0.1   |
-| `develop` branch              | Isaac Sim 6.0.0 / 6.0.1   |
-| `main` branch                 | Isaac Sim 4.5 / 5.0 / 5.1 |
-| `v3.0.0*`                     | Isaac Sim 6.0.0 / 6.0.1   |
-| `v2.3.X`                      | Isaac Sim 4.5 / 5.0 / 5.1 |
-| `v2.2.X`                      | Isaac Sim 4.5 / 5.0       |
-| `v2.1.X`                      | Isaac Sim 4.5             |
-| `v2.0.X`                      | Isaac Sim 4.5             |
+Lightweight checks:
 
-## Contributing to Isaac Lab
+```powershell
+.\isaaclab.bat -p -m py_compile scripts\symm_locomotion\symm_cli.py scripts\symm_locomotion\train.py scripts\symm_locomotion\play.py scripts\symm_locomotion\record.py scripts\symm_locomotion\ablation.py scripts\symm_locomotion\compare.py scripts\symm_locomotion\tensorboard.py
+.\isaaclab.bat -p scripts\symm_locomotion\train.py --robot go2 --smoke --dry-run --no-conda-run
+.\isaaclab.bat -p scripts\symm_locomotion\train.py --robot x1 --smoke --dry-run --no-conda-run
+.\isaaclab.bat -p scripts\symm_locomotion\compare.py --robots go2 x1 --limit 1 --dry-run --no-conda-run
+```
 
-We wholeheartedly welcome contributions from the community to make this framework mature and useful for everyone.
-These may happen as bug reports, feature requests, or code contributions. For details, please check our
-[contribution guidelines](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/refs/contributing.html).
+Conda/IsaacLab tests:
 
-## Show & Tell: Share Your Inspiration
+```powershell
+conda run --no-capture-output -n symm_rl_isaaclab .\isaaclab.bat -p -m pytest source\isaaclab_tasks\test\test_go2_symm_time_reversal.py source\isaaclab_tasks\test\test_symm_quadruped_time_reversal_ppo.py source\isaaclab_tasks\test\test_symm_locomotion_cli.py
+```
 
-We encourage you to utilize our [Show & Tell](https://github.com/isaac-sim/IsaacLab/discussions/categories/show-and-tell)
-area in the `Discussions` section of this repository. This space is designed for you to:
+Full pre-commit before committing or pushing:
 
-* Share the tutorials you've created
-* Showcase your learning content
-* Present exciting projects you've developed
+```powershell
+.\isaaclab.bat -f
+```
 
-By sharing your work, you'll inspire others and contribute to the collective knowledge
-of our community. Your contributions can spark new ideas and collaborations, fostering
-innovation in robotics and simulation.
+## Notes
 
-## Troubleshooting
+- Keep the old IsaacGym project separate from this Isaac Lab migration.
+- Keep routine logs ignored; add only curated runs under
+  `logs/rsl_rl/good_runs/` intentionally.
+- Do not edit generated changelog outputs directly. Add changelog fragments
+  under `source/<package>/changelog.d/` when needed.
 
-Please see the [troubleshooting](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/refs/troubleshooting.html) section for
-common fixes or [submit an issue](https://github.com/isaac-sim/IsaacLab/issues).
+## Upstream Isaac Lab
 
-For issues related to Isaac Sim, we recommend checking its [documentation](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
-or opening a question on its [forums](https://forums.developer.nvidia.com/c/agx-autonomous-machines/isaac/67).
+This workspace is based on [NVIDIA Isaac Lab](https://github.com/isaac-sim/IsaacLab),
+a GPU-accelerated framework for robot learning built on NVIDIA Isaac Sim. This
+checkout tracks the Isaac Lab 3.0.0 and Isaac Sim 6.0.0/6.0.1 generation; use
+the project-specific environment and commands above instead of assuming that
+instructions for another Isaac Lab release are compatible.
 
-## Support
+For upstream framework documentation, see:
 
-* Please use GitHub [Discussions](https://github.com/isaac-sim/IsaacLab/discussions) for discussing ideas,
-  asking questions, and requests for new features.
-* Github [Issues](https://github.com/isaac-sim/IsaacLab/issues) should only be used to track executable pieces of
-  work with a definite scope and a clear deliverable. These can be fixing bugs, documentation issues, new features,
-  or general updates.
-
-## Connect with the NVIDIA Omniverse Community
-
-Do you have a project or resource you'd like to share more widely? We'd love to hear from you!
-Reach out to the NVIDIA Omniverse Community team at OmniverseCommunity@nvidia.com to explore opportunities
-to spotlight your work.
-
-You can also join the conversation on the [Omniverse Discord](https://discord.com/invite/nvidiaomniverse) to
-connect with other developers, share your projects, and help grow a vibrant, collaborative ecosystem
-where creativity and technology intersect. Your contributions can make a meaningful impact on the Isaac Lab
-community and beyond!
+- [Isaac Lab documentation](https://isaac-sim.github.io/IsaacLab/)
+- [Isaac Lab installation](https://isaac-sim.github.io/IsaacLab/source/setup/installation/index.html)
+- [Reinforcement learning workflows](https://isaac-sim.github.io/IsaacLab/source/overview/reinforcement-learning/index.html)
+- [Isaac Lab troubleshooting](https://isaac-sim.github.io/IsaacLab/source/refs/troubleshooting.html)
 
 ## License
 
-The Isaac Lab framework is released under [BSD-3 License](LICENSE). The `isaaclab_mimic` extension and its
-corresponding standalone scripts are released under [Apache 2.0](LICENSE-mimic). The license files of its
-dependencies and assets are present in the [`docs/licenses`](docs/licenses) directory.
+Isaac Lab is released under the [BSD 3-Clause License](LICENSE). The
+`isaaclab_mimic` extension and its standalone scripts are released under the
+[Apache License 2.0](LICENSE-mimic). Dependency and asset licenses are stored
+under [`docs/licenses`](docs/licenses). Isaac Sim also contains components
+under proprietary licensing terms; see the
+[Isaac Sim license](docs/licenses/dependencies/isaacsim-license.txt).
 
-Note that full-featured workflows (PhysX, RTX rendering, ROS, URDF/MJCF importers) require
-[Isaac Sim](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html), which includes
-components under proprietary licensing terms. Kit-less Newton workflows do not require Isaac Sim.
-Please see the [Isaac Sim license](docs/licenses/dependencies/isaacsim-license.txt) for details.
+## Citation and Acknowledgement
 
-Note that the `isaaclab_mimic` extension requires cuRobo, which has proprietary licensing terms that can be found in [`docs/licenses/dependencies/cuRobo-license.txt`](docs/licenses/dependencies/cuRobo-license.txt).
-
-
-## Citation
-
-If you use Isaac Lab in your research, please cite the technical report:
-
-```
-@article{mittal2025isaaclab,
-  title={Isaac Lab: A GPU-Accelerated Simulation Framework for Multi-Modal Robot Learning},
-  author={Mayank Mittal and Pascal Roth and James Tigue and Antoine Richard and Octi Zhang and Peter Du and Antonio Serrano-Muñoz and Xinjie Yao and René Zurbrügg and Nikita Rudin and Lukasz Wawrzyniak and Milad Rakhsha and Alain Denzler and Eric Heiden and Ales Borovicka and Ossama Ahmed and Iretiayo Akinola and Abrar Anwar and Mark T. Carlson and Ji Yuan Feng and Animesh Garg and Renato Gasoto and Lionel Gulich and Yijie Guo and M. Gussert and Alex Hansen and Mihir Kulkarni and Chenran Li and Wei Liu and Viktor Makoviychuk and Grzegorz Malczyk and Hammad Mazhar and Masoud Moghani and Adithyavairavan Murali and Michael Noseworthy and Alexander Poddubny and Nathan Ratliff and Welf Rehberg and Clemens Schwarke and Ritvik Singh and James Latham Smith and Bingjie Tang and Ruchik Thaker and Matthew Trepte and Karl Van Wyk and Fangzhou Yu and Alex Millane and Vikram Ramasamy and Remo Steiner and Sangeeta Subramanian and Clemens Volk and CY Chen and Neel Jawale and Ashwin Varghese Kuruttukulam and Michael A. Lin and Ajay Mandlekar and Karsten Patzwaldt and John Welsh and Huihua Zhao and Fatima Anes and Jean-Francois Lafleche and Nicolas Moënne-Loccoz and Soowan Park and Rob Stepinski and Dirk Van Gelder and Chris Amevor and Jan Carius and Jumyung Chang and Anka He Chen and Pablo de Heras Ciechomski and Gilles Daviet and Mohammad Mohajerani and Julia von Muralt and Viktor Reutskyy and Michael Sauter and Simon Schirm and Eric L. Shi and Pierre Terdiman and Kenny Vilella and Tobias Widmer and Gordon Yeoman and Tiffany Chen and Sergey Grizan and Cathy Li and Lotus Li and Connor Smith and Rafael Wiltz and Kostas Alexis and Yan Chang and David Chu and Linxi "Jim" Fan and Farbod Farshidian and Ankur Handa and Spencer Huang and Marco Hutter and Yashraj Narang and Soha Pouya and Shiwei Sheng and Yuke Zhu and Miles Macklin and Adam Moravanszky and Philipp Reist and Yunrong Guo and David Hoeller and Gavriel State},
-  journal={arXiv preprint arXiv:2511.04831},
-  year={2025},
-  url={https://arxiv.org/abs/2511.04831}
-}
-```
-
-## Acknowledgement
-
-Isaac Lab development initiated from the [Orbit](https://isaac-orbit.github.io/) framework.
-We gratefully acknowledge the authors of Orbit for their foundational contributions.
+If this workspace contributes to published research, cite the upstream Isaac
+Lab technical report described in the
+[Isaac Lab repository](https://github.com/isaac-sim/IsaacLab#citation), along
+with the appropriate DLARlab project or experiment artifacts. Isaac Lab grew
+from the [Orbit](https://isaac-orbit.github.io/) framework; we acknowledge both
+projects and their contributors.

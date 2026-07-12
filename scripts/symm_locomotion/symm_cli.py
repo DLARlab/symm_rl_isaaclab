@@ -528,21 +528,28 @@ def run_tensorboard(args: argparse.Namespace) -> int:
     """Launch TensorBoard for selected symmetric quadruped logs."""
     robot_keys = args.robots or [args.robot]
     specs = [get_robot(robot_key) for robot_key in robot_keys]
-    logdirs = []
-    for spec in specs:
-        logdir = repo_root() / "logs" / "rsl_rl" / spec.experiment_name
-        logdirs.append(f"{spec.key}:{logdir}")
+    if os.name == "nt":
+        # TensorBoard's named logdir grammar conflicts with Windows drive letters.
+        logdir_arg = repo_root() / "logs" / "rsl_rl" / (specs[0].experiment_name if len(specs) == 1 else "")
+    else:
+        logdirs = []
+        for spec in specs:
+            logdir = repo_root() / "logs" / "rsl_rl" / spec.experiment_name
+            logdirs.append(f"{spec.key}:{logdir}")
+        logdir_arg = ",".join(logdirs)
     command = [
-        "tensorboard",
+        sys.executable,
+        "-m",
+        "tensorboard.main",
         "--logdir",
-        ",".join(logdirs),
+        str(logdir_arg),
         "--host",
         args.host,
         "--port",
         str(args.port),
     ]
     if should_use_conda(args):
-        command = ["conda", "run", "--no-capture-output", "-n", args.conda_env, *command]
+        command = ["conda", "run", "--no-capture-output", "-n", args.conda_env, "python", *command[1:]]
     print(log_prefix(args) + command_to_string(command), flush=True)
     if args.dry_run:
         return 0

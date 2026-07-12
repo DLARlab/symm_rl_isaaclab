@@ -40,7 +40,7 @@ bash scripts/symm_locomotion/compare.sh --robots go2 x1
 bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 ```
 
-Direct Python style still works:
+Direct Python style still works from an activated environment:
 
 ```bash
 python scripts/symm_locomotion/train.py --robot go2 --iterations 30000 --no-trs
@@ -105,6 +105,11 @@ selected robot experiment directory. You can also use:
 --checkpoint PATH_TO_MODEL_PT
 ```
 
+Relative `--run` values are resolved under the selected robot's routine log
+directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
+`logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
+`--checkpoint`.
+
 Extra Isaac Lab or Hydra overrides can be passed after `--`:
 
 ```bash
@@ -127,8 +132,10 @@ x1 logs:   logs/rsl_rl/dobot_x1_symm_flat/
 ```
 
 `compare` prints recent run folders and latest checkpoints across robots.
-`tensorboard` starts TensorBoard with named log directories for all selected
-robots.
+`tensorboard` starts TensorBoard through `python -m tensorboard.main`. On
+Windows, multiple selected robots use the shared `logs/rsl_rl/` root because
+TensorBoard's named logdir grammar conflicts with drive letters. On Linux and
+macOS, the launcher uses named log directories for the selected robots.
 
 ## Background Runs
 
