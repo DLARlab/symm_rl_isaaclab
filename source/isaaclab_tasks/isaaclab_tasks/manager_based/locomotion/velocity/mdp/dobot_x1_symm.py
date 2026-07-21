@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import torch
@@ -37,14 +38,16 @@ DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS = (
 DOBOT_X1_SYMM_JOINT_RANGES = (1.3264, 5.236, 5.06)
 """Dobot X1 hip, thigh, and calf joint ranges [rad]."""
 
+_MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = False
 
-def morphological_symmetry_penalty(
+
+def leg_permutation_symmetry_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     joint_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalty for Dobot joint symmetry in shared logical quadruped coordinates.
+    """Penalize Dobot joint differences under phase-aligned leg permutations.
 
     Args:
         env: The environment instance.
@@ -53,9 +56,9 @@ def morphological_symmetry_penalty(
         asset_cfg: Robot articulation.
 
     Returns:
-        The negative morphology symmetry penalty.
+        The negative leg-permutation symmetry penalty.
     """
-    return _symm_quadruped.morphological_symmetry_penalty(
+    return _symm_quadruped.leg_permutation_symmetry_penalty(
         env,
         command_name=command_name,
         joint_cfg=joint_cfg,
@@ -64,4 +67,37 @@ def morphological_symmetry_penalty(
         leg_phase_index=DOBOT_X1_SYMM_LEG_PHASE_INDEX,
         logical_joint_signs=DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
         joint_ranges=DOBOT_X1_SYMM_JOINT_RANGES,
+    )
+
+
+def morphological_symmetry_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    joint_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait command term.
+        joint_cfg: Robot joints in FL, FR, RL, RR order.
+        asset_cfg: Robot articulation.
+
+    Returns:
+        The negative leg-permutation symmetry penalty.
+    """
+    global _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED
+    if not _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED:
+        warnings.warn(
+            "morphological_symmetry_penalty() is deprecated; use leg_permutation_symmetry_penalty().",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = True
+    return leg_permutation_symmetry_penalty(
+        env,
+        command_name=command_name,
+        joint_cfg=joint_cfg,
+        asset_cfg=asset_cfg,
     )

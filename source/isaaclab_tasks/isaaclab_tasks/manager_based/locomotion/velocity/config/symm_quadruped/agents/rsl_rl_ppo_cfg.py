@@ -18,7 +18,7 @@ def configure_symm_quadruped_ppo(
     use_data_augmentation: bool,
     value_loss_coeff: float,
     mirror_loss_coeff: float = 0.1,
-    min_abs_command_velocity: float = 0.2,
+    min_abs_command_velocity: float = 0.0,
     warmup_iterations: int = 500,
 ) -> None:
     """Apply the shared symmetric quadruped PPO/TRS defaults to a runner config.
@@ -39,11 +39,12 @@ def configure_symm_quadruped_ppo(
     cfg.clip_actions = None
     cfg.obs_groups = {"actor": ["policy"], "critic": ["policy"]}
     cfg.actor.hidden_dims = [512, 256, 128]
+    cfg.actor.distribution_cfg.init_std = 0.5
     cfg.critic.hidden_dims = [512, 256, 128]
     cfg.algorithm.class_name = (
         "isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_ppo:TimeReversalPPO"
     )
-    cfg.algorithm.entropy_coef = 0.01
+    cfg.algorithm.entropy_coef = 0.005
     cfg.algorithm.symmetry_cfg = RslRlSymmetryCfg(
         use_data_augmentation=use_data_augmentation,
         use_mirror_loss=True,
@@ -53,6 +54,6 @@ def configure_symm_quadruped_ppo(
         value_loss_coeff=value_loss_coeff,
         min_abs_command_velocity=min_abs_command_velocity,
         warmup_iterations=warmup_iterations,
-        command_observation_index=3,
+        command_observation_index=9,
         command_observation_scale=2.0,
     )

@@ -24,8 +24,8 @@ package paths do not continue pointing at the old workspace.
 Windows PowerShell:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 256 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 256 --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
@@ -36,8 +36,8 @@ Windows PowerShell:
 Ubuntu/bash:
 
 ```bash
-bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 4096 --no-trs
-bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 256 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 256 --no-trs
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
@@ -89,6 +89,9 @@ Training options:
 --smoke
 ```
 
+`--tr-min-abs-cmd-vel` defaults to `0.0`, so TRS losses also train on
+zero-velocity commands used for in-place behavior.
+
 `--no-trs` disables symmetry data augmentation, mirror loss, and TRS value
 loss by forwarding these Hydra overrides:
 
@@ -122,14 +125,55 @@ figure1_linear_velocities_and_position.png
 figure2_E_C_frc_and_contact_forces.png
 figure3_E_C_spd_and_foot_velocities.png
 figure4_agg_E_C_frc_vs_contact.png
+figure5_policy_actions_and_joint_limits.png
+figure6_straight_line_reward_diagnostics.png
+figure7_foot_clearance.png
+figure8_leg_motor_torques.png
+figure9_leg_motor_powers.png
+figure10_leg_ground_reaction_forces.png
 ```
 
 These reproduce the IsaacGym rollout plots for measured versus desired base
 velocity/position, `E_C_frc` versus foot contact force, and `E_C_spd` versus
-foot speed. Use `--no-plots` to disable them, `--plots_dir PATH` to override
-the output directory, or `--plot_env_index INDEX` to select another environment.
+foot speed, with additional policy-action, joint-limit, and straight-line reward
+diagnostics. The leg-usage figures are ordered front-left, front-right,
+rear-left, rear-right. They plot the absolute value of each motor torque, each
+motor's absolute mechanical power (`abs(torque * joint velocity)`), and each
+absolute world-frame ground-reaction-force component. The black aggregate trace
+is the L1 sum for that leg: `sum(abs(component))`, not `abs(sum(component))` or
+the Euclidean force norm. Standard Go2/X1 playback filters contact to the flat
+ground and adds the tangential friction force to the ground-normal force.
+
+Each reported magnitude has a thin raw curve and a thicker dashed centered
+1-second moving arithmetic mean. At the standard 50 Hz control rate this uses
+51 samples spanning `t - 0.5 s` through `t + 0.5 s`. Plot edges use the available
+partial window with the correct sample count, and smoothing never crosses an
+episode reset. This centered, edge-corrected mean avoids the phase delay and
+zero-padding bias of a causal or convolution-padded moving average.
+
+`sim_data.npz` retains the signed source arrays for regeneration or signed power
+analysis, as well as the derived absolute and smoothed arrays, actions, targets,
+positions, soft limits, limit utilization, and measured/target swing-foot
+heights. Use `--no-plots` to disable plots, `--plots_dir PATH` to override the
+output directory, or `--plot_env_index INDEX` to select another environment.
 Plot collection is limited to 30 seconds by default; use
 `--plot_duration SECONDS` to change the window.
+
+The main leg-usage arrays in `sim_data.npz` are:
+
+- `joint_torques`, `joint_velocities`, `joint_powers`: `(T, 12)` in the saved `joint_names` order.
+- `leg_joint_torques`, `leg_joint_powers`: `(T, 4, 3)` in FL, FR, RL, RR order.
+- `leg_joint_torque_magnitudes`, `leg_joint_power_magnitudes`: absolute per-motor values;
+  `leg_torque_magnitude_sums`, `leg_power_magnitude_sums`: their per-leg L1 sums.
+- `leg_torque_sums`, `leg_power_sums`: signed sums retained for compatibility and analysis.
+- `foot_ground_reaction_forces_w`: `(T, 4, 3)` world-frame force vectors; the
+  boolean `ground_reaction_force_includes_friction` records whether each sample contains friction.
+- `foot_ground_reaction_force_abs_components`, `foot_ground_reaction_force_abs_sums`:
+  absolute force components and their L1 sums.
+- Every plotted magnitude key also has a `_centered_moving_mean` array. The scalar
+  `usage_plot_smoothing_window_s` and `usage_plot_smoothing_window_samples` fields
+  record the configured duration and actual odd sample count; `episode_done`
+  records the boundaries applied during smoothing.
 
 Relative `--run` values are resolved under the selected robot's routine log
 directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated

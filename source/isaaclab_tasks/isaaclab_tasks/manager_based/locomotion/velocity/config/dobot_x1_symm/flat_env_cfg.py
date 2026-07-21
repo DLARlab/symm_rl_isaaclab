@@ -17,8 +17,10 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.spawn
 from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg
 from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.flat_env_cfg import (
     SymmQuadrupedPhysicsCfg,
+    SymmQuadrupedRewardsCfg,
     configure_domain_randomization,
     configure_flat_scene,
+    configure_play_ground_reaction_force_sensors,
     configure_policy_observations,
     configure_rewards,
     configure_terminations,
@@ -47,19 +49,20 @@ _DOBOT_X1_JOINT_ORDER = [
     "joint_rear_right_calf_pitch",
 ]
 _DOBOT_X1_DEFAULT_JOINT_POSITIONS = {
-    "joint_front_left_abad": 0.1,
-    "joint_front_left_thigh_pitch": 0.7,
-    "joint_front_left_calf_pitch": -1.5,
-    "joint_front_right_abad": -0.1,
-    "joint_front_right_thigh_pitch": 0.7,
-    "joint_front_right_calf_pitch": -1.5,
-    "joint_rear_left_abad": 0.1,
-    "joint_rear_left_thigh_pitch": -0.7,
-    "joint_rear_left_calf_pitch": 1.5,
-    "joint_rear_right_abad": -0.1,
-    "joint_rear_right_thigh_pitch": -0.7,
-    "joint_rear_right_calf_pitch": 1.5,
+    "joint_front_left_abad": 0.0,
+    "joint_front_left_thigh_pitch": 0.6983,
+    "joint_front_left_calf_pitch": -1.2842,
+    "joint_front_right_abad": 0.0,
+    "joint_front_right_thigh_pitch": 0.6983,
+    "joint_front_right_calf_pitch": -1.2842,
+    "joint_rear_left_abad": 0.0,
+    "joint_rear_left_thigh_pitch": -0.6983,
+    "joint_rear_left_calf_pitch": 1.2842,
+    "joint_rear_right_abad": 0.0,
+    "joint_rear_right_thigh_pitch": -0.6983,
+    "joint_rear_right_calf_pitch": 1.2842,
 }
+_DOBOT_X1_BASE_HEIGHT_RANGE = (0.45, 0.60)
 _DOBOT_X1_FOOT_LINK_ORDER = [
     "link_front_left_foot",
     "link_front_right_foot",
@@ -82,6 +85,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
     """Flat velocity task for the Dobot X1 symmetric robot."""
 
     sim: SimulationCfg = SimulationCfg(physics=PhysicsCfg())
+    rewards: SymmQuadrupedRewardsCfg = SymmQuadrupedRewardsCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -156,7 +160,10 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         self.actions.joint_pos.preserve_order = True
         self.actions.joint_pos.scale = 0.25
 
-        self.commands.base_velocity = make_gait_velocity_command(dobot_mdp, base_height_range=(0.35, 0.55))
+        self.commands.base_velocity = make_gait_velocity_command(
+            dobot_mdp,
+            base_height_range=_DOBOT_X1_BASE_HEIGHT_RANGE,
+        )
 
         self._configure_dobot_x1_symm_observations()
         self._configure_dobot_x1_symm_rewards()
@@ -184,7 +191,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_dobot_x1_symm_observations(self) -> None:
-        """Configure the 60D Dobot policy observation to match Go2 ordering."""
+        """Configure the 72D Dobot policy observation to match Go2 ordering."""
         configure_policy_observations(self, dobot_mdp, _DOBOT_X1_JOINT_ORDER)
 
     def _configure_dobot_x1_symm_rewards(self) -> None:
@@ -196,7 +203,11 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
             foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
-            base_height_range=(0.35, 0.55),
+            base_height_range=_DOBOT_X1_BASE_HEIGHT_RANGE,
+            foot_clearance_height=0.04,
+            foot_clearance_height_scale=0.025,
+            foot_clearance_mode="phase_penalty",
+            pitch_scale=0.35,
         )
 
     def _configure_dobot_x1_symm_terminations(self) -> None:
@@ -205,8 +216,11 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             self,
             dobot_mdp,
             base_sensor_names=("contact_trunk",),
-            base_height_range=(0.15, 0.65),
+            base_height_range=(0.25, 0.65),
             calf_body_names=_DOBOT_X1_CALF_LINK_ORDER,
+            additional_body_point_terms={"front_body_height": ((0.35, 0.0, 0.0), 0.08)},
+            max_roll=0.7,
+            max_pitch=0.7,
         )
 
     def _configure_dobot_x1_symm_domain_randomization(self) -> None:
@@ -224,6 +238,7 @@ class DobotX1SymmFlatEnvCfg_PLAY(DobotX1SymmFlatEnvCfg):
         self.scene.num_envs = 1
         self.scene.env_spacing = 2.5
         self.sim.physics = make_play_physics_cfg()
+        configure_play_ground_reaction_force_sensors(self, _DOBOT_X1_FOOT_SENSOR_NAMES)
         self.viewer.eye = (0.0, -4.0, 1.5)
         self.viewer.lookat = (0.3, 0.0, 0.45)
         self.viewer.origin_type = "asset_root"
@@ -233,3 +248,4 @@ class DobotX1SymmFlatEnvCfg_PLAY(DobotX1SymmFlatEnvCfg):
         self.events.physics_material = None
         self.events.base_external_force_torque = None
         self.events.push_robot = None
+        self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)

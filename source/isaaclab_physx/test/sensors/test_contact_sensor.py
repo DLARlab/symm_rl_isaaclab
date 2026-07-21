@@ -17,16 +17,19 @@ simulation_app = AppLauncher(headless=True).app
 from dataclasses import MISSING
 from enum import Enum
 
+import isaaclab_physx.sensors.contact_sensor.contact_sensor as contact_sensor_module
 import pytest
 import torch
 import warp as wp
 from flaky import flaky
+from isaaclab_physx.sensors.contact_sensor.contact_sensor import ContactSensor as PhysxContactSensor
 
 import isaaclab.sim as sim_utils
 from isaaclab.app.settings_manager import get_settings_manager
 from isaaclab.assets import RigidObject, RigidObjectCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sensors import ContactSensor, ContactSensorCfg
+from isaaclab.sensors.contact_sensor import BaseContactSensor
 from isaaclab.sim import SimulationCfg, SimulationContext, build_simulation_context
 from isaaclab.sim.utils.stage import get_current_stage
 from isaaclab.terrains import HfRandomUniformTerrainCfg, TerrainGeneratorCfg, TerrainImporterCfg
@@ -244,6 +247,82 @@ def test_sphere_contact_time(setup_simulation, disable_contact_processing):
     sim_dt, durations, terrains, devices, settings = setup_simulation
     settings.set_bool("/physics/disableContactProcessing", disable_contact_processing)
     _run_contact_sensor_test(SPHERE_CFG, sim_dt, devices, terrains, settings, durations)
+
+
+def test_contact_filter_arguments_for_explicit_body_paths(monkeypatch):
+    """Checks that PhysX receives one nested filter list per explicit body path."""
+
+    class FakePath:
+        def __init__(self, path: str):
+            self.pathString = path
+
+    class FakePrim:
+        def __init__(self, path: str):
+            self._path = FakePath(path)
+
+        def GetPath(self):
+            return self._path
+
+    class FakeBodyView:
+        count = 2
+
+    class SimulationViewSpy:
+        def __init__(self):
+            self.body_patterns = None
+            self.contact_arguments = None
+
+        def create_rigid_body_view(self, patterns):
+            self.body_patterns = patterns
+            return FakeBodyView()
+
+        def create_rigid_contact_view(self, patterns, filter_patterns, max_contact_data_count):
+            self.contact_arguments = (patterns, filter_patterns, max_contact_data_count)
+            return object()
+
+    simulation_view = SimulationViewSpy()
+    asset_prim = FakePrim("/World/envs/env_0/Robot")
+    foot_prim = FakePrim("/World/envs/env_0/Robot/FL_foot")
+    monkeypatch.setattr(BaseContactSensor, "_initialize_impl", lambda self: None)
+    monkeypatch.setattr(PhysxContactSensor, "_create_buffers", lambda self: None)
+    monkeypatch.setattr(
+        contact_sensor_module.SimulationManager,
+        "get_physics_sim_view",
+        staticmethod(lambda: simulation_view),
+    )
+    monkeypatch.setattr(
+        contact_sensor_module,
+        "resolve_matching_prims_from_source",
+        lambda parent_expr: [(asset_prim, "/World/envs/env_.*/Robot")],
+    )
+    monkeypatch.setattr(
+        contact_sensor_module,
+        "get_all_matching_child_prims",
+        lambda *args, **kwargs: [foot_prim],
+    )
+    sensor = PhysxContactSensor.__new__(PhysxContactSensor)
+    sensor.cfg = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/FL_foot",
+        filter_prim_paths_expr=["/World/ground/terrain/mesh"],
+        max_contact_data_count_per_prim=4,
+    )
+    sensor._num_envs = 2
+    sensor._initialize_handle = None
+    sensor._invalidate_initialize_handle = None
+    sensor._prim_deletion_handle = None
+    sensor._debug_vis_handle = None
+
+    sensor._initialize_impl()
+
+    expected_body_patterns = [
+        "/World/envs/env_0/Robot/FL_foot",
+        "/World/envs/env_1/Robot/FL_foot",
+    ]
+    assert simulation_view.body_patterns == expected_body_patterns
+    assert simulation_view.contact_arguments == (
+        expected_body_patterns,
+        [["/World/ground/terrain/mesh"], ["/World/ground/terrain/mesh"]],
+        8,
+    )
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])

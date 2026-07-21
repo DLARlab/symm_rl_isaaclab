@@ -158,8 +158,8 @@ Use `scripts/symm_locomotion` for normal work.
 Windows PowerShell:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 256 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 256 --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
@@ -170,8 +170,8 @@ Windows PowerShell:
 Ubuntu/bash:
 
 ```bash
-bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 4096 --no-trs
-bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 256 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 256 --no-trs
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
@@ -204,8 +204,8 @@ running it. Extra Isaac Lab/Hydra overrides can be passed after `--`.
 Good no-TRS baselines:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 4096 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 256 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 256 --no-trs
 ```
 
 TRS/mirror-loss runs:
@@ -241,8 +241,8 @@ agent.algorithm.symmetry_cfg.value_loss_coeff=0.0
 Direct IsaacLab commands still work:
 
 ```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 4096 --max_iterations 30000
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 4096 --max_iterations 30000
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 256 --max_iterations 30000
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 256 --max_iterations 30000
 ```
 
 ## Playing and Recording
@@ -289,13 +289,32 @@ figure1_linear_velocities_and_position.png
 figure2_E_C_frc_and_contact_forces.png
 figure3_E_C_spd_and_foot_velocities.png
 figure4_agg_E_C_frc_vs_contact.png
+figure5_policy_actions_and_joint_limits.png
+figure6_straight_line_reward_diagnostics.png
+figure7_foot_clearance.png
+figure8_leg_motor_torques.png
+figure9_leg_motor_powers.png
+figure10_leg_ground_reaction_forces.png
 ```
 
 The plots compare measured and commanded base velocity/position, `E_C_frc`
-and foot contact force, and `E_C_spd` and foot speed. Pass `--no-plots` to
-disable them or `--plots_dir PATH` to select another output directory. Plot
-collection is limited to 30 seconds by default; use `--plot_duration SECONDS`
-to change the window.
+and foot contact force, `E_C_spd` and foot speed, policy outputs and joint-limit
+use, and the straight-line reward components. `sim_data.npz` retains the
+per-joint action, target, position, velocity, applied-torque, signed mechanical
+power, soft-limit, and utilization arrays together with signed and magnitude
+per-leg torque/power sums, world-frame ground-normal and friction forces, and
+measured and commanded swing-foot heights. Standard Go2/X1 playback filters
+these forces to the flat ground, so the saved ground-reaction force contains
+both normal contact and tangential friction. The leg-use figures plot absolute
+motor torques, absolute motor mechanical powers, and absolute world-frame force
+components. Their black aggregate curves are L1 sums (`sum(abs(component))`).
+Every raw magnitude is paired with a thicker dashed, centered 1-second moving
+mean; partial edge windows are correctly normalized and smoothing stops at
+episode boundaries. Signed source arrays remain in `sim_data.npz`. The four-row
+leg plots use front-left, front-right, rear-left, rear-right order. Pass
+`--no-plots` to disable them or `--plots_dir PATH` to select another output
+directory. Plot collection is limited to 30 seconds by default; use
+`--plot_duration SECONDS` to change the window.
 
 ## Logs and Good Runs
 
@@ -306,17 +325,14 @@ logs/rsl_rl/unitree_go2_symm_flat/
 logs/rsl_rl/dobot_x1_symm_flat/
 ```
 
-Selected backed-up runs are copied under:
+Selected backed-up runs are copied under `logs/rsl_rl/good_runs/`. See the
+[curated-run index](logs/rsl_rl/good_runs/README.md) and the
+[60D-to-72D milestone](logs/rsl_rl/good_runs/MILESTONE_60D_TO_72D.md) for the
+complete Go2/X1 run inventory, configuration changes, TRS measurements, and
+safe restoration procedure.
 
-```text
-logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs/
-logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-07-10_02-17-16_trs_aux_only_lr1e4_fixed/
-logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-07-11_02-59-13_no_trs/
-```
-
-Only files under `logs/rsl_rl/good_runs/` are tracked by Git. Leave routine
-training outputs in the robot-specific experiment directories unless a run is
-curated and copied into `good_runs`.
+Leave routine training outputs in the robot-specific experiment directories
+unless a run is intentionally curated and copied into `good_runs`.
 
 Compare recent runs:
 

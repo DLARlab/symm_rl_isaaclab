@@ -21,7 +21,7 @@ DEFAULT_NUM_ENVS = 256
 DEFAULT_MIRROR_LOSS_COEFF = 0.1
 DEFAULT_TR_VALUE_COEFF = 0.05
 DEFAULT_TR_WARMUP_ITERATIONS = 500
-DEFAULT_TR_MIN_ABS_CMD_VEL = 0.2
+DEFAULT_TR_MIN_ABS_CMD_VEL = 0.0
 DEFAULT_VIDEO_DURATION_S = 30.0
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
 
@@ -190,12 +190,20 @@ def resolve_checkpoint(args: argparse.Namespace) -> Path:
     return checkpoints[-1]
 
 
-def latest_play_video(run_dir: Path) -> Path | None:
-    """Return the newest play MP4 for a run, if one exists."""
+def play_video_snapshot(run_dir: Path) -> dict[Path, tuple[int, int]]:
+    """Return modification-time and size signatures for existing play MP4s."""
     video_dir = run_dir / "videos" / "play"
     if not video_dir.exists():
-        return None
-    videos = list(video_dir.glob("*.mp4"))
+        return {}
+    return {path: (path.stat().st_mtime_ns, path.stat().st_size) for path in video_dir.glob("*.mp4")}
+
+
+def latest_play_video(run_dir: Path, previous_videos: dict[Path, tuple[int, int]] | None = None) -> Path | None:
+    """Return the newest play MP4, optionally limited to new or modified files."""
+    current_videos = play_video_snapshot(run_dir)
+    videos = list(current_videos)
+    if previous_videos is not None:
+        videos = [path for path, signature in current_videos.items() if previous_videos.get(path) != signature]
     if not videos:
         return None
     return max(videos, key=lambda path: path.stat().st_mtime)
@@ -221,9 +229,13 @@ def converter_command(args: argparse.Namespace, mp4_path: Path, gif_path: Path) 
     return command
 
 
-def convert_latest_video(args: argparse.Namespace, checkpoint: Path) -> int:
-    """Convert the newest recorded MP4 for the checkpoint run to GIF."""
-    mp4_path = latest_play_video(checkpoint.parent)
+def convert_latest_video(
+    args: argparse.Namespace,
+    checkpoint: Path,
+    previous_videos: dict[Path, tuple[int, int]] | None = None,
+) -> int:
+    """Convert the newest newly recorded MP4 for the checkpoint run to GIF."""
+    mp4_path = latest_play_video(checkpoint.parent, previous_videos)
     if mp4_path is None:
         if args.dry_run:
             print(
@@ -231,7 +243,11 @@ def convert_latest_video(args: argparse.Namespace, checkpoint: Path) -> int:
                 flush=True,
             )
             return 0
-        print(f"{log_prefix(args)}No MP4 found under {checkpoint.parent / 'videos' / 'play'}", flush=True)
+        qualifier = "new or updated " if previous_videos is not None else ""
+        print(
+            f"{log_prefix(args)}No {qualifier}MP4 found under {checkpoint.parent / 'videos' / 'play'}",
+            flush=True,
+        )
         return 1
     gif_path = mp4_path.with_suffix(".gif")
     command = converter_command(args, mp4_path, gif_path)
@@ -348,7 +364,7 @@ def add_rollout_plot_args(parser: argparse.ArgumentParser) -> None:
         "--plots",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Save velocity, position, gait-weight, foot-force, and foot-speed plots.",
+        help="Save tracking, gait, joint-torque/power, and per-foot ground-reaction-force plots.",
     )
     parser.add_argument("--plots_dir", "--plots-dir", default=None, help="Override the rollout plot output directory.")
     parser.add_argument(
@@ -509,7 +525,7 @@ def add_ablation_args(parser: argparse.ArgumentParser) -> None:
         "--tr-warmup-iterations", "--tr_warmup_iterations", dest="tr_warmup_iterations", type=int, default=1000
     )
     parser.add_argument(
-        "--tr-min-abs-cmd-vel", "--tr_min_abs_cmd_vel", dest="tr_min_abs_cmd_vel", type=float, default=0.2
+        "--tr-min-abs-cmd-vel", "--tr_min_abs_cmd_vel", dest="tr_min_abs_cmd_vel", type=float, default=0.0
     )
     parser.add_argument("--only", choices=("both", "with_trs", "no_trs"), default="both")
 
@@ -657,10 +673,21 @@ def main(argv: list[str] | None = None) -> int:
             return run_isaaclab(args, play_lab_args(args, extra))
         if args.command == "record":
             lab_args, checkpoint = record_lab_args(args, extra)
+            previous_videos = play_video_snapshot(checkpoint.parent) if not args.dry_run else None
             code = run_isaaclab(args, lab_args)
-            if code != 0 or not args.gif:
+            if code != 0:
                 return code
-            return convert_latest_video(args, checkpoint)
+            if previous_videos is not None and latest_play_video(checkpoint.parent, previous_videos) is None:
+                print(
+                    f"{log_prefix(args)}ERROR: recording finished without a new or updated MP4 under "
+                    f"{checkpoint.parent / 'videos' / 'play'}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
+            if not args.gif:
+                return 0
+            return convert_latest_video(args, checkpoint, previous_videos)
         if args.command == "ablation":
             return run_ablation(args, extra)
         if args.command == "compare":

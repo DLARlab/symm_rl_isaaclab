@@ -17,12 +17,17 @@ class TimeReversalPPO(PPO):
     """PPO with time-reversal warmup, action, and value losses."""
 
     _MIN_ACTOR_STD = 1.0e-6
-    _MAX_ACTOR_STD = 10.0
+    _MAX_ACTOR_STD = 1.0
+    _ACTOR_MEAN_BOUND = 10.0
+    _ACTOR_MEAN_BOUND_LOSS_COEFF = 1.0e-2
+    _ACTOR_MEAN_ABORT_BOUND = 50.0
+    _ACTOR_MEAN_ABORT_PATIENCE = 25
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.current_learning_iteration = 0
         self._time_reversal_update_count = 0
+        self._actor_mean_abort_count = 0
         self._clamp_actor_std()
 
     def act(self, obs: TensorDict) -> torch.Tensor:
@@ -38,6 +43,7 @@ class TimeReversalPPO(PPO):
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_entropy = 0
+        mean_actor_bound_loss = 0
         mean_rnd_loss = 0 if self.rnd else None
         mean_symmetry_loss = 0 if self.symmetry else None
         mean_tr_value_loss = 0 if time_reversal_enabled else None
@@ -79,6 +85,7 @@ class TimeReversalPPO(PPO):
             values = self.critic(batch.observations, masks=batch.masks, hidden_state=batch.hidden_states[1])
             distribution_params = tuple(p[:original_batch_size] for p in self.actor.output_distribution_params)
             entropy = self.actor.output_entropy[:original_batch_size]
+            actor_bound_loss = self._actor_mean_bound_loss(distribution_params[0])
 
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
@@ -119,6 +126,7 @@ class TimeReversalPPO(PPO):
                 value_loss = (batch.returns - values).pow(2).mean()
 
             loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
+            loss += self._ACTOR_MEAN_BOUND_LOSS_COEFF * actor_bound_loss
 
             symmetry_loss = torch.zeros((), device=self.device)
             tr_value_loss = torch.zeros((), device=self.device)
@@ -186,6 +194,7 @@ class TimeReversalPPO(PPO):
             mean_value_loss += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
             mean_entropy += entropy.mean().item()
+            mean_actor_bound_loss += actor_bound_loss.item()
             if mean_rnd_loss is not None:
                 mean_rnd_loss += rnd_loss.item()
             if mean_symmetry_loss is not None:
@@ -197,6 +206,7 @@ class TimeReversalPPO(PPO):
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         mean_entropy /= num_updates
+        mean_actor_bound_loss /= num_updates
         if mean_rnd_loss is not None:
             mean_rnd_loss /= num_updates
         if mean_symmetry_loss is not None:
@@ -204,6 +214,8 @@ class TimeReversalPPO(PPO):
         if mean_tr_value_loss is not None:
             mean_tr_value_loss /= num_updates
 
+        action_diagnostics = self._action_diagnostics_from_storage()
+        self._update_actor_mean_safety(action_diagnostics["diagnostics/actor_mean_abs_max"])
         self.storage.clear()
         self._time_reversal_update_count += 1
         self.current_learning_iteration = self._time_reversal_update_count
@@ -212,6 +224,7 @@ class TimeReversalPPO(PPO):
             "value": mean_value_loss,
             "surrogate": mean_surrogate_loss,
             "entropy": mean_entropy,
+            "actor_bound": mean_actor_bound_loss,
         }
         if self.rnd:
             loss_dict["rnd"] = mean_rnd_loss
@@ -219,6 +232,7 @@ class TimeReversalPPO(PPO):
             loss_dict["symmetry"] = mean_symmetry_loss
         if mean_tr_value_loss is not None:
             loss_dict["tr_value"] = mean_tr_value_loss
+        loss_dict.update(action_diagnostics)
 
         return loss_dict
 
@@ -248,7 +262,7 @@ class TimeReversalPPO(PPO):
 
     def _time_reversal_mask(self, observations) -> torch.Tensor:
         policy_obs = observations["policy"]
-        command_index = int(self.symmetry.get("command_observation_index", 3))
+        command_index = int(self.symmetry.get("command_observation_index", 9))
         command_scale = float(self.symmetry.get("command_observation_scale", 1.0))
         min_abs_command = float(self.symmetry.get("min_abs_command_velocity", 0.0))
         command = policy_obs[:, command_index] / command_scale
@@ -269,3 +283,34 @@ class TimeReversalPPO(PPO):
         with torch.no_grad():
             std_param.nan_to_num_(nan=self._MIN_ACTOR_STD, posinf=self._MAX_ACTOR_STD, neginf=self._MIN_ACTOR_STD)
             std_param.clamp_(min=self._MIN_ACTOR_STD, max=self._MAX_ACTOR_STD)
+
+    @classmethod
+    def _actor_mean_bound_loss(cls, actor_mean: torch.Tensor) -> torch.Tensor:
+        """Penalize actor means only after they exceed the normal locomotion range."""
+        excess = torch.relu(actor_mean.abs() - cls._ACTOR_MEAN_BOUND)
+        return excess.square().mean()
+
+    def _update_actor_mean_safety(self, actor_mean_abs_max: float) -> None:
+        """Abort training after sustained actor-mean divergence."""
+        if actor_mean_abs_max <= self._ACTOR_MEAN_ABORT_BOUND:
+            self._actor_mean_abort_count = 0
+            return
+
+        self._actor_mean_abort_count += 1
+        if self._actor_mean_abort_count >= self._ACTOR_MEAN_ABORT_PATIENCE:
+            raise RuntimeError(
+                "actor mean diverged above "
+                f"{self._ACTOR_MEAN_ABORT_BOUND:g} for {self._ACTOR_MEAN_ABORT_PATIENCE} consecutive PPO updates; "
+                "stop this run and restart training from a stable checkpoint or a fresh policy"
+            )
+
+    def _action_diagnostics_from_storage(self) -> dict[str, float]:
+        """Summarize exact sampled actions and actor means retained by rollout storage."""
+        sampled_action_abs = self.storage.actions.abs()
+        actor_mean_abs = self.storage.distribution_params[0].abs()
+        return {
+            "diagnostics/action_abs_mean": sampled_action_abs.mean().item(),
+            "diagnostics/action_abs_max": sampled_action_abs.max().item(),
+            "diagnostics/actor_mean_abs_mean": actor_mean_abs.mean().item(),
+            "diagnostics/actor_mean_abs_max": actor_mean_abs.max().item(),
+        }

@@ -15,8 +15,10 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.flat_env_cfg im
 from isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.spawners import spawn_go2_symm_from_urdf
 from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.flat_env_cfg import (
     SymmQuadrupedPhysicsCfg,
+    SymmQuadrupedRewardsCfg,
     configure_domain_randomization,
     configure_flat_scene,
+    configure_play_ground_reaction_force_sensors,
     configure_policy_observations,
     configure_rewards,
     configure_terminations,
@@ -55,6 +57,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
     """Flat Go2 velocity task used as the first Isaac Lab migration milestone."""
 
     sim: SimulationCfg = SimulationCfg(physics=PhysicsCfg())
+    rewards: SymmQuadrupedRewardsCfg = SymmQuadrupedRewardsCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -156,7 +159,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_go2_symm_observations(self) -> None:
-        """Configure the migrated 60D Go2 policy observation."""
+        """Configure the shared 72D Go2 policy observation."""
         configure_policy_observations(self, go2_symm_mdp, _GO2_LEGGED_GYM_JOINT_ORDER)
 
     def _configure_go2_symm_rewards(self) -> None:
@@ -169,6 +172,10 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_sensor_names=_GO2_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_GO2_FOOT_BODY_NAMES,
             base_height_range=(0.35, 0.45),
+            foot_clearance_height=0.08,
+            foot_clearance_height_scale=0.03,
+            foot_clearance_mode="tracking_reward",
+            foot_clearance_weight=0.15,
         )
 
     def _configure_go2_symm_terminations(self) -> None:
@@ -197,6 +204,7 @@ class UnitreeGo2SymmFlatEnvCfg_PLAY(UnitreeGo2SymmFlatEnvCfg):
         self.scene.num_envs = 1
         self.scene.env_spacing = 2.5
         self.sim.physics = make_play_physics_cfg()
+        configure_play_ground_reaction_force_sensors(self, _GO2_FOOT_SENSOR_NAMES)
         self.viewer.eye = (0.0, -4.0, 1.4)
         self.viewer.lookat = (0.3, 0.0, 0.35)
         self.viewer.origin_type = "asset_root"

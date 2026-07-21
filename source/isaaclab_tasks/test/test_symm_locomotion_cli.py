@@ -48,6 +48,18 @@ def test_train_dry_run_uses_selected_robot_task(capsys):
     assert " 1" in captured.out
 
 
+def test_train_defaults_apply_trs_to_in_place_commands():
+    symm_cli = _load_symm_cli()
+    parser = symm_cli.build_parser()
+    args = parser.parse_args(["train", "--robot", "go2", "--no-conda-run"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert args.tr_min_abs_cmd_vel == 0.0
+    assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+
+
 def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):
     symm_cli = _load_symm_cli()
     checkpoint = tmp_path / "model_9999.pt"
@@ -78,6 +90,43 @@ def test_record_video_length_override_is_preserved(monkeypatch, tmp_path):
 
     video_length_index = command.index("--video_length") + 1
     assert command[video_length_index] == "400"
+
+
+def test_gif_conversion_rejects_stale_play_video(monkeypatch, tmp_path, capsys):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    video_dir = tmp_path / "videos" / "play"
+    video_dir.mkdir(parents=True)
+    (video_dir / "rl-video-step-0.mp4").touch()
+    previous_videos = symm_cli.play_video_snapshot(tmp_path)
+    parser = symm_cli.build_parser()
+    args = parser.parse_args(["record", "--robot", "go2", "--gif", "--no-conda-run"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+    monkeypatch.setattr(symm_cli.subprocess, "run", lambda *args, **kwargs: None)
+
+    result = symm_cli.convert_latest_video(args, checkpoint, previous_videos)
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "No new or updated MP4" in captured.out
+
+
+def test_record_rejects_success_code_without_new_video(monkeypatch, tmp_path, capsys):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    video_dir = tmp_path / "videos" / "play"
+    video_dir.mkdir(parents=True)
+    (video_dir / "rl-video-step-0.mp4").touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    monkeypatch.setattr(symm_cli, "run_isaaclab", lambda args, lab_args: 0)
+
+    result = symm_cli.main(["record", "--robot", "go2", "--no-conda-run"])
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "recording finished without a new or updated MP4" in captured.err
 
 
 def test_play_and_record_enable_rollout_plots_by_default(monkeypatch, tmp_path):

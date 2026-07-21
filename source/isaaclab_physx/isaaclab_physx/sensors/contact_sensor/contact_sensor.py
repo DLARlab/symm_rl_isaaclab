@@ -331,12 +331,17 @@ class ContactSensor(BaseContactSensor):
             else:
                 body_paths_glob.append(body_path_glob)
         filter_prim_paths_glob = [expr.replace(".*", "*") for expr in self.cfg.filter_prim_paths_expr]
+        # PhysX's explicit-pattern overload expects one filter-pattern list per body pattern.
+        # All sensor bodies use the same configured filters, so replicate the list for each body.
+        contact_filter_patterns = (
+            [filter_prim_paths_glob.copy() for _ in body_paths_glob] if filter_prim_paths_glob else []
+        )
 
         # create a rigid prim view for the sensor
         self._body_physx_view = self._physics_sim_view.create_rigid_body_view(body_paths_glob)
         self._contact_view = self._physics_sim_view.create_rigid_contact_view(
             body_paths_glob,
-            filter_patterns=filter_prim_paths_glob,
+            filter_patterns=contact_filter_patterns,
             max_contact_data_count=self.cfg.max_contact_data_count_per_prim * len(body_names) * self._num_envs,
         )
         # resolve the true count of bodies

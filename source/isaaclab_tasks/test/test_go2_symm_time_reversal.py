@@ -14,16 +14,17 @@ from isaaclab_tasks.manager_based.locomotion.velocity.mdp import go2_symm
 
 
 def test_time_reverse_observations_is_involution_with_expected_parities():
-    obs = torch.randn(3, 60)
+    obs = torch.randn(3, 72)
 
     obs_tt = go2_symm.time_reverse_observations(go2_symm.time_reverse_observations(obs))
     assert torch.allclose(obs_tt, obs)
 
-    parity = torch.ones(60)
-    parity[3:6] = -1.0
-    parity[18:30] = -1.0
-    parity[42:46] = -1.0
-    parity[50:54] = -1.0
+    parity = torch.ones(72)
+    parity[0:6] = -1.0
+    parity[9:15] = -1.0
+    parity[27:39] = -1.0
+    parity[51:55] = -1.0
+    parity[59:63] = -1.0
 
     obs_tr = go2_symm.time_reverse_observations(obs)
     assert torch.allclose(obs_tr, obs * parity)
@@ -41,7 +42,7 @@ def test_time_reverse_actions_is_identity_involution():
 
 def test_compute_time_reversal_states_augments_observations_and_actions():
     batch_size = 4
-    obs = TensorDict({"policy": torch.randn(batch_size, 60)}, batch_size=[batch_size])
+    obs = TensorDict({"policy": torch.randn(batch_size, 72)}, batch_size=[batch_size])
     actions = torch.randn(batch_size, 12)
 
     obs_aug, actions_aug = go2_symm.compute_time_reversal_states(env=None, obs=obs, actions=actions)

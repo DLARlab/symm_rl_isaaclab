@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from dataclasses import MISSING
 from typing import TYPE_CHECKING
@@ -62,7 +63,9 @@ SYMM_QUADRUPED_LEG_PAIRS = (
     ("FL", "RR"),
     ("RL", "FR"),
 )
-"""Default leg pairs compared by the morphology symmetry reward."""
+"""Default leg pairs compared by the leg-permutation symmetry reward."""
+
+_MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = False
 
 
 @configclass
@@ -419,6 +422,46 @@ def phase_ratios(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return gait_command.phase_ratios()
 
 
+def desired_base_twist(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Expand the planar command into desired linear and angular velocities.
+
+    The output order is ``(v_x, v_y, v_z, omega_x, omega_y, omega_z)``. The
+    command generator only controls planar translation and yaw, so the other
+    desired axes are explicitly zero.
+    """
+    command = env.command_manager.get_command(command_name)
+    desired_twist = torch.zeros(command.shape[0], 6, device=command.device, dtype=command.dtype)
+    desired_twist[:, :2] = command[:, :2]
+    desired_twist[:, 5] = command[:, 2]
+    return desired_twist
+
+
+def sagittal_plane_state(
+    env: ManagerBasedRLEnv,
+    lateral_position_scale: float = 0.5,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Return observable cross-track and heading error for straight-line recovery.
+
+    The heading target is the environment's zero-yaw sagittal plane. Sine and
+    cosine encode the wrapped heading error without a discontinuity at pi.
+    """
+    if lateral_position_scale <= 0.0:
+        raise ValueError(f"Lateral-position scale must be positive, received {lateral_position_scale}.")
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    lateral_position = asset.data.root_pos_w.torch[:, 1] - env.scene.env_origins[:, 1]
+    heading_error = math_utils.wrap_to_pi(asset.data.heading_w.torch)
+    return torch.stack(
+        (
+            (lateral_position / lateral_position_scale).clamp(-1.0, 1.0),
+            torch.sin(heading_error),
+            torch.cos(heading_error),
+        ),
+        dim=-1,
+    )
+
+
 def alive_bonus(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Constant alive reward."""
     return torch.ones(env.num_envs, device=env.device)
@@ -439,6 +482,246 @@ def command_tracking_penalty(
     y_penalty = 1.0 - torch.exp(-10.0 * y_error)
     yaw_penalty = 1.0 - torch.exp(-5.0 * yaw_error)
     return -(x_penalty + y_penalty + yaw_penalty)
+
+
+def straight_line_motion_reward(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    forward_velocity_scale: float = 0.35,
+    lateral_position_scale: float = 0.5,
+    heading_scale: float = 0.5,
+    lateral_velocity_scale: float = 0.25,
+    yaw_rate_scale: float = 0.25,
+    pose_weight: float = 0.1,
+    roll_scale: float = 0.25,
+    pitch_scale: float = 0.5,
+    min_base_height: float = 0.35,
+    height_scale: float = 0.1,
+    support_loss_weight: float = 0.25,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    forward_weight: float = 1.0,
+    straight_weight: float = 0.3,
+    posture_weight: float = 0.15,
+    lateral_position_deadband: float = 0.05,
+    heading_deadband: float = 0.05,
+) -> torch.Tensor:
+    """Additively reward commanded x motion, straightness, and supported posture.
+
+    Forward tracking is an independent term, so poor posture or temporary
+    cross-track error cannot erase its learning signal. The observable lateral
+    position and heading-error terms make returning to the sagittal plane
+    preferable to walking straight along a displaced or rotated path.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the velocity command term.
+        forward_velocity_scale: Forward velocity-error scale [m/s].
+        lateral_position_scale: Cross-track error scale [m].
+        heading_scale: Heading-error scale [rad].
+        lateral_velocity_scale: Lateral velocity-error scale [m/s].
+        yaw_rate_scale: Yaw-rate error scale [rad/s].
+        pose_weight: Weight of lateral-position and heading recovery.
+        roll_scale: Straightness roll-error scale [rad].
+        pitch_scale: Posture pitch scale and support corridor half-width [rad].
+        min_base_height: Minimum supported base height [m].
+        height_scale: Base height-shortfall scale [m].
+        support_loss_weight: Weight of the bounded, forward-independent support loss.
+        asset_cfg: Robot articulation configuration.
+        forward_weight: Weight of forward command tracking.
+        straight_weight: Weight of lateral velocity, yaw rate, and roll control.
+        posture_weight: Weight of pitch and base-height posture.
+        lateral_position_deadband: Unpenalized cross-track corridor half-width [m].
+        heading_deadband: Unpenalized heading-error corridor half-width [rad].
+
+    Returns:
+        The bounded additive straight-line motion reward.
+    """
+    components = straight_line_motion_reward_components(
+        env,
+        command_name=command_name,
+        forward_velocity_scale=forward_velocity_scale,
+        lateral_position_scale=lateral_position_scale,
+        heading_scale=heading_scale,
+        lateral_velocity_scale=lateral_velocity_scale,
+        yaw_rate_scale=yaw_rate_scale,
+        roll_scale=roll_scale,
+        pitch_scale=pitch_scale,
+        min_base_height=min_base_height,
+        height_scale=height_scale,
+        asset_cfg=asset_cfg,
+        lateral_position_deadband=lateral_position_deadband,
+        heading_deadband=heading_deadband,
+    )
+    reward = forward_weight * components["forward_score"]
+    reward += straight_weight * components["straight_score"]
+    reward += pose_weight * components["pose_score"]
+    reward += posture_weight * components["posture_score"]
+    reward -= support_loss_weight * components["support_loss"]
+    env._straight_line_motion_diagnostics = {
+        name: value.detach() for name, value in (*components.items(), ("reward", reward))
+    }
+    return reward
+
+
+def straight_line_motion_reward_components(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    forward_velocity_scale: float = 0.35,
+    lateral_position_scale: float = 0.5,
+    heading_scale: float = 0.5,
+    lateral_velocity_scale: float = 0.25,
+    yaw_rate_scale: float = 0.25,
+    roll_scale: float = 0.25,
+    pitch_scale: float = 0.5,
+    min_base_height: float = 0.35,
+    height_scale: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    lateral_position_deadband: float = 0.05,
+    heading_deadband: float = 0.05,
+) -> dict[str, torch.Tensor]:
+    """Return the component tensors used by :func:`straight_line_motion_reward`.
+
+    This helper keeps training and diagnostic calculations identical. The
+    All returned values are bounded in ``[0, 1]``.
+    """
+    positive_scales = {
+        "forward_velocity_scale": forward_velocity_scale,
+        "lateral_position_scale": lateral_position_scale,
+        "heading_scale": heading_scale,
+        "lateral_velocity_scale": lateral_velocity_scale,
+        "yaw_rate_scale": yaw_rate_scale,
+        "roll_scale": roll_scale,
+        "pitch_scale": pitch_scale,
+        "height_scale": height_scale,
+    }
+    for name, value in positive_scales.items():
+        if value <= 0.0:
+            raise ValueError(f"{name} must be positive, received {value}.")
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    forward_velocity_error = asset.data.root_lin_vel_b.torch[:, 0] - command[:, 0]
+    forward_error = torch.square(forward_velocity_error / forward_velocity_scale)
+    forward_score = torch.exp(-forward_error)
+
+    roll, pitch, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+    lateral_velocity_error = asset.data.root_lin_vel_b.torch[:, 1] - command[:, 1]
+    yaw_rate_error = asset.data.root_ang_vel_b.torch[:, 2] - command[:, 2]
+    normalized_lateral_velocity = lateral_velocity_error / lateral_velocity_scale
+    normalized_yaw_rate = yaw_rate_error / yaw_rate_scale
+    normalized_roll = roll / roll_scale
+    lateral_velocity_score = torch.exp(-torch.square(normalized_lateral_velocity))
+    yaw_rate_score = torch.exp(-torch.square(normalized_yaw_rate))
+    roll_score = torch.exp(-torch.square(normalized_roll))
+    straight_error = torch.square(normalized_lateral_velocity)
+    straight_error += torch.square(normalized_yaw_rate)
+    straight_error += torch.square(normalized_roll)
+    straight_score = torch.reciprocal(1.0 + straight_error)
+
+    lateral_position = asset.data.root_pos_w.torch[:, 1] - env.scene.env_origins[:, 1]
+    lateral_position_excess = torch.relu(torch.abs(lateral_position) - lateral_position_deadband)
+    heading_error = math_utils.wrap_to_pi(asset.data.heading_w.torch)
+    heading_excess = torch.relu(torch.abs(heading_error) - heading_deadband)
+    lateral_position_score = torch.exp(-torch.square(lateral_position_excess / lateral_position_scale))
+    heading_score = torch.exp(-torch.square(heading_excess / heading_scale))
+    pose_score = 0.5 * (lateral_position_score + heading_score)
+
+    base_height = asset.data.root_pos_w.torch[:, 2] - env.scene.env_origins[:, 2]
+    height_shortfall = torch.relu(min_base_height - base_height)
+    posture_error = torch.square(pitch / pitch_scale)
+    posture_error += torch.square(height_shortfall / height_scale)
+    posture_score = torch.reciprocal(1.0 + posture_error)
+
+    normalized_pitch_excess = torch.relu(torch.abs(pitch) - pitch_scale) / pitch_scale
+    pitch_support_loss = -torch.expm1(-torch.square(normalized_pitch_excess))
+    normalized_height_shortfall = height_shortfall / height_scale
+    height_support_loss = -torch.expm1(-torch.square(normalized_height_shortfall))
+    support_loss = 0.5 * (pitch_support_loss + height_support_loss)
+
+    return {
+        "forward_score": forward_score,
+        "lateral_velocity_score": lateral_velocity_score,
+        "yaw_rate_score": yaw_rate_score,
+        "roll_score": roll_score,
+        "straight_score": straight_score,
+        "lateral_position_score": lateral_position_score,
+        "heading_score": heading_score,
+        "pose_score": pose_score,
+        "posture_score": posture_score,
+        "support_loss": support_loss,
+    }
+
+
+def sagittal_plane_penalty(
+    env: ManagerBasedRLEnv,
+    lateral_position_tolerance: float,
+    heading_tolerance: float,
+    lateral_velocity_tolerance: float,
+    roll_tolerance: float,
+    roll_rate_tolerance: float,
+    yaw_rate_tolerance: float,
+    secondary_weight: float = 0.25,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    pose_weight: float = 0.1,
+    min_base_height: float = 0.25,
+    height_tolerance: float = 0.1,
+    low_height_weight: float = 1.0,
+) -> torch.Tensor:
+    """Penalize low posture and motion outside a sagittal-plane corridor.
+
+    The sagittal plane is defined by each environment origin's world x-z plane and
+    a zero world heading. Forward/backward translation and pitch motion are not
+    penalized. Each tolerance defines a zero-penalty corridor so normal gait sway
+    is not discouraged. Absolute position and heading errors are weighted
+    separately from motion errors because they are not policy observations.
+
+    Args:
+        env: The environment instance.
+        lateral_position_tolerance: Lateral position normalization tolerance [m].
+        heading_tolerance: Heading normalization tolerance [rad].
+        lateral_velocity_tolerance: Lateral velocity normalization tolerance [m/s].
+        roll_tolerance: Roll normalization tolerance [rad].
+        roll_rate_tolerance: Roll-rate normalization tolerance [rad/s].
+        yaw_rate_tolerance: Yaw-rate normalization tolerance [rad/s].
+        secondary_weight: Weight applied to velocity, roll, and angular-rate errors.
+        asset_cfg: Robot articulation configuration.
+        pose_weight: Weight applied to absolute lateral-position and heading errors.
+        min_base_height: Minimum base height before applying a low-posture penalty [m].
+        height_tolerance: Low-height normalization tolerance [m].
+        low_height_weight: Weight applied to the low-posture penalty.
+
+    Returns:
+        The negative bounded sagittal-plane and low-posture penalty.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    lateral_position_error = asset.data.root_pos_w.torch[:, 1] - env.scene.env_origins[:, 1]
+    roll, _, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+    heading_error = math_utils.wrap_to_pi(asset.data.heading_w.torch)
+    lateral_velocity = asset.data.root_lin_vel_b.torch[:, 1]
+    roll_rate = asset.data.root_ang_vel_b.torch[:, 0]
+    yaw_rate = asset.data.root_ang_vel_b.torch[:, 2]
+
+    normalized_errors = torch.stack(
+        (
+            lateral_position_error / lateral_position_tolerance,
+            heading_error / heading_tolerance,
+            lateral_velocity / lateral_velocity_tolerance,
+            roll / roll_tolerance,
+            roll_rate / roll_rate_tolerance,
+            yaw_rate / yaw_rate_tolerance,
+        ),
+        dim=-1,
+    )
+    normalized_excess = torch.relu(torch.abs(normalized_errors) - 1.0)
+    bounded_penalties = -torch.expm1(-torch.square(normalized_excess))
+    pose_penalty = bounded_penalties[:, :2].mean(dim=-1)
+    motion_penalty = bounded_penalties[:, 2:].mean(dim=-1)
+
+    base_height = asset.data.root_pos_w.torch[:, 2] - env.scene.env_origins[:, 2]
+    normalized_height_shortfall = torch.relu((min_base_height - base_height) / height_tolerance)
+    low_height_penalty = -torch.expm1(-torch.square(normalized_height_shortfall))
+    return -(pose_weight * pose_penalty + secondary_weight * motion_penalty + low_height_weight * low_height_penalty)
 
 
 def base_height_range_penalty(
@@ -508,24 +791,215 @@ def foot_clearance_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     feet_cfg: SceneEntityCfg,
+    min_height: float = 0.08,
+    height_scale: float = 0.05,
+    min_command_speed: float = 0.2,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize feet below a ground-relative swing-height trajectory.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        feet_cfg: Foot body configuration in FL, FR, RL, and RR order.
+        min_height: Peak commanded foot-link height above flat ground [m].
+        height_scale: Clearance-shortfall shaping scale [m].
+        min_command_speed: Forward command magnitude that fully enables the penalty [m/s].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        The negative bounded swing-clearance penalty.
+    """
+    if min_height < 0.0:
+        raise ValueError(f"Foot-clearance peak height must be non-negative, received {min_height}.")
+    if height_scale <= 0.0:
+        raise ValueError(f"Foot-clearance height scale must be positive, received {height_scale}.")
+    if min_command_speed <= 0.0:
+        raise ValueError(f"Foot-clearance command scale must be positive, received {min_command_speed}.")
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+
+    foot_height = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2] - env.scene.env_origins[:, 2:3]
+    swing_ratio = (1.0 - gait_command.duty_factors).unsqueeze(-1).clamp_min(1.0e-6)
+    swing_subphase = (gait_command.foot_phases() / swing_ratio).clamp(0.0, 1.0)
+    target_height = min_height * torch.sin(torch.pi * swing_subphase)
+    swing_weight = _smooth_swing_indicator(gait_command.foot_phases(), gait_command.duty_factors, gait_command.kappa)
+    shortfall = torch.relu(target_height - foot_height)
+    clearance_penalty = -torch.expm1(-shortfall / height_scale)
+
+    command = env.command_manager.get_command(command_name)
+    command_gate = (torch.abs(command[:, 0]) / min_command_speed).clamp(0.0, 1.0).unsqueeze(-1)
+    active_weight = swing_weight * command_gate
+    weighted_penalty = clearance_penalty * active_weight
+    penalty = -torch.sum(weighted_penalty, dim=-1)
+
+    active_weight_sum = active_weight.sum(dim=-1).clamp_min(1.0e-6)
+    env._foot_clearance_diagnostics = {
+        "foot_height": foot_height.detach(),
+        "target_height": target_height.detach(),
+        "shortfall": shortfall.detach(),
+        "swing_weight": active_weight.detach(),
+        "mean_swing_height": ((foot_height * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "mean_target_height": ((target_height * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "mean_shortfall": ((shortfall * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "penalty": penalty.detach(),
+    }
+    return penalty
+
+
+def foot_clearance_current_speed_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    feet_cfg: SceneEntityCfg,
     min_height: float = 0.04,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalty for insufficient foot clearance during commanded swing phases."""
+    """Penalize low swing feet only after the robot starts tracking its forward command.
+
+    This retains the conservative clearance shaping used by the stable X1 training setup while making foot height
+    ground-relative.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        feet_cfg: Foot body configuration in FL, FR, RL, and RR order.
+        min_height: Minimum swing foot-link height above flat ground [m].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        The negative swing-clearance penalty.
+    """
+    if min_height < 0.0:
+        raise ValueError(f"Foot-clearance minimum height must be non-negative, received {min_height}.")
+
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
-    foot_z = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2]
+    foot_height = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2] - env.scene.env_origins[:, 2:3]
     swing_ratio = (1.0 - gait_command.duty_factors).unsqueeze(-1).clamp_min(1.0e-6)
     swing_subphase = (gait_command.foot_phases() / swing_ratio).clamp(0.0, 1.0)
     mid_swing_weight = 0.5 + 0.5 * torch.sin(torch.pi * swing_subphase)
-    shortfall = torch.relu(min_height - foot_z)
+    shortfall = torch.relu(min_height - foot_height)
     clearance_penalty = 1.0 - torch.exp(-20.0 * shortfall * mid_swing_weight)
 
     command = env.command_manager.get_command(command_name)
     current_x_speed = torch.abs(asset.data.root_lin_vel_b.torch[:, 0])
     desired_x_speed = torch.abs(command[:, 0]).clamp_min(1.0e-3)
-    velocity_coeff = torch.sigmoid(5.0 * (current_x_speed / (desired_x_speed * 0.5) - 1.0)).clamp(0.0, 1.0)
-    return torch.sum(clearance_penalty * gait_command.periodic_force_weights(), dim=-1) * velocity_coeff
+    velocity_gate = torch.sigmoid(5.0 * (current_x_speed / (desired_x_speed * 0.5) - 1.0)).clamp(0.0, 1.0)
+    swing_weight = -gait_command.periodic_force_weights()
+    active_weight = swing_weight * velocity_gate.unsqueeze(-1)
+    penalty = -torch.sum(clearance_penalty * active_weight, dim=-1)
+
+    active_weight_sum = active_weight.sum(dim=-1).clamp_min(1.0e-6)
+    target_height = torch.full_like(foot_height, min_height)
+    env._foot_clearance_diagnostics = {
+        "foot_height": foot_height.detach(),
+        "target_height": target_height.detach(),
+        "shortfall": shortfall.detach(),
+        "swing_weight": active_weight.detach(),
+        "mean_swing_height": ((foot_height * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "mean_target_height": ((target_height * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "mean_shortfall": ((shortfall * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "penalty": penalty.detach(),
+    }
+    return penalty
+
+
+def foot_clearance_tracking_reward(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    feet_cfg: SceneEntityCfg,
+    foot_sensor_names: Sequence[str],
+    foot_sensor_body_names: Sequence[str] | None = None,
+    target_height: float = 0.10,
+    height_scale: float = 0.03,
+    excess_height_margin: float = 0.03,
+    excess_height_scale: float = 0.03,
+    min_command_speed: float = 0.20,
+    force_scale: float = 0.05,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward every commanded swing foot for bounded height and no contact.
+
+    A weighted harmonic mean aggregates the per-foot scores, preventing three
+    well-behaved legs from hiding one dragging or overlifting leg.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        feet_cfg: Foot body configuration in FL, FR, RL, and RR order.
+        foot_sensor_names: Single-body foot contact sensor names in the same order as :paramref:`feet_cfg`.
+        foot_sensor_body_names: Expected body name for each contact sensor.
+        target_height: Peak commanded foot-link height above flat ground [m].
+        height_scale: Clearance-shortfall shaping scale [m].
+        excess_height_margin: Allowed height above the swing target [m].
+        excess_height_scale: Overlift shaping scale [m].
+        min_command_speed: Forward command magnitude that fully enables the reward [m/s].
+        force_scale: Contact-force shaping scale [1/N].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        The bounded swing-clearance and no-contact reward.
+    """
+    if target_height < 0.0:
+        raise ValueError(f"Foot-clearance target height must be non-negative, received {target_height}.")
+    if height_scale <= 0.0:
+        raise ValueError(f"Foot-clearance height scale must be positive, received {height_scale}.")
+    if excess_height_margin < 0.0:
+        raise ValueError(f"Foot-clearance excess margin must be non-negative, received {excess_height_margin}.")
+    if excess_height_scale <= 0.0:
+        raise ValueError(f"Foot-clearance excess scale must be positive, received {excess_height_scale}.")
+    if min_command_speed <= 0.0:
+        raise ValueError(f"Foot-clearance command scale must be positive, received {min_command_speed}.")
+    if force_scale <= 0.0:
+        raise ValueError(f"Foot-contact force scale must be positive, received {force_scale}.")
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    foot_height = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2] - env.scene.env_origins[:, 2:3]
+    swing_ratio = (1.0 - gait_command.duty_factors).unsqueeze(-1).clamp_min(1.0e-6)
+    swing_subphase = (gait_command.foot_phases() / swing_ratio).clamp(0.0, 1.0)
+    target_height_profile = target_height * torch.sin(torch.pi * swing_subphase)
+    shortfall = torch.relu(target_height_profile - foot_height)
+    clearance_score = torch.exp(-shortfall / height_scale)
+    excess_height = torch.relu(foot_height - target_height_profile - excess_height_margin)
+    excess_height_score = torch.exp(-excess_height / excess_height_scale)
+    contact_forces = _collect_single_body_contact_force_norms(
+        env,
+        foot_sensor_names,
+        foot_sensor_body_names,
+    )
+    no_contact_score = torch.exp(-force_scale * contact_forces)
+
+    swing_weight = _smooth_swing_indicator(gait_command.foot_phases(), gait_command.duty_factors, gait_command.kappa)
+    command = env.command_manager.get_command(command_name)
+    command_gate = (torch.abs(command[:, 0]) / min_command_speed).clamp(0.0, 1.0).unsqueeze(-1)
+    active_weight = swing_weight * command_gate
+    active_weight_sum = active_weight.sum(dim=-1)
+    per_foot_score = clearance_score * excess_height_score * no_contact_score
+    harmonic_denominator = torch.sum(active_weight / per_foot_score.clamp_min(1.0e-6), dim=-1)
+    reward = torch.where(
+        active_weight_sum > 1.0e-6,
+        active_weight_sum / harmonic_denominator.clamp_min(1.0e-6),
+        torch.zeros_like(active_weight_sum),
+    )
+    safe_active_weight_sum = active_weight_sum.clamp_min(1.0e-6)
+
+    env._foot_clearance_diagnostics = {
+        "foot_height": foot_height.detach(),
+        "target_height": target_height_profile.detach(),
+        "shortfall": shortfall.detach(),
+        "excess_height": excess_height.detach(),
+        "per_foot_score": per_foot_score.detach(),
+        "swing_weight": active_weight.detach(),
+        "contact_force": contact_forces.detach(),
+        "mean_swing_height": ((foot_height * active_weight).sum(dim=-1) / safe_active_weight_sum).detach(),
+        "mean_target_height": ((target_height_profile * active_weight).sum(dim=-1) / safe_active_weight_sum).detach(),
+        "mean_shortfall": ((shortfall * active_weight).sum(dim=-1) / safe_active_weight_sum).detach(),
+        "penalty": (-reward).detach(),
+        "reward": reward.detach(),
+    }
+    return reward
 
 
 def hip_action_penalty(
@@ -539,6 +1013,33 @@ def hip_action_penalty(
     weights = torch.softmax(hip_abs / tau, dim=-1)
     hip_action_magnitude = torch.sum(weights * hip_abs, dim=-1)
     return -(1.0 - torch.exp(-0.5 * hip_action_magnitude))
+
+
+def joint_position_target_limit_penalty(
+    env: ManagerBasedRLEnv,
+    action_term_name: str = "joint_pos",
+    margin_fraction: float = 0.05,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize processed joint targets inside a margin near the soft limits.
+
+    Targets are already clamped for simulator safety. This term supplies the
+    missing policy-learning signal that makes repeatedly requesting those
+    clamps costly.
+    """
+    if not 0.0 < margin_fraction < 0.5:
+        raise ValueError(f"Joint-limit margin fraction must be in (0, 0.5), received {margin_fraction}.")
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    action_term = env.action_manager.get_term(action_term_name)
+    soft_limits = asset.data.soft_joint_pos_limits.torch[:, action_term._joint_ids]
+    lower_limits = soft_limits[..., 0]
+    upper_limits = soft_limits[..., 1]
+    limit_range = (upper_limits - lower_limits).clamp_min(torch.finfo(soft_limits.dtype).eps)
+    normalized_target = (2.0 * (action_term.processed_actions - lower_limits) / limit_range - 1.0).abs()
+    margin_start = 1.0 - 2.0 * margin_fraction
+    normalized_margin_excess = ((normalized_target - margin_start) / (1.0 - margin_start)).clamp(0.0, 1.0)
+    return -torch.square(normalized_margin_excess).mean(dim=-1)
 
 
 def _base_stability_gate(
@@ -582,7 +1083,7 @@ def action_rate_exp_penalty(
     return -penalty
 
 
-def morphological_symmetry_penalty(
+def leg_permutation_symmetry_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     joint_cfg: SceneEntityCfg,
@@ -593,7 +1094,7 @@ def morphological_symmetry_penalty(
     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
 ) -> torch.Tensor:
-    """Penalty for phase-weighted quadruped joint morphology symmetry.
+    """Penalize phase-aligned joint differences under leg permutations.
 
     Args:
         env: The environment instance.
@@ -607,7 +1108,7 @@ def morphological_symmetry_penalty(
         leg_pairs: Logical leg pairs to compare.
 
     Returns:
-        The negative morphology symmetry penalty.
+        The negative leg-permutation symmetry penalty.
     """
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
@@ -619,7 +1120,7 @@ def morphological_symmetry_penalty(
     joint_pos = joint_pos.reshape(joint_pos.shape[0], -1)
     joint_range = torch.tensor(joint_ranges, dtype=torch.float32, device=env.device)
 
-    def morph_sym_error(tag_a: str, tag_b: str) -> torch.Tensor:
+    def leg_permutation_error(tag_a: str, tag_b: str) -> torch.Tensor:
         sign = torch.tensor([-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0], device=env.device)
         phase_a = gait_command.foot_thetas[:, leg_phase_index[tag_a]]
         phase_b = gait_command.foot_thetas[:, leg_phase_index[tag_b]]
@@ -634,8 +1135,56 @@ def morphological_symmetry_penalty(
 
     error_sum = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
     for tag_a, tag_b in leg_pairs:
-        error_sum += morph_sym_error(tag_a, tag_b)
+        error_sum += leg_permutation_error(tag_a, tag_b)
     return -(1.0 - torch.exp(-5.0 * error_sum / max(len(leg_pairs), 1)))
+
+
+def morphological_symmetry_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    joint_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    leg_joint_ids: dict[str, Sequence[int]] | None = None,
+    leg_phase_index: dict[str, int] | None = None,
+    logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
+    joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
+    leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
+) -> torch.Tensor:
+    """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait command term.
+        joint_cfg: Robot joints in FL, FR, RL, RR order.
+        asset_cfg: Robot articulation.
+        leg_joint_ids: Mapping from logical leg tag to joint indices within :paramref:`joint_cfg`.
+        leg_phase_index: Mapping from logical leg tag to gait phase column.
+        logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
+        joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
+        leg_pairs: Logical leg pairs to compare.
+
+    Returns:
+        The negative leg-permutation symmetry penalty.
+    """
+    global _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED
+    if not _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED:
+        warnings.warn(
+            "morphological_symmetry_penalty() is deprecated; use leg_permutation_symmetry_penalty().",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = True
+    return leg_permutation_symmetry_penalty(
+        env,
+        command_name=command_name,
+        joint_cfg=joint_cfg,
+        asset_cfg=asset_cfg,
+        leg_joint_ids=leg_joint_ids,
+        leg_phase_index=leg_phase_index,
+        logical_joint_signs=logical_joint_signs,
+        joint_ranges=joint_ranges,
+        leg_pairs=leg_pairs,
+    )
 
 
 class SmoothnessPenalty(ManagerTermBase):
@@ -698,6 +1247,33 @@ def base_roll_pitch_out_of_range(
     return torch.logical_or(torch.abs(roll) > max_roll, torch.abs(pitch) > max_pitch)
 
 
+def body_local_point_height_below(
+    env: ManagerBasedRLEnv,
+    point_b: tuple[float, float, float],
+    min_height: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Terminate when a body-frame point falls below a ground-relative height.
+
+    Args:
+        env: The environment instance.
+        point_b: Point position in the articulation root frame [m].
+        min_height: Minimum point height above the environment origin [m].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        A mask identifying environments whose point is below :paramref:`min_height`.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    root_position = asset.data.root_pos_w.torch
+    point_position_b = torch.tensor(point_b, device=root_position.device, dtype=root_position.dtype).expand_as(
+        root_position
+    )
+    point_position_w = root_position + math_utils.quat_apply(asset.data.root_quat_w.torch, point_position_b)
+    point_height = point_position_w[:, 2] - env.scene.env_origins[:, 2]
+    return point_height < min_height
+
+
 def body_height_below(
     env: ManagerBasedRLEnv,
     min_height: float,
@@ -741,7 +1317,7 @@ def compute_time_reversal_states(
     obs: TensorDict | None = None,
     actions: torch.Tensor | None = None,
 ):
-    """Augment states using the shared 60D quadruped time-reversal transform."""
+    """Augment states using the shared 72D quadruped time-reversal transform."""
     if obs is not None:
         batch_size = obs.batch_size[0]
         obs_aug = obs.repeat(2)
@@ -763,17 +1339,23 @@ def compute_time_reversal_states(
 
 
 def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
-    """Time-reverse the shared 60D symmetric quadruped policy observation."""
+    """Time-reverse the shared 72D symmetric quadruped policy observation."""
+    if obs.shape[-1] != 72:
+        raise ValueError(f"Expected a 72D symmetric quadruped policy observation, got shape {tuple(obs.shape)}.")
+
     obs_tr = obs.clone()
-    obs_tr[:, 3:6] = -obs[:, 3:6]
-    obs_tr[:, 6:18] = obs[:, 6:18]
-    obs_tr[:, 18:30] = -obs[:, 18:30]
-    obs_tr[:, 30:42] = obs[:, 30:42]
-    obs_tr[:, 42:46] = -obs[:, 42:46]
-    obs_tr[:, 46:50] = obs[:, 46:50]
-    obs_tr[:, 50:54] = -obs[:, 50:54]
-    obs_tr[:, 54:58] = obs[:, 54:58]
-    obs_tr[:, 58:60] = obs[:, 58:60]
+    obs_tr[:, 0:6] = -obs[:, 0:6]
+    obs_tr[:, 6:9] = obs[:, 6:9]
+    obs_tr[:, 9:15] = -obs[:, 9:15]
+    obs_tr[:, 15:27] = obs[:, 15:27]
+    obs_tr[:, 27:39] = -obs[:, 27:39]
+    obs_tr[:, 39:51] = obs[:, 39:51]
+    obs_tr[:, 51:55] = -obs[:, 51:55]
+    obs_tr[:, 55:59] = obs[:, 55:59]
+    obs_tr[:, 59:63] = -obs[:, 59:63]
+    obs_tr[:, 63:67] = obs[:, 63:67]
+    obs_tr[:, 67:69] = obs[:, 67:69]
+    obs_tr[:, 69:72] = obs[:, 69:72]
     return obs_tr
 
 

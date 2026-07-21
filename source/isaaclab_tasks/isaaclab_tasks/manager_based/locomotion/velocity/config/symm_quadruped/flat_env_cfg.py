@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
@@ -23,6 +24,7 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
+from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import RewardsCfg
 from isaaclab_tasks.utils import PresetCfg
 
 SYMM_QUADRUPED_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
@@ -34,6 +36,40 @@ SYMM_QUADRUPED_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
     sub_terrains={"flat": terrain_gen.MeshPlaneTerrainCfg(proportion=1.0)},
 )
 """Shared flat terrain generator used by symmetric quadruped tasks."""
+
+SYMM_QUADRUPED_GROUND_COLLISION_PATH = "/World/ground/terrain/mesh"
+"""Collision-mesh path used to filter playback ground-reaction forces."""
+
+
+def _warn_morphological_symmetry_deprecation() -> None:
+    """Warn when the deprecated reward configuration name is used."""
+    warnings.warn(
+        "The 'morphological_symmetry' reward is deprecated; use 'leg_permutation_symmetry'.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+@configclass
+class SymmQuadrupedRewardsCfg(RewardsCfg):
+    """Reward configuration with a deprecated leg-symmetry name alias."""
+
+    leg_permutation_symmetry: RewTerm | None = None
+    """Phase-weighted joint symmetry under configured leg permutations."""
+
+    def __getattr__(self, name: str):
+        """Resolve the deprecated reward name without exposing it as a config field."""
+        if name == "morphological_symmetry":
+            _warn_morphological_symmetry_deprecation()
+            return self.leg_permutation_symmetry
+        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+
+    def __setattr__(self, name: str, value) -> None:
+        """Redirect assignments through the deprecated reward name."""
+        if name == "morphological_symmetry":
+            _warn_morphological_symmetry_deprecation()
+            name = "leg_permutation_symmetry"
+        super().__setattr__(name, value)
 
 
 @configclass
@@ -62,6 +98,7 @@ class SymmQuadrupedPhysicsCfg(PresetCfg):
 
 def configure_flat_scene(env_cfg) -> None:
     """Apply the shared flat terrain and lighting setup."""
+    env_cfg.scene.num_envs = 256
     env_cfg.scene.terrain.terrain_type = "generator"
     env_cfg.scene.terrain.terrain_generator = SYMM_QUADRUPED_FLAT_TERRAIN_CFG
     env_cfg.scene.terrain.max_init_terrain_level = 0
@@ -74,8 +111,16 @@ def make_single_body_contact_sensor(prim_path: str) -> ContactSensorCfg:
     return ContactSensorCfg(
         prim_path=prim_path,
         history_length=3,
-        track_air_time=True,
+        track_air_time=False,
     )
+
+
+def configure_play_ground_reaction_force_sensors(env_cfg, sensor_names: Sequence[str]) -> None:
+    """Enable ground-filtered normal and friction forces on playback foot sensors."""
+    for sensor_name in sensor_names:
+        sensor_cfg = getattr(env_cfg.scene, sensor_name)
+        sensor_cfg.filter_prim_paths_expr = [SYMM_QUADRUPED_GROUND_COLLISION_PATH]
+        sensor_cfg.track_friction_forces = True
 
 
 def make_gait_velocity_command(
@@ -90,7 +135,7 @@ def make_gait_velocity_command(
         heading_command=False,
         heading_control_stiffness=0.5,
         rel_standing_envs=0.0,
-        rel_heading_envs=1.0,
+        rel_heading_envs=0.0,
         min_xy_command_norm=0.2,
         resample_once_after_reset=True,
         resample_gait_once_after_reset=True,
@@ -109,20 +154,28 @@ def make_gait_velocity_command(
 
 
 def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str]) -> None:
-    """Configure the shared 60D symmetric quadruped policy observation."""
+    """Configure the shared 72D symmetric quadruped policy observation."""
     policy = env_cfg.observations.policy
     ordered_joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
 
-    policy.base_lin_vel = None
-    policy.base_ang_vel = None
+    policy.base_lin_vel = ObsTerm(
+        func=base_mdp.base_lin_vel,
+        noise=Unoise(n_min=-0.1, n_max=0.1),
+        scale=(2.0, 2.0, 2.0),
+    )
+    policy.base_ang_vel = ObsTerm(
+        func=base_mdp.base_ang_vel,
+        noise=Unoise(n_min=-0.2, n_max=0.2),
+        scale=(0.25, 0.25, 0.25),
+    )
     policy.projected_gravity = ObsTerm(
         func=base_mdp.projected_gravity,
         noise=Unoise(n_min=-0.05, n_max=0.05),
     )
     policy.velocity_commands = ObsTerm(
-        func=base_mdp.generated_commands,
+        func=mdp_module.desired_base_twist,
         params={"command_name": "base_velocity"},
-        scale=(2.0, 2.0, 0.25),
+        scale=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
     )
     policy.joint_pos = ObsTerm(
         func=base_mdp.joint_pos_rel,
@@ -142,6 +195,10 @@ def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str
     policy.foot_theta_sin = ObsTerm(func=mdp_module.foot_theta_sin, params={"command_name": "base_velocity"})
     policy.foot_theta_cos = ObsTerm(func=mdp_module.foot_theta_cos, params={"command_name": "base_velocity"})
     policy.phase_ratios = ObsTerm(func=mdp_module.phase_ratios, params={"command_name": "base_velocity"})
+    policy.sagittal_plane_state = ObsTerm(
+        func=mdp_module.sagittal_plane_state,
+        params={"lateral_position_scale": 0.5},
+    )
 
 
 def configure_rewards(
@@ -153,6 +210,11 @@ def configure_rewards(
     foot_sensor_names: Sequence[str],
     foot_sensor_body_names: Sequence[str],
     base_height_range: tuple[float, float],
+    foot_clearance_height: float = 0.08,
+    foot_clearance_height_scale: float = 0.05,
+    foot_clearance_mode: str = "phase_penalty",
+    foot_clearance_weight: float = 0.10,
+    pitch_scale: float = 0.50,
 ) -> None:
     """Configure the shared symmetric quadruped reward layout."""
     env_cfg.rewards.track_lin_vel_xy_exp = None
@@ -172,12 +234,9 @@ def configure_rewards(
 
     feet_cfg = SceneEntityCfg("robot", body_names=list(foot_body_names), preserve_order=True)
     joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
-    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=1.0)
-    env_cfg.rewards.cmd = RewTerm(
-        func=mdp_module.command_tracking_penalty,
-        weight=0.40,
-        params={"command_name": "base_velocity"},
-    )
+    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=0.20)
+    env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=-200.0)
+    env_cfg.rewards.cmd = None
     env_cfg.rewards.foot_periodicity = RewTerm(
         func=mdp_module.foot_periodicity_penalty,
         weight=0.30,
@@ -186,6 +245,7 @@ def configure_rewards(
             "feet_cfg": feet_cfg,
             "foot_sensor_names": tuple(foot_sensor_names),
             "foot_sensor_body_names": tuple(foot_sensor_body_names),
+            "force_scale": 0.005,
         },
     )
     env_cfg.rewards.base_height = RewTerm(
@@ -193,14 +253,74 @@ def configure_rewards(
         weight=0.30,
         params={"height_range": base_height_range},
     )
+    if foot_clearance_mode == "phase_penalty":
+        foot_clearance_func = mdp_module.foot_clearance_penalty
+        foot_clearance_params = {
+            "command_name": "base_velocity",
+            "feet_cfg": feet_cfg,
+            "min_height": foot_clearance_height,
+            "height_scale": foot_clearance_height_scale,
+            "min_command_speed": 0.20,
+        }
+    elif foot_clearance_mode == "current_speed_penalty":
+        foot_clearance_func = mdp_module.foot_clearance_current_speed_penalty
+        foot_clearance_params = {
+            "command_name": "base_velocity",
+            "feet_cfg": feet_cfg,
+            "min_height": foot_clearance_height,
+        }
+    elif foot_clearance_mode == "tracking_reward":
+        foot_clearance_func = mdp_module.foot_clearance_tracking_reward
+        foot_clearance_params = {
+            "command_name": "base_velocity",
+            "feet_cfg": feet_cfg,
+            "foot_sensor_names": tuple(foot_sensor_names),
+            "foot_sensor_body_names": tuple(foot_sensor_body_names),
+            "target_height": foot_clearance_height,
+            "height_scale": foot_clearance_height_scale,
+            "excess_height_margin": 0.03,
+            "excess_height_scale": foot_clearance_height_scale,
+            "min_command_speed": 0.20,
+        }
+    else:
+        raise ValueError(f"Unsupported foot-clearance mode: {foot_clearance_mode!r}.")
     env_cfg.rewards.foot_clearance = RewTerm(
-        func=mdp_module.foot_clearance_penalty,
-        weight=0.10,
-        params={"command_name": "base_velocity", "feet_cfg": feet_cfg},
+        func=foot_clearance_func,
+        weight=foot_clearance_weight,
+        params=foot_clearance_params,
     )
     env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.15)
-    env_cfg.rewards.morphological_symmetry = RewTerm(
-        func=mdp_module.morphological_symmetry_penalty,
+    env_cfg.rewards.joint_target_limits = RewTerm(
+        func=mdp_module.joint_position_target_limit_penalty,
+        weight=0.05,
+        params={"action_term_name": "joint_pos", "margin_fraction": 0.05},
+    )
+    env_cfg.rewards.sagittal_plane = None
+    env_cfg.rewards.straight_line_motion = RewTerm(
+        func=mdp_module.straight_line_motion_reward,
+        weight=1.0,
+        params={
+            "command_name": "base_velocity",
+            "forward_velocity_scale": 0.35,
+            "lateral_position_scale": 0.35,
+            "heading_scale": 0.35,
+            "lateral_velocity_scale": 0.20,
+            "yaw_rate_scale": 0.20,
+            "pose_weight": 0.30,
+            "roll_scale": 0.25,
+            "pitch_scale": pitch_scale,
+            "min_base_height": base_height_range[0],
+            "height_scale": 0.10,
+            "support_loss_weight": 0.25,
+            "forward_weight": 1.0,
+            "straight_weight": 0.30,
+            "posture_weight": 0.15,
+            "lateral_position_deadband": 0.05,
+            "heading_deadband": 0.05,
+        },
+    )
+    env_cfg.rewards.leg_permutation_symmetry = RewTerm(
+        func=mdp_module.leg_permutation_symmetry_penalty,
         weight=0.30,
         params={"command_name": "base_velocity", "joint_cfg": joint_cfg},
     )
@@ -215,6 +335,9 @@ def configure_terminations(
     base_height_range: tuple[float, float],
     calf_body_names: Sequence[str],
     additional_contact_terms: dict[str, Sequence[str]] | None = None,
+    additional_body_point_terms: dict[str, tuple[tuple[float, float, float], float]] | None = None,
+    max_roll: float = 0.8,
+    max_pitch: float = 1.2,
 ) -> None:
     """Configure the shared symmetric quadruped termination layout."""
     env_cfg.terminations.base_contact = DoneTerm(
@@ -227,7 +350,7 @@ def configure_terminations(
     )
     env_cfg.terminations.base_orientation = DoneTerm(
         func=mdp_module.base_roll_pitch_out_of_range,
-        params={"max_roll": 0.8, "max_pitch": 1.0},
+        params={"max_roll": max_roll, "max_pitch": max_pitch},
     )
     for term_name, sensor_names in (additional_contact_terms or {}).items():
         setattr(
@@ -236,6 +359,15 @@ def configure_terminations(
             DoneTerm(
                 func=mdp_module.illegal_contact_any_sensor,
                 params={"sensor_names": tuple(sensor_names), "threshold": 1.0},
+            ),
+        )
+    for term_name, (point_b, min_height) in (additional_body_point_terms or {}).items():
+        setattr(
+            env_cfg.terminations,
+            term_name,
+            DoneTerm(
+                func=mdp_module.body_local_point_height_below,
+                params={"point_b": point_b, "min_height": min_height},
             ),
         )
     env_cfg.terminations.calf_height = DoneTerm(

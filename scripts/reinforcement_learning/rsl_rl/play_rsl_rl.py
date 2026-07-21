@@ -336,7 +336,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                         policy_nn.reset(dones)
 
                 if rollout_plotter is not None:
-                    rollout_plotter.record()
+                    # In RSL-RL inference, the policy output is the deterministic actor mean.
+                    rollout_plotter.record(actions=actions, actor_means=actions, dones=dones)
 
                 timestep += 1
                 if args_cli.print_gait_info and timestep % gait_info_interval == 0:
