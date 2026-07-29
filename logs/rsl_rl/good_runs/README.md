@@ -11,6 +11,15 @@ changes, leg-usage measurements, and safe restoration procedures, is:
 
 - [60D to 72D milestone](MILESTONE_60D_TO_72D.md)
 
+The TensorBoard comparison restricted to runs physically archived in this
+directory, including resolved training parameters and reward-by-iteration
+analysis for each robot, is:
+
+- [Curated TensorBoard reward report](CURATED_TENSORBOARD_REWARD.md)
+- [Go2 curated reward plot](curated_tensorboard/reward_vs_iterations_go2.svg)
+- [X1 curated reward plot](curated_tensorboard/reward_vs_iterations_x1.svg)
+- [Curated reward summary data](curated_tensorboard/training_reward_summary.csv)
+
 The focused comparison of the newest no-TRS and mirror/value `0.30 / 0.15`
 policies is:
 
