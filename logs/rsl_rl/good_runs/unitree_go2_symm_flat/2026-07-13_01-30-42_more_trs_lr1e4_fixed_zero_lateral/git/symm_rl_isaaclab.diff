@@ -1,0 +1,786 @@
+--- git commit ---
+6932e59290ec55e9f62f3bd5da87736de8916a32
+
+
+--- git status ---
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   README.md
+	modified:   scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+	modified:   scripts/symm_locomotion/README.md
+	modified:   scripts/symm_locomotion/symm_cli.py
+	modified:   source/isaaclab/isaaclab/envs/direct_marl_env.py
+	modified:   source/isaaclab/isaaclab/envs/direct_rl_env.py
+	modified:   source/isaaclab/isaaclab/envs/manager_based_rl_env.py
+	modified:   source/isaaclab/isaaclab/envs/utils/video_recorder.py
+	modified:   source/isaaclab/isaaclab/envs/utils/video_recorder_cfg.py
+	modified:   source/isaaclab/test/envs/test_video_recorder.py
+	modified:   source/isaaclab_physx/isaaclab_physx/video_recording/isaacsim_kit_perspective_video.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	scripts/reinforcement_learning/rsl_rl/symm_rollout_plotter.py
+	scripts/reinforcement_learning/test/test_symm_rollout_plotter.py
+	source/isaaclab/changelog.d/dlarlab-video-camera-tracking.rst
+	source/isaaclab_physx/changelog.d/dlarlab-video-camera-tracking.rst
+	source/isaaclab_physx/test/video_recording/
+	source/isaaclab_tasks/changelog.d/symm-recording-duration.rst
+	source/isaaclab_tasks/changelog.d/symm-zero-reset-yaw.rst
+	source/isaaclab_tasks/test/test_symm_quadruped_config.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/README.md b/README.md
+index 659749db8..56c2faf43 100644
+--- a/README.md
++++ b/README.md
+@@ -162,7 +162,7 @@ Windows PowerShell:
+ .\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+ .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
+ .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
+-.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
++.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
+ .\scripts\symm_locomotion\compare.ps1 --robots go2 x1
+ .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
+ ```
+@@ -174,7 +174,7 @@ bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs
+ bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+ bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
+ bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
+-bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --video-length 400 --gif
++bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
+ bash scripts/symm_locomotion/compare.sh --robots go2 x1
+ bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
+ ```
+@@ -273,10 +273,30 @@ for example `logs/rsl_rl/unitree_go2_symm_flat/`. To play a curated
+ Record videos:
+ 
+ ```powershell
+-.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
+-.\scripts\symm_locomotion\record.ps1 --robot x1 --checkpoint latest --video-length 400 --gif
++.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
++.\scripts\symm_locomotion\record.ps1 --robot x1 --checkpoint latest --gif
+ ```
+ 
++Recordings are 30 seconds by default (1,500 environment steps at 50 Hz).
++Pass `--video-length` to override the length in environment steps.
++
++Play and record also save symmetric rollout diagnostics under the selected
++checkpoint run's `plots/play/` directory by default:
++
++```text
++sim_data.npz
++figure1_linear_velocities_and_position.png
++figure2_E_C_frc_and_contact_forces.png
++figure3_E_C_spd_and_foot_velocities.png
++figure4_agg_E_C_frc_vs_contact.png
++```
++
++The plots compare measured and commanded base velocity/position, `E_C_frc`
++and foot contact force, and `E_C_spd` and foot speed. Pass `--no-plots` to
++disable them or `--plots_dir PATH` to select another output directory. Plot
++collection is limited to 30 seconds by default; use `--plot_duration SECONDS`
++to change the window.
++
+ ## Logs and Good Runs
+ 
+ Routine experiment directories:
+diff --git a/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py b/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+index 7a6075476..3b9b3d7c3 100644
+--- a/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
++++ b/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+@@ -79,6 +79,29 @@ parser.add_argument(
+     default=50,
+     help="Number of play steps between gait information terminal prints.",
+ )
++parser.add_argument(
++    "--symm_rollout_plots",
++    action="store_true",
++    default=False,
++    help="Save symmetric quadruped rollout plots and sampled data after play.",
++)
++parser.add_argument(
++    "--symm_rollout_plots_dir",
++    default=None,
++    help="Directory for symmetric rollout plots. Defaults to <run>/plots/play.",
++)
++parser.add_argument(
++    "--symm_rollout_plot_env_index",
++    type=int,
++    default=0,
++    help="Environment index sampled by symmetric rollout plots.",
++)
++parser.add_argument(
++    "--symm_rollout_plot_max_steps",
++    type=int,
++    default=None,
++    help="Maximum number of steps sampled by symmetric rollout plots.",
++)
+ cli_args.add_rsl_rl_args(parser)
+ add_launcher_args(parser)
+ args_cli, remaining_args = setup_preset_cli(parser)
+@@ -280,6 +303,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+             export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+ 
+         dt = env.unwrapped.step_dt
++        rollout_plotter = None
++        if args_cli.symm_rollout_plots:
++            from symm_rollout_plotter import SymmetricRolloutPlotter
++
++            plots_dir = args_cli.symm_rollout_plots_dir or os.path.join(log_dir, "plots", "play")
++            rollout_plotter = SymmetricRolloutPlotter(
++                env.unwrapped,
++                output_dir=plots_dir,
++                env_index=args_cli.symm_rollout_plot_env_index,
++                max_samples=args_cli.symm_rollout_plot_max_steps,
++            )
+ 
+         # reset environment
+         obs = env.get_observations()
+@@ -301,6 +335,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+                     else:
+                         policy_nn.reset(dones)
+ 
++                if rollout_plotter is not None:
++                    rollout_plotter.record()
++
+                 timestep += 1
+                 if args_cli.print_gait_info and timestep % gait_info_interval == 0:
+                     gait_info = _format_symmetric_gait_info(env)
+@@ -314,10 +351,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+                 if args_cli.real_time and sleep_time > 0:
+                     time.sleep(sleep_time)
+ 
+-            # close the simulator
+-            env.close()
+         except KeyboardInterrupt:
+             pass
++        finally:
++            if rollout_plotter is not None:
++                rollout_plotter.save()
++            env.close()
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/scripts/symm_locomotion/README.md b/scripts/symm_locomotion/README.md
+index 034cc990b..d879f45e4 100644
+--- a/scripts/symm_locomotion/README.md
++++ b/scripts/symm_locomotion/README.md
+@@ -28,7 +28,7 @@ Windows PowerShell:
+ .\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+ .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
+ .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
+-.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --video-length 400 --gif
++.\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
+ .\scripts\symm_locomotion\compare.ps1 --robots go2 x1
+ .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
+ ```
+@@ -40,7 +40,7 @@ bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs
+ bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 4096 --no-trs
+ bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
+ bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
+-bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --video-length 400 --gif
++bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
+ bash scripts/symm_locomotion/compare.sh --robots go2 x1
+ bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
+ ```
+@@ -110,6 +110,27 @@ selected robot experiment directory. You can also use:
+ --checkpoint PATH_TO_MODEL_PT
+ ```
+ 
++Recordings are 30 seconds by default (1,500 environment steps at 50 Hz).
++Pass `--video-length` to override the length in environment steps.
++
++Play and record save the following rollout diagnostics under the selected
++checkpoint run's `plots/play/` directory by default:
++
++```text
++sim_data.npz
++figure1_linear_velocities_and_position.png
++figure2_E_C_frc_and_contact_forces.png
++figure3_E_C_spd_and_foot_velocities.png
++figure4_agg_E_C_frc_vs_contact.png
++```
++
++These reproduce the IsaacGym rollout plots for measured versus desired base
++velocity/position, `E_C_frc` versus foot contact force, and `E_C_spd` versus
++foot speed. Use `--no-plots` to disable them, `--plots_dir PATH` to override
++the output directory, or `--plot_env_index INDEX` to select another environment.
++Plot collection is limited to 30 seconds by default; use
++`--plot_duration SECONDS` to change the window.
++
+ Relative `--run` values are resolved under the selected robot's routine log
+ directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
+ `logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
+diff --git a/scripts/symm_locomotion/symm_cli.py b/scripts/symm_locomotion/symm_cli.py
+index 6f988a999..e4e269466 100644
+--- a/scripts/symm_locomotion/symm_cli.py
++++ b/scripts/symm_locomotion/symm_cli.py
+@@ -22,6 +22,7 @@ DEFAULT_MIRROR_LOSS_COEFF = 0.1
+ DEFAULT_TR_VALUE_COEFF = 0.05
+ DEFAULT_TR_WARMUP_ITERATIONS = 500
+ DEFAULT_TR_MIN_ABS_CMD_VEL = 0.2
++DEFAULT_VIDEO_DURATION_S = 30.0
+ DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
+ 
+ 
+@@ -34,6 +35,7 @@ class RobotSpec:
+     train_task: str
+     play_task: str
+     experiment_name: str
++    step_dt: float
+ 
+ 
+ ROBOT_SPECS = {
+@@ -43,6 +45,7 @@ ROBOT_SPECS = {
+         train_task="Isaac-Velocity-Flat-Unitree-Go2-Symm-v0",
+         play_task="Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0",
+         experiment_name="unitree_go2_symm_flat",
++        step_dt=0.02,
+     ),
+     "x1": RobotSpec(
+         key="x1",
+@@ -50,6 +53,7 @@ ROBOT_SPECS = {
+         train_task="Isaac-Velocity-Flat-Dobot-X1-Symm-v0",
+         play_task="Isaac-Velocity-Flat-Dobot-X1-Symm-Play-v0",
+         experiment_name="dobot_x1_symm_flat",
++        step_dt=0.02,
+     ),
+ }
+ ROBOT_ALIASES = {
+@@ -338,10 +342,55 @@ def add_checkpoint_args(parser: argparse.ArgumentParser) -> None:
+     parser.add_argument("--model", default=None, help="Checkpoint iteration or file name inside the run.")
+ 
+ 
++def add_rollout_plot_args(parser: argparse.ArgumentParser) -> None:
++    """Add symmetric rollout plotting options."""
++    parser.add_argument(
++        "--plots",
++        action=argparse.BooleanOptionalAction,
++        default=True,
++        help="Save velocity, position, gait-weight, foot-force, and foot-speed plots.",
++    )
++    parser.add_argument("--plots_dir", "--plots-dir", default=None, help="Override the rollout plot output directory.")
++    parser.add_argument(
++        "--plot_env_index",
++        "--plot-env-index",
++        type=int,
++        default=0,
++        help="Environment index sampled for rollout plots.",
++    )
++    parser.add_argument(
++        "--plot_duration",
++        "--plot-duration",
++        type=float,
++        default=DEFAULT_VIDEO_DURATION_S,
++        help="Maximum plotted rollout duration in seconds.",
++    )
++
++
++def rollout_plot_lab_args(args: argparse.Namespace) -> list[str]:
++    """Build Isaac Lab arguments for symmetric rollout plotting."""
++    if not args.plots:
++        return []
++    max_steps = round(args.plot_duration / args.robot_spec.step_dt)
++    if max_steps < 1:
++        raise ValueError("Plot duration must be positive.")
++    command = [
++        "--symm_rollout_plots",
++        "--symm_rollout_plot_env_index",
++        str(args.plot_env_index),
++        "--symm_rollout_plot_max_steps",
++        str(max_steps),
++    ]
++    if args.plots_dir:
++        command += ["--symm_rollout_plots_dir", args.plots_dir]
++    return command
++
++
+ def add_play_args(parser: argparse.ArgumentParser) -> None:
+     """Add play command options."""
+     add_common_args(parser)
+     add_checkpoint_args(parser)
++    add_rollout_plot_args(parser)
+     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
+     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
+     parser.add_argument("--kit-args", "--kit_args", default=None)
+@@ -391,15 +440,22 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
+         command += ["--kit_args", kit_args]
+     if args.print_gait:
+         command += ["--print_gait_info", "--print_gait_info_interval", str(args.print_gait_interval)]
+-    return command + extra
++    return command + rollout_plot_lab_args(args) + extra
+ 
+ 
+ def add_record_args(parser: argparse.ArgumentParser) -> None:
+     """Add record command options."""
+     add_common_args(parser)
+     add_checkpoint_args(parser)
++    add_rollout_plot_args(parser)
+     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
+-    parser.add_argument("--video-length", "--video_length", type=int, default=400)
++    parser.add_argument(
++        "--video-length",
++        "--video_length",
++        type=int,
++        default=None,
++        help="Recording length in environment steps. Defaults to 30 seconds for the selected robot.",
++    )
+     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
+     parser.add_argument("--kit-args", "--kit_args", default=None)
+     parser.add_argument("--viewer", action="store_true", help="Show the Kit viewer while recording.")
+@@ -413,6 +469,11 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
+     checkpoint = resolve_checkpoint(args)
+     print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
+     kit_args = default_kit_args() if args.kit_args is None else args.kit_args
++    video_length = (
++        args.video_length
++        if args.video_length is not None
++        else round(DEFAULT_VIDEO_DURATION_S / args.robot_spec.step_dt)
++    )
+     command = [
+         "play",
+         "--rl_library",
+@@ -425,7 +486,7 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
+         str(checkpoint),
+         "--video",
+         "--video_length",
+-        str(args.video_length),
++        str(video_length),
+         "--rendering_mode",
+         args.rendering_mode,
+     ]
+@@ -433,7 +494,7 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
+         command += ["--viz", "kit", "--real-time"]
+     if kit_args:
+         command += ["--kit_args", kit_args]
+-    return command + extra, checkpoint
++    return command + rollout_plot_lab_args(args) + extra, checkpoint
+ 
+ 
+ def add_ablation_args(parser: argparse.ArgumentParser) -> None:
+diff --git a/source/isaaclab/isaaclab/envs/direct_marl_env.py b/source/isaaclab/isaaclab/envs/direct_marl_env.py
+index 9ebc983c6..c2de57cbf 100644
+--- a/source/isaaclab/isaaclab/envs/direct_marl_env.py
++++ b/source/isaaclab/isaaclab/envs/direct_marl_env.py
+@@ -185,6 +185,10 @@ class DirectMARLEnv(gym.Env):
+             vr = self.cfg.video_recorder
+             vr.eye = tuple(float(x) for x in self.cfg.viewer.eye)
+             vr.lookat = tuple(float(x) for x in self.cfg.viewer.lookat)
++            vr.origin_type = self.cfg.viewer.origin_type
++            vr.env_index = self.cfg.viewer.env_index
++            vr.asset_name = self.cfg.viewer.asset_name
++            vr.body_name = self.cfg.viewer.body_name
+             self.video_recorder: VideoRecorder = self.cfg.video_recorder.class_type(self.cfg.video_recorder, self.scene)
+         else:
+             self.video_recorder = None
+diff --git a/source/isaaclab/isaaclab/envs/direct_rl_env.py b/source/isaaclab/isaaclab/envs/direct_rl_env.py
+index bfe97948a..bf2d875af 100644
+--- a/source/isaaclab/isaaclab/envs/direct_rl_env.py
++++ b/source/isaaclab/isaaclab/envs/direct_rl_env.py
+@@ -191,6 +191,10 @@ class DirectRLEnv(gym.Env):
+             vr = self.cfg.video_recorder
+             vr.eye = tuple(float(x) for x in self.cfg.viewer.eye)
+             vr.lookat = tuple(float(x) for x in self.cfg.viewer.lookat)
++            vr.origin_type = self.cfg.viewer.origin_type
++            vr.env_index = self.cfg.viewer.env_index
++            vr.asset_name = self.cfg.viewer.asset_name
++            vr.body_name = self.cfg.viewer.body_name
+             self.video_recorder: VideoRecorder = self.cfg.video_recorder.class_type(self.cfg.video_recorder, self.scene)
+         else:
+             self.video_recorder = None
+diff --git a/source/isaaclab/isaaclab/envs/manager_based_rl_env.py b/source/isaaclab/isaaclab/envs/manager_based_rl_env.py
+index dfdbef509..ca572c515 100644
+--- a/source/isaaclab/isaaclab/envs/manager_based_rl_env.py
++++ b/source/isaaclab/isaaclab/envs/manager_based_rl_env.py
+@@ -83,6 +83,10 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
+             cfg.video_recorder.env_render_mode = render_mode
+             cfg.video_recorder.eye = tuple(float(x) for x in cfg.viewer.eye)
+             cfg.video_recorder.lookat = tuple(float(x) for x in cfg.viewer.lookat)
++            cfg.video_recorder.origin_type = cfg.viewer.origin_type
++            cfg.video_recorder.env_index = cfg.viewer.env_index
++            cfg.video_recorder.asset_name = cfg.viewer.asset_name
++            cfg.video_recorder.body_name = cfg.viewer.body_name
+ 
+         # initialize the base class to setup the scene.
+         super().__init__(cfg=cfg)
+diff --git a/source/isaaclab/isaaclab/envs/utils/video_recorder.py b/source/isaaclab/isaaclab/envs/utils/video_recorder.py
+index 0925b4a0a..603ecd907 100644
+--- a/source/isaaclab/isaaclab/envs/utils/video_recorder.py
++++ b/source/isaaclab/isaaclab/envs/utils/video_recorder.py
+@@ -19,8 +19,8 @@ to ignore active visualizers and record from the physics/renderer stack.
+ 
+ Camera sync when a visualizer drives the backend: construction copies the visualizer config's
+ ``eye`` / ``lookat`` into the recorder config; each :meth:`~VideoRecorder.render_rgb_array`
+-call then re-reads the Newton viewer's live ``camera.pos/pitch/yaw``. Kit video uses the
+-configured ``eye`` / ``lookat`` at construction time.
++call then re-reads the Newton viewer's live ``camera.pos/pitch/yaw``. Scene-relative camera
++origins are recomputed before every frame so recorded views track moving assets like the play viewer.
+ 
+ See :mod:`video_recorder_cfg` for configuration.
+ """
+@@ -175,7 +175,7 @@ class VideoRecorder:
+         if cfg.env_render_mode == "rgb_array":
+             backend_source = getattr(cfg, "backend_source", "visualizer")
+             self._backend, self._matched_visualizer = _resolve_video_backend(scene, backend_source)
+-            if self._matched_visualizer is not None:
++            if self._matched_visualizer is not None and getattr(cfg, "origin_type", "world") == "world":
+                 _sync_camera_from_visualizer(scene, self._matched_visualizer, cfg)
+             if self._backend == "newton_gl":
+                 try:
+@@ -243,13 +243,48 @@ class VideoRecorder:
+         target = (pos[0] + dx, pos[1] + dy, pos[2] + dz)
+         self._capture.update_camera(pos, target)
+ 
++    def _sync_tracking_camera(self) -> None:
++        """Update the recording camera from its configured scene-relative origin."""
++        origin_type = getattr(self.cfg, "origin_type", "world")
++        env_index = getattr(self.cfg, "env_index", 0)
++        if env_index < 0 or env_index >= self._scene.num_envs:
++            raise ValueError(
++                f"Video recorder env_index {env_index} is outside the valid range [0, {self._scene.num_envs - 1}]."
++            )
++
++        if origin_type == "env":
++            origin = self._scene.env_origins[env_index]
++        elif origin_type in ("asset_root", "asset_body"):
++            asset_name = getattr(self.cfg, "asset_name", None)
++            if asset_name is None:
++                raise ValueError(f"Video recorder origin type '{origin_type}' requires an asset_name.")
++            asset = self._scene[asset_name]
++            if origin_type == "asset_root":
++                origin = asset.data.root_pos_w.torch[env_index]
++            else:
++                body_name = getattr(self.cfg, "body_name", None)
++                if body_name is None:
++                    raise ValueError("Video recorder origin type 'asset_body' requires a body_name.")
++                body_ids, _ = asset.find_bodies(body_name)
++                if len(body_ids) != 1:
++                    raise ValueError(f"Video recorder body_name '{body_name}' must match exactly one body.")
++                origin = asset.data.body_pos_w.torch[env_index, body_ids[0]]
++        else:
++            return
++
++        origin = origin.detach().cpu()
++        position = tuple(float(origin[index]) + self.cfg.eye[index] for index in range(3))
++        target = tuple(float(origin[index]) + self.cfg.lookat[index] for index in range(3))
++        self._capture.update_camera(position, target)
++
+     def render_rgb_array(self) -> np.ndarray | None:
+         """Return an RGB frame for the resolved backend. Fails if backend is unavailable."""
+         if self._backend is None or self._capture is None:
+             return None
+-        if self._matched_visualizer == "newton":
++        if getattr(self.cfg, "origin_type", "world") != "world":
++            self._sync_tracking_camera()
++        elif self._matched_visualizer == "newton":
+             # Newton GL camera state lives in the capture object and must be synced each frame
+             # to follow interactive viewer movement.
+             self._sync_newton_camera()
+-        # Kit capture uses the configured eye/lookat applied to the recording camera at construction time.
+         return self._capture.render_rgb_array()
+diff --git a/source/isaaclab/isaaclab/envs/utils/video_recorder_cfg.py b/source/isaaclab/isaaclab/envs/utils/video_recorder_cfg.py
+index f795ad114..98b6ac70d 100644
+--- a/source/isaaclab/isaaclab/envs/utils/video_recorder_cfg.py
++++ b/source/isaaclab/isaaclab/envs/utils/video_recorder_cfg.py
+@@ -33,7 +33,7 @@ class VideoRecorderCfg:
+     """
+ 
+     eye: tuple[float, float, float] = (7.5, 7.5, 7.5)
+-    """Perspective camera position in world space (metres).
++    """Perspective camera position [m] relative to :attr:`origin_type`.
+ 
+     Direct RL / MARL and manager-based RL environments overwrite this from
+     :attr:`~isaaclab.envs.common.ViewerCfg.eye` before recording so ``--video`` matches the
+@@ -41,7 +41,22 @@ class VideoRecorderCfg:
+     """
+ 
+     lookat: tuple[float, float, float] = (0.0, 0.0, 0.0)
+-    """Perspective camera look-at target in world space (metres). Set from ``ViewerCfg.lookat`` at env init."""
++    """Perspective camera look-at target [m] relative to :attr:`origin_type`."""
++
++    origin_type: Literal["world", "env", "asset_root", "asset_body"] = "world"
++    """Frame in which :attr:`eye` and :attr:`lookat` are defined.
++
++    Recording tracks moving ``"asset_root"`` and ``"asset_body"`` origins on every frame.
++    """
++
++    env_index: int = 0
++    """Environment index used by non-world camera origins."""
++
++    asset_name: str | None = None
++    """Scene asset used by ``"asset_root"`` and ``"asset_body"`` camera origins."""
++
++    body_name: str | None = None
++    """Asset body used by the ``"asset_body"`` camera origin."""
+ 
+     backend_source: Literal["visualizer", "renderer"] = "visualizer"
+     """Source used to resolve the video capture backend.
+diff --git a/source/isaaclab/test/envs/test_video_recorder.py b/source/isaaclab/test/envs/test_video_recorder.py
+index e22cbe656..fefd05bbe 100644
+--- a/source/isaaclab/test/envs/test_video_recorder.py
++++ b/source/isaaclab/test/envs/test_video_recorder.py
+@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
+ 
+ import numpy as np
+ import pytest
++import torch
+ 
+ from isaaclab.envs.utils import video_recorder as _video_recorder_module
+ from isaaclab.envs.utils.video_recorder import VideoRecorder, _resolve_video_backend, _sync_camera_from_visualizer
+@@ -21,6 +22,10 @@ _DEFAULT_CFG = dict(
+     env_render_mode="rgb_array",
+     eye=(7.5, 7.5, 7.5),
+     lookat=(0.0, 0.0, 0.0),
++    origin_type="world",
++    env_index=0,
++    asset_name=None,
++    body_name=None,
+     backend_source="visualizer",
+     window_width=1280,
+     window_height=720,
+@@ -132,6 +137,24 @@ def test_init_no_visualizer_skips_camera_sync():
+     mock_sync.assert_not_called()
+ 
+ 
++def test_init_tracking_camera_preserves_viewer_offsets():
++    """Scene-relative cameras keep task viewer offsets instead of visualizer world poses."""
++    scene = MagicMock()
++    cfg = SimpleNamespace(**{**_DEFAULT_CFG, "origin_type": "asset_root", "asset_name": "robot"})
++    with patch.object(_video_recorder_module, "_resolve_video_backend", return_value=("kit", "kit")):
++        with patch.object(_video_recorder_module, "_sync_camera_from_visualizer") as mock_sync:
++            with patch.dict(
++                sys.modules,
++                {
++                    "isaaclab_physx.video_recording": MagicMock(),
++                    "isaaclab_physx.video_recording.isaacsim_kit_perspective_video": MagicMock(),
++                    "isaaclab_physx.video_recording.isaacsim_kit_perspective_video_cfg": MagicMock(),
++                },
++            ):
++                VideoRecorder(cfg, scene)
++    mock_sync.assert_not_called()
++
++
+ def _make_scene(visualizer_types, physics_name="PhysxPhysicsManager", renderer_types=None):
+     scene = MagicMock()
+     scene.sim.resolve_visualizer_types.return_value = visualizer_types
+@@ -302,6 +325,57 @@ def test_render_rgb_array_calls_capture_each_step():
+     assert recorder._capture.render_rgb_array.call_count == 3
+ 
+ 
++def test_render_rgb_array_tracks_asset_root():
++    """Scene-relative recording camera follows the selected asset root."""
++    recorder = _create_recorder(
++        _backend="kit",
++        origin_type="asset_root",
++        asset_name="robot",
++        eye=(0.0, -4.0, 1.4),
++        lookat=(0.3, 0.0, 0.35),
++    )
++    recorder._scene.num_envs = 1
++    asset = MagicMock()
++    asset.data.root_pos_w.torch = torch.tensor([[2.0, 3.0, 0.5]])
++    recorder._scene.__getitem__.return_value = asset
++
++    recorder.render_rgb_array()
++
++    recorder._scene.__getitem__.assert_called_once_with("robot")
++    recorder._capture.update_camera.assert_called_once_with((2.0, -1.0, 1.9), (2.3, 3.0, 0.85))
++
++
++def test_render_rgb_array_updates_tracking_camera_each_frame():
++    """Moving camera pose is recomputed before every captured frame."""
++    recorder = _create_recorder(
++        _backend="kit",
++        origin_type="asset_root",
++        asset_name="robot",
++        eye=(0.0, -4.0, 1.4),
++        lookat=(0.3, 0.0, 0.35),
++    )
++    recorder._scene.num_envs = 1
++    asset = MagicMock()
++    asset.data.root_pos_w.torch = torch.tensor([[0.0, 0.0, 0.0]])
++    recorder._scene.__getitem__.return_value = asset
++
++    recorder.render_rgb_array()
++    asset.data.root_pos_w.torch = torch.tensor([[1.0, 0.0, 0.0]])
++    recorder.render_rgb_array()
++
++    assert recorder._capture.update_camera.call_args_list[0].args[0] == (0.0, -4.0, 1.4)
++    assert recorder._capture.update_camera.call_args_list[1].args[0] == (1.0, -4.0, 1.4)
++
++
++def test_render_rgb_array_keeps_world_camera_fixed():
++    """World-relative recording cameras do not receive tracking updates."""
++    recorder = _create_recorder(_backend="kit", origin_type="world")
++
++    recorder.render_rgb_array()
++
++    recorder._capture.update_camera.assert_not_called()
++
++
+ def test_render_rgb_array_calls_sync_newton_camera_when_newton_visualizer():
+     """render_rgb_array triggers _sync_newton_camera when matched_visualizer is 'newton'."""
+     recorder = _create_recorder(_backend="newton_gl", _matched_visualizer="newton")
+diff --git a/source/isaaclab_physx/isaaclab_physx/video_recording/isaacsim_kit_perspective_video.py b/source/isaaclab_physx/isaaclab_physx/video_recording/isaacsim_kit_perspective_video.py
+index 4796340f2..d8841396f 100644
+--- a/source/isaaclab_physx/isaaclab_physx/video_recording/isaacsim_kit_perspective_video.py
++++ b/source/isaaclab_physx/isaaclab_physx/video_recording/isaacsim_kit_perspective_video.py
+@@ -23,6 +23,27 @@ class IsaacsimKitPerspectiveVideo:
+         self._rgb_annotator = None
+         self._render_product = None
+ 
++    def update_camera(
++        self,
++        position: tuple[float, float, float],
++        target: tuple[float, float, float],
++    ) -> None:
++        """Update the recording camera position and target.
++
++        Args:
++            position: Camera position [m].
++            target: Camera look-at target [m].
++        """
++        from isaacsim.core.rendering_manager import ViewportManager
++
++        self.cfg.eye = position
++        self.cfg.lookat = target
++        ViewportManager.set_camera_view(
++            self.cfg.camera_prim_path,
++            eye=list(position),
++            target=list(target),
++        )
++
+     def render_rgb_array(self) -> np.ndarray:
+         """Return one RGB frame. Blank frame during warmup; raises on other failures."""
+         import omni.kit.app
+@@ -32,13 +53,7 @@ class IsaacsimKitPerspectiveVideo:
+ 
+         h, w = self.cfg.window_height, self.cfg.window_width
+         if self._rgb_annotator is None:
+-            from isaacsim.core.rendering_manager import ViewportManager
+-
+-            ViewportManager.set_camera_view(
+-                self.cfg.camera_prim_path,
+-                eye=list(self.cfg.eye),
+-                target=list(self.cfg.lookat),
+-            )
++            self.update_camera(self.cfg.eye, self.cfg.lookat)
+             self._render_product = rep.create.render_product(self.cfg.camera_prim_path, (w, h))
+             self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
+             self._rgb_annotator.attach([self._render_product])
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+index be33ba7a3..e6098d05a 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+@@ -264,15 +264,15 @@ def configure_domain_randomization(env_cfg, *, base_body_name: str | None = None
+     env_cfg.events.reset_base.params["pose_range"] = {}
+     env_cfg.events.reset_base.params["velocity_range"] = {
+         "x": (-0.5, 0.5),
+-        "y": (-0.5, 0.5),
++        "y": (0.0, 0.0),
+         "z": (-0.5, 0.5),
+         "roll": (-0.5, 0.5),
+         "pitch": (-0.5, 0.5),
+-        "yaw": (-0.5, 0.5),
++        "yaw": (0.0, 0.0),
+     }
+ 
+     env_cfg.events.push_robot.interval_range_s = (15.0, 15.0)
+-    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
++    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (0.0, 0.0)}
+ 
+ 
+ def make_play_physics_cfg() -> PhysxCfg:
+diff --git a/source/isaaclab_tasks/test/test_symm_locomotion_cli.py b/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+index 6f558c5a2..e7f59060a 100644
+--- a/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
++++ b/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+@@ -48,6 +48,79 @@ def test_train_dry_run_uses_selected_robot_task(capsys):
+     assert " 1" in captured.out
+ 
+ 
++def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    checkpoint = tmp_path / "model_9999.pt"
++    checkpoint.touch()
++    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
++    parser = symm_cli.build_parser()
++
++    for robot in ("go2", "x1"):
++        args = parser.parse_args(["record", "--robot", robot, "--no-conda-run"])
++        args.robot_spec = symm_cli.get_robot(args.robot)
++        command, resolved_checkpoint = symm_cli.record_lab_args(args, [])
++
++        video_length_index = command.index("--video_length") + 1
++        assert command[video_length_index] == "1500"
++        assert resolved_checkpoint == checkpoint
++
++
++def test_record_video_length_override_is_preserved(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    checkpoint = tmp_path / "model_9999.pt"
++    checkpoint.touch()
++    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
++    parser = symm_cli.build_parser()
++    args = parser.parse_args(["record", "--robot", "go2", "--video-length", "400", "--no-conda-run"])
++    args.robot_spec = symm_cli.get_robot(args.robot)
++
++    command, _ = symm_cli.record_lab_args(args, [])
++
++    video_length_index = command.index("--video_length") + 1
++    assert command[video_length_index] == "400"
++
++
++def test_play_and_record_enable_rollout_plots_by_default(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    checkpoint = tmp_path / "model_9999.pt"
++    checkpoint.touch()
++    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
++    parser = symm_cli.build_parser()
++
++    for subcommand in ("play", "record"):
++        args = parser.parse_args([subcommand, "--robot", "go2", "--no-conda-run"])
++        args.robot_spec = symm_cli.get_robot(args.robot)
++        command = symm_cli.play_lab_args(args, []) if subcommand == "play" else symm_cli.record_lab_args(args, [])[0]
++
++        assert "--symm_rollout_plots" in command
++        plot_env_index = command.index("--symm_rollout_plot_env_index") + 1
++        assert command[plot_env_index] == "0"
++        plot_max_steps = command.index("--symm_rollout_plot_max_steps") + 1
++        assert command[plot_max_steps] == "1500"
++
++
++def test_rollout_plots_can_be_disabled_or_redirected(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    checkpoint = tmp_path / "model_9999.pt"
++    checkpoint.touch()
++    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
++    parser = symm_cli.build_parser()
++
++    disabled_args = parser.parse_args(["record", "--robot", "x1", "--no-plots", "--no-conda-run"])
++    disabled_args.robot_spec = symm_cli.get_robot(disabled_args.robot)
++    disabled_command, _ = symm_cli.record_lab_args(disabled_args, [])
++    assert "--symm_rollout_plots" not in disabled_command
++
++    plots_dir = tmp_path / "plots"
++    redirected_args = parser.parse_args(
++        ["play", "--robot", "x1", "--plots_dir", str(plots_dir), "--plot_env_index", "2", "--no-conda-run"]
++    )
++    redirected_args.robot_spec = symm_cli.get_robot(redirected_args.robot)
++    redirected_command = symm_cli.play_lab_args(redirected_args, [])
++    assert redirected_command[redirected_command.index("--symm_rollout_plots_dir") + 1] == str(plots_dir)
++    assert redirected_command[redirected_command.index("--symm_rollout_plot_env_index") + 1] == "2"
++
++
+ def test_compare_handles_missing_log_directories(capsys):
+     symm_cli = _load_symm_cli()
+ 
