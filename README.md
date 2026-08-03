@@ -158,8 +158,8 @@ Use `scripts/symm_locomotion` for normal work.
 Windows PowerShell:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 256 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 256 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 20000 --num-envs 512 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 20000 --num-envs 512 --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
@@ -170,8 +170,8 @@ Windows PowerShell:
 Ubuntu/bash:
 
 ```bash
-bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 256 --no-trs
-bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 256 --no-trs
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 20000 --num-envs 512 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 20000 --num-envs 512 --no-trs
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
@@ -182,7 +182,7 @@ bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 Direct Python style from an activated environment:
 
 ```bash
-python scripts/symm_locomotion/train.py --robot go2 --iterations 30000 --no-trs
+python scripts/symm_locomotion/train.py --robot go2 --iterations 20000 --no-trs
 python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
 ```
 
@@ -198,21 +198,22 @@ bash scripts/symm_locomotion/symm_locomotion.sh train --robot x1 --smoke --dry-r
 
 All commands accept `--dry-run` to print the resolved Isaac Lab command without
 running it. Extra Isaac Lab/Hydra overrides can be passed after `--`.
+Training and ablation runs default to 20,000 iterations across 512 environments.
 
 ## Training
 
 Good no-TRS baselines:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 256 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 256 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 20000 --num-envs 512 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 20000 --num-envs 512 --no-trs
 ```
 
 TRS/mirror-loss runs:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --mirror 0.1
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --mirror 0.1
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 20000 --mirror 0.1
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 20000 --mirror 0.1
 ```
 
 One-iteration smoke runs:
@@ -225,8 +226,8 @@ One-iteration smoke runs:
 Linux background runs:
 
 ```bash
-bash scripts/symm_locomotion/train.sh --nohup --robot go2 --iterations 30000 --no-trs
-bash scripts/symm_locomotion/ablation.sh --nohup --robot x1 --iterations 10000 --seeds 1 2 3
+bash scripts/symm_locomotion/train.sh --nohup --robot go2 --iterations 20000 --no-trs
+bash scripts/symm_locomotion/ablation.sh --nohup --robot x1 --iterations 20000 --seeds 1 2 3
 ```
 
 `--no-trs` forwards:
@@ -241,9 +242,66 @@ agent.algorithm.symmetry_cfg.value_loss_coeff=0.0
 Direct IsaacLab commands still work:
 
 ```powershell
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 256 --max_iterations 30000
-.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 256 --max_iterations 30000
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Unitree-Go2-Symm-v0 --num_envs 512 --max_iterations 20000
+.\isaaclab.bat train --rl_library rsl_rl --task Isaac-Velocity-Flat-Dobot-X1-Symm-v0 --num_envs 512 --max_iterations 20000
 ```
+
+## Gait Phase and Time-Reversal Semantics
+
+The current mapping is recorded in each environment configuration as
+`phase_mapping_version = "same_gait_backward_duty_aware_trs_v2"`. The policy
+observation remains 72D and contains no clock-direction channel.
+
+Ordinary backward locomotion uses the same forward-time gait schedule as
+forward locomotion. For common clock `phi` and fixed leg offsets `theta`, both
+positive and negative x commands use:
+
+```text
+foot_phase = remainder(phi + theta, 1)
+```
+
+Changing command sign changes the desired spatial velocity only; it does not
+change the sampled gait row, `theta`, footfall order, or clock direction. Gait
+period and duty factor continue to depend on the absolute x-command speed.
+
+The auxiliary physical time-reversal (TR) pair is a separate mapping. With
+stance duty factor `beta`, swing ratio `1 - beta`, and foot phase `psi`, it
+uses:
+
+```text
+psi_tr   = remainder((1 - beta) - psi, 1)
+theta_tr = remainder(-theta, 1)
+```
+
+Velocities and the desired command are odd under this transform. Positions,
+previous position-target actions, phase ratios, and sagittal-plane state are
+even. The duty-aware phase reflection reverses temporal event order while
+preserving swing/stance mode away from event boundaries. In particular, a
+forward touchdown maps to a reversed liftoff, and vice versa.
+
+This TR pairing is an observation/policy/value inductive bias. It is not a
+claim that dissipative contact dynamics are exactly reversible. PPO transition
+data augmentation remains disabled (`use_data_augmentation=False`); the
+transformed observations are used only by the auxiliary policy-equivariance
+and value-consistency losses.
+
+The sampled gait library has the following TR closure:
+
+- Trot is self-reversing.
+- Bound is self-reversing.
+- The two half-bound rows are TR partners.
+- The pure TR partners of the two current gallop rows are not sampled. They
+  have intentionally not been added in this milestone.
+
+The training command deadband is disabled with `min_xy_command_norm=0.0`, so
+sampled low-speed commands remain continuous through zero instead of being
+converted to standstill commands. Exact standstill commands are not sampled
+while `rel_standing_envs=0.0`.
+
+Existing 72D checkpoints trained with the earlier negative-command phase
+reversal have different environment semantics. Reproduce those archived runs
+with their archived environment code and configuration rather than this phase
+mapping.
 
 ## Playing and Recording
 
@@ -328,8 +386,9 @@ logs/rsl_rl/dobot_x1_symm_flat/
 Selected backed-up runs are copied under `logs/rsl_rl/good_runs/`. See the
 [curated-run index](logs/rsl_rl/good_runs/README.md) and the
 [60D-to-72D milestone](logs/rsl_rl/good_runs/MILESTONE_60D_TO_72D.md) for the
-complete Go2/X1 run inventory, configuration changes, TRS measurements, and
-safe restoration procedure.
+original controller comparison and restoration procedure. The
+[Phase Mapping V2 milestone](logs/rsl_rl/good_runs/MILESTONE_PHASE_MAPPING_V2.md)
+documents the corrected gait/TR semantics and matched Go2/X1 studies.
 
 Leave routine training outputs in the robot-specific experiment directories
 unless a run is intentionally curated and copied into `good_runs`.
@@ -442,7 +501,7 @@ Lightweight checks:
 Conda/IsaacLab tests:
 
 ```powershell
-conda run --no-capture-output -n symm_rl_isaaclab .\isaaclab.bat -p -m pytest source\isaaclab_tasks\test\test_go2_symm_time_reversal.py source\isaaclab_tasks\test\test_symm_quadruped_time_reversal_ppo.py source\isaaclab_tasks\test\test_symm_locomotion_cli.py
+conda run --no-capture-output -n symm_rl_isaaclab .\isaaclab.bat -p -m pytest source\isaaclab_tasks\test\test_go2_symm_time_reversal.py source\isaaclab_tasks\test\test_symm_quadruped_phase_mapping.py source\isaaclab_tasks\test\test_symm_quadruped_time_reversal_ppo.py source\isaaclab_tasks\test\test_symm_quadruped_config.py source\isaaclab_tasks\test\test_symm_locomotion_cli.py
 ```
 
 Full pre-commit before committing or pushing:

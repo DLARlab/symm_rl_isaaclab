@@ -33,7 +33,7 @@ def configure_symm_quadruped_ppo(
         min_abs_command_velocity: Minimum forward command velocity [m/s] for TRS losses.
         warmup_iterations: Number of PPO iterations before applying TRS losses.
     """
-    cfg.max_iterations = 5000
+    cfg.max_iterations = 20000
     cfg.save_interval = 1000
     cfg.experiment_name = experiment_name
     cfg.clip_actions = None

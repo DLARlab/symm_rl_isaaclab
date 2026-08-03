@@ -24,8 +24,8 @@ package paths do not continue pointing at the old workspace.
 Windows PowerShell:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --num-envs 256 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --num-envs 256 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 20000 --num-envs 512 --no-trs
+.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 20000 --num-envs 512 --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
@@ -36,8 +36,8 @@ Windows PowerShell:
 Ubuntu/bash:
 
 ```bash
-bash scripts/symm_locomotion/train.sh --robot go2 --iterations 30000 --num-envs 256 --no-trs
-bash scripts/symm_locomotion/train.sh --robot x1 --iterations 30000 --num-envs 256 --no-trs
+bash scripts/symm_locomotion/train.sh --robot go2 --iterations 20000 --num-envs 512 --no-trs
+bash scripts/symm_locomotion/train.sh --robot x1 --iterations 20000 --num-envs 512 --no-trs
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
@@ -48,7 +48,7 @@ bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 Direct Python style still works from an activated environment:
 
 ```bash
-python scripts/symm_locomotion/train.py --robot go2 --iterations 30000 --no-trs
+python scripts/symm_locomotion/train.py --robot go2 --iterations 20000 --no-trs
 python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
 ```
 
@@ -88,6 +88,8 @@ Training options:
 --no-trs
 --smoke
 ```
+
+Training and ablation runs default to 20,000 iterations across 512 environments.
 
 `--tr-min-abs-cmd-vel` defaults to `0.0`, so TRS losses also train on
 zero-velocity commands used for in-place behavior.
@@ -187,6 +189,32 @@ bash scripts/symm_locomotion/train.sh --robot go2 --no-trs -- \
   env.commands.base_velocity.ranges.lin_vel_x='(-1.0, 2.0)'
 ```
 
+## Matched TRS Study Analysis
+
+`analyze_matched_trs_study.py` is the maintained entry point for the Phase
+Mapping V2 four-run studies. Robot-specific run folders, coefficients, plotting
+bounds, and command windows live in a `study.json` manifest beside each report;
+the metric, validation, table, and SVG implementation is shared.
+
+```powershell
+python .\scripts\symm_locomotion\analyze_matched_trs_study.py `
+  .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\phase_mapping_v2_go2_trs_run_analysis\study.json
+
+python .\scripts\symm_locomotion\analyze_matched_trs_study.py `
+  .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\phase_mapping_v2_x1_trs_run_analysis\study.json
+```
+
+The small `reproduce.py` file in either analysis directory invokes the same
+shared engine. Before producing outputs, it verifies matched rollout members,
+initial/final checkpoints, resolved configurations, and archived
+training-source provenance. Generated `summary.json` files record the analysis
+method, engine hash, and manifest hash. Treat this manifest-driven utility as
+the source of truth for future matched TRS studies; the older hard-coded grid
+and TensorBoard scripts remain available for compatibility. Analysis method
+`phase_mapping_v2_matched_trs_v1` is intentionally scoped to four-condition,
+20,000-iteration studies; use a new versioned method before changing that
+horizon or the early-AUC definition.
+
 ## Logs
 
 The script maps each robot to its task and experiment directory:
@@ -212,8 +240,8 @@ macOS, the launcher uses named log directories for the selected robots.
 On Linux, `train.sh` and `ablation.sh` support `--nohup`:
 
 ```bash
-bash scripts/symm_locomotion/train.sh --nohup --robot go2 --iterations 30000 --no-trs
-bash scripts/symm_locomotion/ablation.sh --nohup --robot x1 --iterations 10000 --seeds 1 2 3
+bash scripts/symm_locomotion/train.sh --nohup --robot go2 --iterations 20000 --no-trs
+bash scripts/symm_locomotion/ablation.sh --nohup --robot x1 --iterations 20000 --seeds 1 2 3
 ```
 
 Logs are written under:

@@ -15,9 +15,15 @@ import torch
 
 from isaaclab.envs import mdp as base_mdp
 
+from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.agents.rsl_rl_ppo_cfg import (
+    DobotX1SymmFlatPPORunnerCfg,
+)
 from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.flat_env_cfg import (
     DobotX1SymmFlatEnvCfg,
     DobotX1SymmFlatEnvCfg_PLAY,
+)
+from isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.agents.rsl_rl_ppo_cfg import (
+    UnitreeGo2SymmFlatPPORunnerCfg,
 )
 from isaaclab_tasks.manager_based.locomotion.velocity.config.go2_symm.flat_env_cfg import (
     UnitreeGo2SymmFlatEnvCfg,
@@ -64,7 +70,7 @@ def test_flat_scene_defaults_to_scalable_training_batch():
 
     configure_flat_scene(env_cfg)
 
-    assert env_cfg.scene.num_envs == 256
+    assert env_cfg.scene.num_envs == 512
 
 
 def test_single_body_contact_sensor_skips_unused_air_time_tracking():
@@ -89,11 +95,40 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
         value_loss_coeff=0.0,
     )
 
+    assert cfg.max_iterations == 20000
     assert cfg.clip_actions is None
     assert cfg.actor.distribution_cfg.init_std == 0.5
     assert cfg.algorithm.entropy_coef == 0.005
     assert cfg.algorithm.symmetry_cfg.command_observation_index == 9
     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
+
+
+@pytest.mark.parametrize("env_cfg_type", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
+def test_symm_quadruped_command_and_phase_mapping_configuration_is_stable(env_cfg_type):
+    command_cfg = env_cfg_type().commands.base_velocity
+
+    assert command_cfg.ranges.lin_vel_x == (-2.0, 2.0)
+    assert command_cfg.min_xy_command_norm == 0.0
+    assert command_cfg.phase_mapping_version == symm_quadruped.SYMM_QUADRUPED_PHASE_MAPPING_VERSION
+    assert command_cfg.phase_mapping_version == "same_gait_backward_duty_aware_trs_v2"
+
+
+@pytest.mark.parametrize(
+    "runner_cfg_type",
+    [UnitreeGo2SymmFlatPPORunnerCfg, DobotX1SymmFlatPPORunnerCfg],
+)
+def test_robot_ppo_time_reversal_configuration_is_stable(runner_cfg_type):
+    runner_cfg = runner_cfg_type()
+    symmetry_cfg = runner_cfg.algorithm.symmetry_cfg
+
+    assert runner_cfg.max_iterations == 20000
+    assert not symmetry_cfg.use_data_augmentation
+    assert symmetry_cfg.use_time_reversal_regularization
+    assert symmetry_cfg.use_mirror_loss
+    assert symmetry_cfg.mirror_loss_coeff == 0.1
+    assert symmetry_cfg.value_loss_coeff == 0.05
+    assert symmetry_cfg.min_abs_command_velocity == 0.0
+    assert symmetry_cfg.warmup_iterations == 500
 
 
 def test_running_reward_is_clipped_before_terminal_penalty_is_added():
@@ -120,6 +155,32 @@ def test_policy_observations_include_velocity_and_observable_sagittal_state():
     assert policy.velocity_commands.scale == (2.0, 2.0, 2.0, 0.25, 0.25, 0.25)
     assert policy.sagittal_plane_state.func is symm_quadruped.sagittal_plane_state
     assert policy.sagittal_plane_state.params == {"lateral_position_scale": 0.5}
+
+
+@pytest.mark.parametrize("env_cfg_type", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
+def test_policy_observation_concatenation_remains_72d_and_in_original_order(env_cfg_type):
+    policy = env_cfg_type().observations.policy
+    term_dimensions = {
+        "base_lin_vel": 3,
+        "base_ang_vel": 3,
+        "projected_gravity": 3,
+        "velocity_commands": 6,
+        "joint_pos": 12,
+        "joint_vel": 12,
+        "actions": 12,
+        "foot_phase_sin": 4,
+        "foot_phase_cos": 4,
+        "foot_theta_sin": 4,
+        "foot_theta_cos": 4,
+        "phase_ratios": 2,
+        "sagittal_plane_state": 3,
+    }
+    configured_terms = tuple(
+        name for name in policy.__dict__ if name in term_dimensions and getattr(policy, name) is not None
+    )
+
+    assert configured_terms == tuple(term_dimensions)
+    assert sum(term_dimensions[name] for name in configured_terms) == symm_quadruped.SYMM_QUADRUPED_POLICY_OBS_DIM
 
 
 def test_sagittal_plane_state_exposes_lateral_offset_and_wrapped_heading():
@@ -891,7 +952,7 @@ def test_sagittal_plane_penalty_allows_gait_sway_and_rejects_low_posture():
     assert torch.all(penalty >= -2.1)
 
 
-def test_domain_randomization_resets_with_zero_lateral_and_yaw_velocity():
+def test_domain_randomization_includes_lateral_and_yaw_velocity_disturbances():
     events = SimpleNamespace(
         physics_material=SimpleNamespace(params={}),
         add_base_mass=SimpleNamespace(params={}),
@@ -904,6 +965,8 @@ def test_domain_randomization_resets_with_zero_lateral_and_yaw_velocity():
 
     configure_domain_randomization(env_cfg)
 
-    assert env_cfg.events.reset_base.params["velocity_range"]["y"] == (0.0, 0.0)
-    assert env_cfg.events.reset_base.params["velocity_range"]["yaw"] == (0.0, 0.0)
-    assert env_cfg.events.push_robot.params["velocity_range"]["y"] == (0.0, 0.0)
+    reset_velocity_range = env_cfg.events.reset_base.params["velocity_range"]
+    push_velocity_range = env_cfg.events.push_robot.params["velocity_range"]
+    assert reset_velocity_range["y"] == reset_velocity_range["x"] == (-0.5, 0.5)
+    assert reset_velocity_range["yaw"] == reset_velocity_range["roll"] == (-0.5, 0.5)
+    assert push_velocity_range["y"] == push_velocity_range["x"] == (-0.25, 0.25)

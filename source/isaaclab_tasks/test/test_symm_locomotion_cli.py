@@ -48,7 +48,7 @@ def test_train_dry_run_uses_selected_robot_task(capsys):
     assert " 1" in captured.out
 
 
-def test_train_defaults_apply_trs_to_in_place_commands():
+def test_train_defaults_apply_shared_scale_and_trs_settings():
     symm_cli = _load_symm_cli()
     parser = symm_cli.build_parser()
     args = parser.parse_args(["train", "--robot", "go2", "--no-conda-run"])
@@ -56,8 +56,33 @@ def test_train_defaults_apply_trs_to_in_place_commands():
 
     command = symm_cli.train_lab_args(args, [])
 
+    assert args.num_envs == 512
+    assert args.iterations == 20000
+    assert command[command.index("--num_envs") + 1] == "512"
+    assert command[command.index("--max_iterations") + 1] == "20000"
     assert args.tr_min_abs_cmd_vel == 0.0
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+
+
+def test_ablation_uses_shared_training_scale_defaults():
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["ablation", "--robot", "go2", "--no-conda-run"])
+
+    assert args.num_envs == 512
+    assert args.iterations == 20000
+
+
+def test_no_trs_disables_every_auxiliary_symmetry_training_path():
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", "go2", "--no-conda-run", "--no-trs"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
+    assert "agent.algorithm.symmetry_cfg.use_mirror_loss=False" in command
+    assert "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0" in command
+    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0" in command
 
 
 def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):

@@ -98,7 +98,7 @@ class SymmQuadrupedPhysicsCfg(PresetCfg):
 
 def configure_flat_scene(env_cfg) -> None:
     """Apply the shared flat terrain and lighting setup."""
-    env_cfg.scene.num_envs = 256
+    env_cfg.scene.num_envs = 512
     env_cfg.scene.terrain.terrain_type = "generator"
     env_cfg.scene.terrain.terrain_generator = SYMM_QUADRUPED_FLAT_TERRAIN_CFG
     env_cfg.scene.terrain.max_init_terrain_level = 0
@@ -136,7 +136,7 @@ def make_gait_velocity_command(
         heading_control_stiffness=0.5,
         rel_standing_envs=0.0,
         rel_heading_envs=0.0,
-        min_xy_command_norm=0.2,
+        min_xy_command_norm=0.0,
         resample_once_after_reset=True,
         resample_gait_once_after_reset=True,
         vel_xy_success_threshold=0.05,
@@ -396,15 +396,15 @@ def configure_domain_randomization(env_cfg, *, base_body_name: str | None = None
     env_cfg.events.reset_base.params["pose_range"] = {}
     env_cfg.events.reset_base.params["velocity_range"] = {
         "x": (-0.5, 0.5),
-        "y": (0.0, 0.0),
+        "y": (-0.5, 0.5),
         "z": (-0.5, 0.5),
         "roll": (-0.5, 0.5),
         "pitch": (-0.5, 0.5),
-        "yaw": (0.0, 0.0),
+        "yaw": (-0.5, 0.5),
     }
 
     env_cfg.events.push_robot.interval_range_s = (15.0, 15.0)
-    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (0.0, 0.0)}
+    env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
 
 
 def make_play_physics_cfg() -> PhysxCfg:

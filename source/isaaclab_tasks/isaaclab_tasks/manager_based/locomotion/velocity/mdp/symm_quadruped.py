@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
-from dataclasses import MISSING
+from dataclasses import MISSING, dataclass
 from typing import TYPE_CHECKING
 
 import torch
@@ -39,6 +39,51 @@ SYMM_QUADRUPED_LEG_JOINT_IDS = {
 
 SYMM_QUADRUPED_LEG_PHASE_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 """Default mapping from logical leg tags to gait phase columns."""
+
+SYMM_QUADRUPED_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_trs_v2"
+"""Audit identifier for the shared gait and time-reversal phase semantics."""
+
+SYMM_QUADRUPED_POLICY_OBS_DIM = 72
+"""Dimension of the shared symmetric quadruped policy observation."""
+
+
+@dataclass(frozen=True)
+class _SymmQuadrupedPolicyObservationLayout:
+    """Slices for the shared symmetric quadruped policy observation."""
+
+    measured_base_twist: slice
+    projected_gravity: slice
+    desired_base_twist: slice
+    joint_position: slice
+    joint_velocity: slice
+    previous_action: slice
+    foot_phase_sin: slice
+    foot_phase_cos: slice
+    foot_theta_sin: slice
+    foot_theta_cos: slice
+    phase_ratios: slice
+    swing_ratio: slice
+    stance_ratio: slice
+    sagittal_plane_state: slice
+
+
+SYMM_QUADRUPED_POLICY_OBS_LAYOUT = _SymmQuadrupedPolicyObservationLayout(
+    measured_base_twist=slice(0, 6),
+    projected_gravity=slice(6, 9),
+    desired_base_twist=slice(9, 15),
+    joint_position=slice(15, 27),
+    joint_velocity=slice(27, 39),
+    previous_action=slice(39, 51),
+    foot_phase_sin=slice(51, 55),
+    foot_phase_cos=slice(55, 59),
+    foot_theta_sin=slice(59, 63),
+    foot_theta_cos=slice(63, 67),
+    phase_ratios=slice(67, 69),
+    swing_ratio=slice(67, 68),
+    stance_ratio=slice(68, 69),
+    sagittal_plane_state=slice(69, SYMM_QUADRUPED_POLICY_OBS_DIM),
+)
+"""Named layout for the shared symmetric quadruped policy observation."""
 
 SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS = (
     (1.0, 1.0, 1.0),
@@ -96,6 +141,9 @@ class GaitVelocityCommandCfg(CommandTermCfg):
 
     min_xy_command_norm: float = 0.0
     """Minimum sampled XY command norm [m/s]; smaller commands are zeroed."""
+
+    phase_mapping_version: str = SYMM_QUADRUPED_PHASE_MAPPING_VERSION
+    """Audit metadata identifying the gait and time-reversal phase semantics."""
 
     resample_once_after_reset: bool = False
     """Whether velocity commands resample only once after the episode reset."""
@@ -281,10 +329,10 @@ class GaitVelocityCommand(CommandTerm):
 
     def foot_phases(self) -> torch.Tensor:
         """Foot phases for FL, FR, RL, and RR in cycle units."""
-        phase_ratio = self._env.episode_length_buf.to(torch.float32) * self._env.step_dt / self.gait_periods
-        phase = _wrap_phase(phase_ratio.unsqueeze(-1) + self.foot_thetas)
-        phase_tr = _wrap_phase(-(phase_ratio.unsqueeze(-1) + self.foot_thetas))
-        return torch.where(self.command[:, 0:1] >= 0.0, phase, phase_tr)
+        phase_ratio = (
+            self._env.episode_length_buf.to(dtype=self.gait_periods.dtype) * self._env.step_dt / self.gait_periods
+        )
+        return compute_same_gait_foot_phases(phase_ratio.unsqueeze(-1), self.foot_thetas)
 
     def phase_ratios(self) -> torch.Tensor:
         """Swing and stance phase ratios."""
@@ -1316,8 +1364,22 @@ def compute_time_reversal_states(
     env: ManagerBasedRLEnv,
     obs: TensorDict | None = None,
     actions: torch.Tensor | None = None,
-):
-    """Augment states using the shared 72D quadruped time-reversal transform."""
+) -> tuple[TensorDict | None, torch.Tensor | None]:
+    """Pair original samples with their shared quadruped time-reversal transforms.
+
+    RSL-RL uses this callback to construct pairs for the auxiliary policy
+    equivariance and value-consistency losses. When
+    ``use_data_augmentation=False``, the transformed samples do not enter the
+    PPO surrogate or PPO value-regression transition batch.
+
+    Args:
+        env: Environment passed by the RSL-RL symmetry callback API.
+        obs: Original observation batch.
+        actions: Original action batch.
+
+    Returns:
+        The original/transformed observation and action pairs.
+    """
     if obs is not None:
         batch_size = obs.batch_size[0]
         obs_aug = obs.repeat(2)
@@ -1338,24 +1400,101 @@ def compute_time_reversal_states(
     return obs_aug, actions_aug
 
 
+def time_reverse_phase_sin_cos(
+    phase_sin: torch.Tensor,
+    phase_cos: torch.Tensor,
+    swing_ratio: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply the duty-aware time-reversal reflection to phase features.
+
+    The reflected phase is ``remainder(swing_ratio - phase, 1.0)``. Ratios are
+    used as provided and are not silently clamped.
+
+    Args:
+        phase_sin: Phase sine features with four leg channels in the final dimension.
+        phase_cos: Phase cosine features matching :paramref:`phase_sin`.
+        swing_ratio: Swing phase ratio with a singleton final dimension broadcastable to the phase features.
+
+    Returns:
+        The reflected phase sine and cosine features.
+
+    Raises:
+        ValueError: If shapes, devices, or dtypes are incompatible.
+    """
+    if phase_sin.ndim < 1 or phase_sin.shape[-1] != 4:
+        raise ValueError(
+            f"Expected phase_sin to have four leg channels in its final dimension, got {tuple(phase_sin.shape)}."
+        )
+    if phase_cos.shape != phase_sin.shape:
+        raise ValueError(
+            f"Expected phase_cos to match phase_sin shape, got {tuple(phase_cos.shape)} and {tuple(phase_sin.shape)}."
+        )
+    if swing_ratio.ndim < 1 or swing_ratio.shape[-1] != 1:
+        raise ValueError(
+            f"Expected swing_ratio to have a singleton final dimension, got shape {tuple(swing_ratio.shape)}."
+        )
+    if phase_cos.device != phase_sin.device or swing_ratio.device != phase_sin.device:
+        raise ValueError(
+            "Expected phase_sin, phase_cos, and swing_ratio on the same device, "
+            f"got {phase_sin.device}, {phase_cos.device}, and {swing_ratio.device}."
+        )
+    if phase_cos.dtype != phase_sin.dtype or swing_ratio.dtype != phase_sin.dtype:
+        raise ValueError(
+            "Expected phase_sin, phase_cos, and swing_ratio to have the same dtype, "
+            f"got {phase_sin.dtype}, {phase_cos.dtype}, and {swing_ratio.dtype}."
+        )
+    if not torch.is_floating_point(phase_sin):
+        raise ValueError(f"Expected floating-point phase features, got dtype {phase_sin.dtype}.")
+
+    try:
+        broadcast_shape = torch.broadcast_shapes(phase_sin.shape, swing_ratio.shape)
+    except RuntimeError as error:
+        raise ValueError(
+            "Expected swing_ratio to be broadcastable to the phase features, "
+            f"got {tuple(swing_ratio.shape)} and {tuple(phase_sin.shape)}."
+        ) from error
+    if broadcast_shape != phase_sin.shape:
+        raise ValueError(
+            "Expected swing_ratio to broadcast without expanding the phase feature shape, "
+            f"got broadcast shape {tuple(broadcast_shape)} from {tuple(swing_ratio.shape)} "
+            f"and {tuple(phase_sin.shape)}."
+        )
+
+    alpha = 2.0 * torch.pi * swing_ratio
+    sin_alpha = torch.sin(alpha)
+    cos_alpha = torch.cos(alpha)
+    phase_sin_tr = sin_alpha * phase_cos - cos_alpha * phase_sin
+    phase_cos_tr = cos_alpha * phase_cos + sin_alpha * phase_sin
+    return phase_sin_tr, phase_cos_tr
+
+
 def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
     """Time-reverse the shared 72D symmetric quadruped policy observation."""
-    if obs.shape[-1] != 72:
-        raise ValueError(f"Expected a 72D symmetric quadruped policy observation, got shape {tuple(obs.shape)}.")
+    if obs.ndim < 1 or obs.shape[-1] != SYMM_QUADRUPED_POLICY_OBS_DIM:
+        raise ValueError(
+            f"Expected a {SYMM_QUADRUPED_POLICY_OBS_DIM}D symmetric quadruped policy observation, "
+            f"got shape {tuple(obs.shape)}."
+        )
 
+    layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
+    phase_sin_tr, phase_cos_tr = time_reverse_phase_sin_cos(
+        obs[..., layout.foot_phase_sin],
+        obs[..., layout.foot_phase_cos],
+        obs[..., layout.swing_ratio],
+    )
     obs_tr = obs.clone()
-    obs_tr[:, 0:6] = -obs[:, 0:6]
-    obs_tr[:, 6:9] = obs[:, 6:9]
-    obs_tr[:, 9:15] = -obs[:, 9:15]
-    obs_tr[:, 15:27] = obs[:, 15:27]
-    obs_tr[:, 27:39] = -obs[:, 27:39]
-    obs_tr[:, 39:51] = obs[:, 39:51]
-    obs_tr[:, 51:55] = -obs[:, 51:55]
-    obs_tr[:, 55:59] = obs[:, 55:59]
-    obs_tr[:, 59:63] = -obs[:, 59:63]
-    obs_tr[:, 63:67] = obs[:, 63:67]
-    obs_tr[:, 67:69] = obs[:, 67:69]
-    obs_tr[:, 69:72] = obs[:, 69:72]
+    obs_tr[..., layout.measured_base_twist] = -obs[..., layout.measured_base_twist]
+    obs_tr[..., layout.projected_gravity] = obs[..., layout.projected_gravity]
+    obs_tr[..., layout.desired_base_twist] = -obs[..., layout.desired_base_twist]
+    obs_tr[..., layout.joint_position] = obs[..., layout.joint_position]
+    obs_tr[..., layout.joint_velocity] = -obs[..., layout.joint_velocity]
+    obs_tr[..., layout.previous_action] = obs[..., layout.previous_action]
+    obs_tr[..., layout.foot_phase_sin] = phase_sin_tr
+    obs_tr[..., layout.foot_phase_cos] = phase_cos_tr
+    obs_tr[..., layout.foot_theta_sin] = -obs[..., layout.foot_theta_sin]
+    obs_tr[..., layout.foot_theta_cos] = obs[..., layout.foot_theta_cos]
+    obs_tr[..., layout.phase_ratios] = obs[..., layout.phase_ratios]
+    obs_tr[..., layout.sagittal_plane_state] = obs[..., layout.sagittal_plane_state]
     return obs_tr
 
 
@@ -1366,6 +1505,19 @@ def time_reverse_actions(actions: torch.Tensor) -> torch.Tensor:
     Under time reversal, joint positions are even, so the transform is the identity.
     """
     return actions.clone()
+
+
+def compute_same_gait_foot_phases(common_phase: torch.Tensor, foot_thetas: torch.Tensor) -> torch.Tensor:
+    """Combine a forward-time common gait clock with fixed foot offsets.
+
+    Args:
+        common_phase: Common gait phase in cycle units.
+        foot_thetas: Per-foot phase offsets in cycle units.
+
+    Returns:
+        Wrapped foot phases with the broadcast shape of the inputs.
+    """
+    return _wrap_phase(common_phase + foot_thetas)
 
 
 def _wrap_phase(x: torch.Tensor) -> torch.Tensor:

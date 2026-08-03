@@ -227,8 +227,14 @@ def _draw_panel(
     y_min: float,
     y_max: float,
     y_ticks: Sequence[float],
+    curve_colors: Sequence[str] | None = None,
+    curve_dash_arrays: Sequence[str | None] | None = None,
 ) -> None:
     """Draw one aligned TensorBoard reward panel."""
+    if curve_colors is not None and len(curve_colors) != len(curves):
+        raise ValueError("curve_colors must match the number of reward curves.")
+    if curve_dash_arrays is not None and len(curve_dash_arrays) != len(curves):
+        raise ValueError("curve_dash_arrays must match the number of reward curves.")
     plot_left = 105.0 + panel_index * 760.0
     plot_top = 135.0
     plot_width = 675.0
@@ -361,7 +367,7 @@ def _draw_panel(
         )
 
     curve_group = ET.SubElement(root, _svg_tag("g"), {"clip-path": f"url(#{clip_id})"})
-    for curve in curves:
+    for curve_index, curve in enumerate(curves):
         attributes = {
             "points": _polyline_points(
                 getattr(curve, x_field),
@@ -376,13 +382,13 @@ def _draw_panel(
                 y_max=y_max,
             ),
             "fill": "none",
-            "stroke": _curve_color(curve),
+            "stroke": curve_colors[curve_index] if curve_colors is not None else _curve_color(curve),
             "stroke-width": "3.0" if not curve.run.trs_enabled else "1.8",
             "stroke-linejoin": "round",
             "stroke-linecap": "round",
             "opacity": "1.0" if not curve.run.trs_enabled else "0.9",
         }
-        dash_array = _curve_dash_array(curve)
+        dash_array = curve_dash_arrays[curve_index] if curve_dash_arrays is not None else _curve_dash_array(curve)
         if dash_array is not None:
             attributes["stroke-dasharray"] = dash_array
         ET.SubElement(curve_group, _svg_tag("polyline"), attributes)
@@ -409,8 +415,17 @@ def _draw_panel(
         )
 
 
-def _draw_legend(root: ET.Element, curves: Sequence[RewardCurve]) -> None:
+def _draw_legend(
+    root: ET.Element,
+    curves: Sequence[RewardCurve],
+    curve_colors: Sequence[str] | None = None,
+    curve_dash_arrays: Sequence[str | None] | None = None,
+) -> None:
     """Draw a two-row legend with explicit coefficient and warm-up labels."""
+    if curve_colors is not None and len(curve_colors) != len(curves):
+        raise ValueError("curve_colors must match the number of reward curves.")
+    if curve_dash_arrays is not None and len(curve_dash_arrays) != len(curves):
+        raise ValueError("curve_dash_arrays must match the number of reward curves.")
     columns = 5
     item_width = 300.0
     start_x = 70.0
@@ -424,11 +439,11 @@ def _draw_legend(root: ET.Element, curves: Sequence[RewardCurve]) -> None:
             "x2": f"{item_x + 45.0:.2f}",
             "y1": f"{item_y:.2f}",
             "y2": f"{item_y:.2f}",
-            "stroke": _curve_color(curve),
+            "stroke": curve_colors[index] if curve_colors is not None else _curve_color(curve),
             "stroke-width": "3.0" if not curve.run.trs_enabled else "2.0",
             "stroke-linecap": "round",
         }
-        dash_array = _curve_dash_array(curve)
+        dash_array = curve_dash_arrays[index] if curve_dash_arrays is not None else _curve_dash_array(curve)
         if dash_array is not None:
             line_attributes["stroke-dasharray"] = dash_array
         ET.SubElement(root, _svg_tag("line"), line_attributes)

@@ -55,7 +55,7 @@ class TestCuratedTensorBoardPlotter(unittest.TestCase):
             self.assertEqual(plotter._parse_yaml_scalar(path, "schedule"), "adaptive")
 
     def test_discovery_is_limited_to_five_curated_runs_per_robot(self) -> None:
-        """Find only the ten TensorBoard traces physically under ``good_runs``."""
+        """Find only the ten traces in the fixed legacy comparison inventory."""
         runs = plotter.discover_curated_runs()
         self.assertEqual(len(runs), 10)
         for robot in plotter.ROBOT_RUN_DIRS:

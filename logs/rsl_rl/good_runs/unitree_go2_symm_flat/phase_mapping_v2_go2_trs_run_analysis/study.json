@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "analysis_method_version": "phase_mapping_v2_matched_trs_v1",
+  "robot": "go2",
+  "display_name": "Unitree Go2",
+  "short_name": "Go2",
+  "run_root": "logs/rsl_rl/good_runs/unitree_go2_symm_flat",
+  "training": {
+    "seed": 42,
+    "num_envs": 512,
+    "num_steps_per_env": 24,
+    "max_iterations": 20000
+  },
+  "windows_s": {
+    "backward": [0.5, 9.5],
+    "forward": [10.5, 29.5]
+  },
+  "balance_y_range": [-90.0, 90.0],
+  "balance_y_ticks": [-80.0, -40.0, 0.0, 40.0, 80.0],
+  "runs": [
+    {
+      "label": "No TRS",
+      "slug": "no_trs",
+      "folder": "2026-07-31_22-48-10_go2_no_trs_20k_512",
+      "mirror_coeff": 0.0,
+      "value_coeff": 0.0,
+      "warmup_iterations": null,
+      "trs_enabled": false
+    },
+    {
+      "label": "TRS 0.10/0.05",
+      "slug": "trs_0p10_0p05",
+      "folder": "2026-08-01_11-09-46_go2_trs_m0p1_v0p05_w500_minv0_20k_512",
+      "mirror_coeff": 0.1,
+      "value_coeff": 0.05,
+      "warmup_iterations": 500,
+      "trs_enabled": true
+    },
+    {
+      "label": "TRS 0.20/0.10",
+      "slug": "trs_0p20_0p10",
+      "folder": "2026-07-31_22-48-38_go2_trs_m0p2_v0p1_w500_20k_512",
+      "mirror_coeff": 0.2,
+      "value_coeff": 0.1,
+      "warmup_iterations": 500,
+      "trs_enabled": true
+    },
+    {
+      "label": "TRS 0.30/0.15",
+      "slug": "trs_0p30_0p15",
+      "folder": "2026-08-01_22-39-14_go2_trs_m0p3_v0p15_w500_minv0_20k_512",
+      "mirror_coeff": 0.3,
+      "value_coeff": 0.15,
+      "warmup_iterations": 500,
+      "trs_enabled": true
+    }
+  ]
+}

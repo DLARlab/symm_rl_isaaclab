@@ -17,7 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 CONDA_ENV = "symm_rl_isaaclab"
-DEFAULT_NUM_ENVS = 256
+DEFAULT_NUM_ENVS = 512
+DEFAULT_TRAINING_ITERATIONS = 20000
 DEFAULT_MIRROR_LOSS_COEFF = 0.1
 DEFAULT_TR_VALUE_COEFF = 0.05
 DEFAULT_TR_WARMUP_ITERATIONS = 500
@@ -270,7 +271,9 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
     """Add train command options."""
     add_common_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=DEFAULT_NUM_ENVS)
-    parser.add_argument("--iterations", "--max-iterations", "--max_iterations", type=int, default=30000)
+    parser.add_argument(
+        "--iterations", "--max-iterations", "--max_iterations", type=int, default=DEFAULT_TRAINING_ITERATIONS
+    )
     parser.add_argument("--run-name", "--run_name", default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
@@ -517,7 +520,9 @@ def add_ablation_args(parser: argparse.ArgumentParser) -> None:
     """Add ablation command options."""
     add_common_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=DEFAULT_NUM_ENVS)
-    parser.add_argument("--iterations", "--max-iterations", "--max_iterations", type=int, default=10000)
+    parser.add_argument(
+        "--iterations", "--max-iterations", "--max_iterations", type=int, default=DEFAULT_TRAINING_ITERATIONS
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[1])
     parser.add_argument("--mirror", "--mirror-loss-coeff", dest="mirror_loss_coeff", type=float, default=0.2)
     parser.add_argument("--tr-value-coef", "--tr_value_coef", dest="tr_value_coeff", type=float, default=0.05)

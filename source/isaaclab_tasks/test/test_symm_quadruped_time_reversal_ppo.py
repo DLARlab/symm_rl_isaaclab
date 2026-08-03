@@ -25,6 +25,19 @@ class _DummyActor:
         self.distribution = _DummyDistribution()
 
 
+def test_zeroed_no_trs_configuration_disables_time_reversal_update_path():
+    algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
+    algorithm.symmetry = {
+        "use_time_reversal_regularization": True,
+        "use_data_augmentation": False,
+        "use_mirror_loss": False,
+        "mirror_loss_coeff": 0.0,
+        "value_loss_coeff": 0.0,
+    }
+
+    assert not algorithm._time_reversal_enabled()
+
+
 def test_clamp_actor_std_keeps_scalar_gaussian_std_positive_and_finite():
     algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
     algorithm.actor = _DummyActor()

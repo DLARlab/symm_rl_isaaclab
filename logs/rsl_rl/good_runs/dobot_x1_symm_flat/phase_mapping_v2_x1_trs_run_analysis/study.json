@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "analysis_method_version": "phase_mapping_v2_matched_trs_v1",
+  "robot": "x1",
+  "display_name": "Dobot X1",
+  "short_name": "X1",
+  "run_root": "logs/rsl_rl/good_runs/dobot_x1_symm_flat",
+  "training": {
+    "seed": 42,
+    "num_envs": 512,
+    "num_steps_per_env": 24,
+    "max_iterations": 20000
+  },
+  "windows_s": {
+    "backward": [0.5, 9.5],
+    "forward": [10.5, 29.5]
+  },
+  "balance_y_range": [-100.0, 100.0],
+  "balance_y_ticks": [-100.0, -50.0, 0.0, 50.0, 100.0],
+  "runs": [
+    {
+      "label": "No TRS",
+      "slug": "no_trs",
+      "folder": "2026-08-02_10-35-06_x1_no_trs_20k_512",
+      "mirror_coeff": 0.0,
+      "value_coeff": 0.0,
+      "warmup_iterations": null,
+      "trs_enabled": false
+    },
+    {
+      "label": "TRS 0.10/0.05",
+      "slug": "trs_0p10_0p05",
+      "folder": "2026-08-02_21-02-49_x1_trs_m0p1_v0p05_w500_minv0_20k_512",
+      "mirror_coeff": 0.1,
+      "value_coeff": 0.05,
+      "warmup_iterations": 500,
+      "trs_enabled": true
+    },
+    {
+      "label": "TRS 0.20/0.10",
+      "slug": "trs_0p20_0p10",
+      "folder": "2026-08-02_10-28-45_x1_trs_m0p2_v0p10_w500_minv0_20k_512",
+      "mirror_coeff": 0.2,
+      "value_coeff": 0.1,
+      "warmup_iterations": 500,
+      "trs_enabled": true
+    },
+    {
+      "label": "TRS 0.30/0.15",
+      "slug": "trs_0p30_0p15",
+      "folder": "2026-08-02_21-07-58_x1_trs_m0p3_v0p15_w500_minv0_20k_512",
+      "mirror_coeff": 0.3,
+      "value_coeff": 0.15,
+      "warmup_iterations": 500,
+      "trs_enabled": true
+    }
+  ]
+}

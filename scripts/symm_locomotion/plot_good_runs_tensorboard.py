@@ -155,10 +155,12 @@ def _generation(run_name: str) -> str:
 
 
 def discover_curated_runs() -> list[CuratedRun]:
-    """Discover runs whose event and parameter files are physically curated."""
+    """Discover the fixed legacy 60D/72D comparison inventory."""
     runs = []
     for robot, run_root in ROBOT_RUN_DIRS.items():
         for run_path in sorted(path for path in run_root.iterdir() if path.is_dir()):
+            if run_path.name not in LEGACY_RUN_NAMES | UPDATED_RUN_NAMES:
+                continue
             event_paths = sorted(run_path.glob("events.out.tfevents.*"))
             agent_path = run_path / "params/agent.yaml"
             if not event_paths and not agent_path.is_file():
