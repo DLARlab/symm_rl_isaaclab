@@ -1,3 +1,30 @@
-# Keep intermediate training checkpoints local. The terminal checkpoint for
-# each curated run is deliberately force-added to version control.
+# Publish every curated run directory and every non-checkpoint artifact.
+# The repository-level .gitignore explicitly exposes this good_runs tree.
+!**/
+!**
+
+# Keep iteration checkpoints local by default, then explicitly publish only
+# the numerically latest checkpoint from each curated training run.
 **/model_*.pt
+
+# Gitignore cannot select a numeric maximum dynamically. Add one exact
+# exception here whenever a new curated run is archived.
+!/dobot_x1_symm_flat/2026-07-11_02-59-13_no_trs/model_9999.pt
+!/dobot_x1_symm_flat/2026-07-13_01-31-40_more_trs_lr1e4_fixed_zero_lateral/model_9999.pt
+!/dobot_x1_symm_flat/2026-07-19_10-33-04_x1_no_trs_pitch0p35/model_19999.pt
+!/dobot_x1_symm_flat/2026-07-19_17-46-27_x1_trs_m0p1_v0p05_w500_pitch0p35_pterm0p70/model_19999.pt
+!/dobot_x1_symm_flat/2026-07-20_16-24-19_x1_trs_m0p20_v0p10_w500/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-02_10-28-45_x1_trs_m0p2_v0p10_w500_minv0_20k_512/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-02_10-35-06_x1_no_trs_20k_512/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-02_21-02-49_x1_trs_m0p1_v0p05_w500_minv0_20k_512/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-02_21-07-58_x1_trs_m0p3_v0p15_w500_minv0_20k_512/model_19999.pt
+
+!/unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs/model_9999.pt
+!/unitree_go2_symm_flat/2026-07-13_01-30-42_more_trs_lr1e4_fixed_zero_lateral/model_9999.pt
+!/unitree_go2_symm_flat/2026-07-19_10-32-57_go2_no_trs_pitch0p50_pterm1p20/model_19999.pt
+!/unitree_go2_symm_flat/2026-07-19_17-37-55_go2_trs_m0p1_v0p05_w500_minv0_pitch0p50_pterm1p20/model_19999.pt
+!/unitree_go2_symm_flat/2026-07-20_16-23-32_go2_trs_m0p20_v0p10_w500/model_19999.pt
+!/unitree_go2_symm_flat/2026-07-31_22-48-10_go2_no_trs_20k_512/model_19999.pt
+!/unitree_go2_symm_flat/2026-07-31_22-48-38_go2_trs_m0p2_v0p1_w500_20k_512/model_19999.pt
+!/unitree_go2_symm_flat/2026-08-01_11-09-46_go2_trs_m0p1_v0p05_w500_minv0_20k_512/model_19999.pt
+!/unitree_go2_symm_flat/2026-08-01_22-39-14_go2_trs_m0p3_v0p15_w500_minv0_20k_512/model_19999.pt
