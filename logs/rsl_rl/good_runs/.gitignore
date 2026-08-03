@@ -1,0 +1,3 @@
+# Keep intermediate training checkpoints local. The terminal checkpoint for
+# each curated run is deliberately force-added to version control.
+**/model_*.pt

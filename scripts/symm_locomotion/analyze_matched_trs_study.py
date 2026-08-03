@@ -384,18 +384,40 @@ def _validate_run_configuration(run: StudyRun) -> dict[str, Any]:
     )
 
 
+def _validate_initial_checkpoints(checkpoint_paths: dict[str, Path]) -> tuple[bool | None, dict[str, str], str]:
+    """Validate initial checkpoints when the archive retains them.
+
+    Latest-only curated archives intentionally omit every ``model_0.pt`` file.
+    A partially retained set is rejected because it cannot support a matched
+    initialization comparison.
+    """
+    available = {slug: path.is_file() for slug, path in checkpoint_paths.items()}
+    if any(available.values()) and not all(available.values()):
+        missing = [str(checkpoint_paths[slug]) for slug, is_available in available.items() if not is_available]
+        raise FileNotFoundError(f"Initial checkpoint set is incomplete: {missing}")
+    if not any(available.values()):
+        return None, {}, "unavailable_latest_only_archive"
+
+    hashes = {slug: hashlib.sha256(path.read_bytes()).hexdigest() for slug, path in checkpoint_paths.items()}
+    equal = len(set(hashes.values())) == 1
+    if not equal:
+        raise ValueError("Initial checkpoints are not byte-identical.")
+    return equal, hashes, "validated"
+
+
 def validate_artifacts() -> dict[str, Any]:
     """Validate completed checkpoints and byte-identical paired inputs."""
     member_hashes: dict[str, dict[str, str]] = {}
     env_snapshots: dict[str, str] = {}
     agent_snapshots: dict[str, str] = {}
-    initial_checkpoint_hashes: dict[str, str] = {}
+    initial_checkpoint_equal, initial_checkpoint_hashes, initial_checkpoint_validation = _validate_initial_checkpoints(
+        {run.slug: run.path / "model_0.pt" for run in RUNS}
+    )
     raw_provenance_hashes: dict[str, str] = {}
     training_provenance_hashes: dict[str, str] = {}
     resolved_run_settings: dict[str, dict[str, Any]] = {}
     for run in RUNS:
         required = (
-            run.path / "model_0.pt",
             run.path / "model_19999.pt",
             run.path / "params" / "agent.yaml",
             run.path / "params" / "env.yaml",
@@ -426,7 +448,6 @@ def validate_artifacts() -> dict[str, Any]:
             },
         )
         resolved_run_settings[run.slug] = _validate_run_configuration(run)
-        initial_checkpoint_hashes[run.slug] = hashlib.sha256((run.path / "model_0.pt").read_bytes()).hexdigest()
         provenance_path = run.path / "git" / "symm_rl_isaaclab.diff"
         raw_provenance_hashes[run.slug] = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
         training_provenance_hashes[run.slug] = hashlib.sha256(
@@ -443,15 +464,12 @@ def validate_artifacts() -> dict[str, Any]:
         raise ValueError(f"The supposedly matched rollout inputs differ: {mismatched}")
     env_equal = len(set(env_snapshots.values())) == 1
     agent_equal_after_trs_normalization = len(set(agent_snapshots.values())) == 1
-    initial_checkpoint_equal = len(set(initial_checkpoint_hashes.values())) == 1
     raw_provenance_equal = len(set(raw_provenance_hashes.values())) == 1
     training_provenance_equal = len(set(training_provenance_hashes.values())) == 1
     if not env_equal:
         raise ValueError("Resolved environment snapshots differ beyond log_dir.")
     if not agent_equal_after_trs_normalization:
         raise ValueError("Resolved agent snapshots differ beyond run name and TRS settings.")
-    if not initial_checkpoint_equal:
-        raise ValueError("Initial checkpoints are not byte-identical.")
     if not training_provenance_equal:
         raise ValueError("Archived training-source provenance differs between runs.")
     return {
@@ -460,6 +478,7 @@ def validate_artifacts() -> dict[str, Any]:
         "agent_snapshots_equal_after_run_name_and_trs_normalization": agent_equal_after_trs_normalization,
         "initial_checkpoints_byte_identical": initial_checkpoint_equal,
         "initial_checkpoint_sha256": initial_checkpoint_hashes,
+        "initial_checkpoint_validation": initial_checkpoint_validation,
         "raw_code_provenance_diffs_byte_identical": raw_provenance_equal,
         "raw_code_provenance_diff_sha256": raw_provenance_hashes,
         "training_source_provenance_equal_after_archive_listing_exclusion": training_provenance_equal,

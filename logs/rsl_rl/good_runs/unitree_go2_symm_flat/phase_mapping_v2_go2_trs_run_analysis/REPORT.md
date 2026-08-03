@@ -47,8 +47,9 @@ TRS effect and are not calibrated hardware failure probabilities.
 
 This is a strongly matched comparison:
 
-- every run is complete through `model_19999.pt`, with 19,999 reward scalar
-  points and the same 72-input, 12-output actor dimensions;
+- every run completed through `model_19999.pt`; the published archive retains
+  that terminal checkpoint, 19,999 reward scalar points, and the same
+  72-input, 12-output actor dimensions;
 - all runs use seed 42, 512 environments, 24 steps per environment, and 20,000
   iterations: 12,288 transitions per iteration and 245.76 million transitions
   in total;
@@ -284,6 +285,7 @@ From the repository root, regenerate the CSV, JSON, and SVG artifacts with:
 python .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\phase_mapping_v2_go2_trs_run_analysis\reproduce.py
 ```
 
-The raw run directories named by `study.json` must be available locally. The
-engine validates their paired inputs and provenance before regenerating the
-tables, JSON, and SVGs.
+The published run directories named by `study.json` contain the required
+paired inputs, provenance, event logs, and terminal checkpoints. The engine
+validates those artifacts before regenerating the tables, JSON, and SVGs; a
+fresh latest-only clone records initial-checkpoint revalidation as unavailable.

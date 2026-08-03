@@ -45,11 +45,13 @@ The comparison is strongly controlled:
 - every run uses seed 42, 512 environments, 24 steps per environment, and
   20,000 iterations: 12,288 transitions per iteration and 245.76 million
   transitions total;
-- every run has 21 checkpoints through `model_19999.pt`, one complete event
-  file, 20,000 reward points at iterations 0 through 19,999, and no nonfinite
-  TensorBoard scalars;
-- all four `model_0.pt` files are byte-identical
-  (`2089a92bd6992ab581c6dec01b70fdd7b87ca93d93f9cf521d0506c18b1249af`);
+- training produced 21 checkpoints per run through `model_19999.pt`; the
+  published archive retains only that terminal checkpoint, plus one complete
+  event file with 20,000 finite reward points at iterations 0 through 19,999;
+- before latest-only curation, all four `model_0.pt` files were verified as
+  byte-identical
+  (`2089a92bd6992ab581c6dec01b70fdd7b87ca93d93f9cf521d0506c18b1249af`),
+  with the hashes retained in `summary.json`;
 - actor/critic input dimensions remain 72, the action dimension is 12, and the
   network/PPO settings are shared;
 - resolved environment YAML files are identical after normalizing only
@@ -268,8 +270,10 @@ The small wrapper invokes the maintained shared engine at
 `scripts/symm_locomotion/analyze_matched_trs_study.py`. It loads immutable
 robot/run metadata from `study.json`, validates matched artifacts, recomputes
 every table, uses a fixed bootstrap seed, and regenerates the SVG figures and
-`summary.json`. The raw run directories named by the manifest must be available
-locally.
+`summary.json`. The published run directories named by the manifest contain the
+required event, rollout, configuration, provenance, and terminal-checkpoint
+artifacts. Initial-checkpoint revalidation is skipped explicitly in a fresh
+latest-only clone.
 
 - `front_hind_metrics.csv`: pair totals, per-distance values, imbalance, and
   temporal bootstrap intervals.

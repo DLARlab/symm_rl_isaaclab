@@ -205,9 +205,11 @@ The detailed, machine-readable reports and plots are archived here:
 
 Each comparison uses four seed-42 runs, 20,000 PPO iterations, 512 environments,
 the same initial checkpoint within the robot study, and a final-policy 30-second
-paired backward/forward rollout. The intended TRS coefficients are the study
-variable: no TRS, `0.10/0.05`, `0.20/0.10`, and `0.30/0.15`, with 500-iteration
-warm-up for enabled TRS runs.
+paired backward/forward rollout. Initial-checkpoint equality was verified before
+the archive adopted its latest-checkpoint-only retention policy; the recorded
+SHA-256 values remain in the study summaries. The intended TRS coefficients are
+the study variable: no TRS, `0.10/0.05`, `0.20/0.10`, and `0.30/0.15`, with
+500-iteration warm-up for enabled TRS runs.
 
 ### Go2: front/hind load concentration
 
@@ -269,10 +271,12 @@ The phase-mapping regression suite covers:
 - configuration invariants, including data augmentation disabled for both
   robots and unchanged auxiliary coefficients/warm-up.
 
-The shared analysis engine additionally validates final and initial checkpoints,
+The shared analysis engine additionally validates terminal checkpoints,
 resolved environment/agent snapshots after documented normalization, archived
 training-source provenance, and matched rollout-array hashes before computing
-comparisons.
+comparisons. It validates initial-checkpoint equality when a complete initial
+set is locally available, records it as unavailable for the published
+latest-only archive, and rejects a partially present set.
 
 ## Reproducible analysis layout
 
@@ -295,11 +299,14 @@ or invoke the shared utility with either manifest. The generated `summary.json`
 records the analysis-method version and SHA-256 hashes of the shared engine and
 manifest for auditability.
 
-The committed analysis directories contain the reports, plots, tables,
-manifests, and reproduction wrappers. The large raw checkpoints and rollout
-inputs are deliberately not duplicated into this milestone artifact commit;
-rerunning the wrappers requires the corresponding run directories named in the
-manifests to be available locally.
+The committed `good_runs` tree contains the training event logs, resolved
+configuration snapshots, provenance diffs, rollout inputs, plots, recordings,
+deployment exports, reports, tables, manifests, and reproduction wrappers.
+Each training folder retains exactly one terminal `model_<iteration>.pt`
+checkpoint; intermediate and initial training checkpoints remain local and are
+excluded from version control. The wrappers therefore reproduce the numerical
+study from a fresh clone while explicitly reporting initial-checkpoint
+revalidation as unavailable.
 
 ## Publication validation record
 

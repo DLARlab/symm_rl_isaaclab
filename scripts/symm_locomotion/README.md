@@ -206,8 +206,10 @@ python .\scripts\symm_locomotion\analyze_matched_trs_study.py `
 
 The small `reproduce.py` file in either analysis directory invokes the same
 shared engine. Before producing outputs, it verifies matched rollout members,
-initial/final checkpoints, resolved configurations, and archived
-training-source provenance. Generated `summary.json` files record the analysis
+terminal checkpoints, resolved configurations, and archived training-source
+provenance. Initial checkpoints are also compared when all are available; the
+latest-only curated archive omits them, and a partially present initial set is
+rejected. Generated `summary.json` files record the validation state, analysis
 method, engine hash, and manifest hash. Treat this manifest-driven utility as
 the source of truth for future matched TRS studies; the older hard-coded grid
 and TensorBoard scripts remain available for compatibility. Analysis method

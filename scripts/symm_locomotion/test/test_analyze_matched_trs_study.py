@@ -134,6 +134,34 @@ class TestMatchedTrsStudyManifest(unittest.TestCase):
                 training_cfg,
             )
 
+    def test_initial_checkpoint_validation_supports_latest_only_archives(self) -> None:
+        """Validate complete sets, skip absent sets, and reject partial sets."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoint_paths = {slug: root / slug / "model_0.pt" for slug in ("a", "b", "c", "d")}
+
+            equal, hashes, validation = study_analysis._validate_initial_checkpoints(checkpoint_paths)
+            self.assertIsNone(equal)
+            self.assertEqual(hashes, {})
+            self.assertEqual(validation, "unavailable_latest_only_archive")
+
+            checkpoint_paths["a"].parent.mkdir()
+            checkpoint_paths["a"].write_bytes(b"same initialization")
+            with self.assertRaisesRegex(FileNotFoundError, "incomplete"):
+                study_analysis._validate_initial_checkpoints(checkpoint_paths)
+
+            for path in checkpoint_paths.values():
+                path.parent.mkdir(exist_ok=True)
+                path.write_bytes(b"same initialization")
+            equal, hashes, validation = study_analysis._validate_initial_checkpoints(checkpoint_paths)
+            self.assertTrue(equal)
+            self.assertEqual(len(set(hashes.values())), 1)
+            self.assertEqual(validation, "validated")
+
+            checkpoint_paths["d"].write_bytes(b"different initialization")
+            with self.assertRaisesRegex(ValueError, "not byte-identical"):
+                study_analysis._validate_initial_checkpoints(checkpoint_paths)
+
 
 if __name__ == "__main__":
     unittest.main()

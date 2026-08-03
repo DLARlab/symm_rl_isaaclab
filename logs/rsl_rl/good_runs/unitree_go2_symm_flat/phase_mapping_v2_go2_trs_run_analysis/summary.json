@@ -8,6 +8,7 @@
       "trs_0p20_0p10": "a3cb98d29ab41111b60e990e6d5989b8fa89422611d169d69949d1fbca9edc13",
       "trs_0p30_0p15": "a3cb98d29ab41111b60e990e6d5989b8fa89422611d169d69949d1fbca9edc13"
     },
+    "initial_checkpoint_validation": "validated",
     "initial_checkpoints_byte_identical": true,
     "matched_npz_members": {
       "E_C_frc.npy": true,
@@ -171,7 +172,7 @@
   },
   "method": {
     "analysis_engine": "scripts/symm_locomotion/analyze_matched_trs_study.py",
-    "analysis_engine_sha256": "1f5e5d89e5a063407b2bf2bebd909a98577480ae5b94115180b5db9acb30f0ce",
+    "analysis_engine_sha256": "ec2772ce80c259dd44b4ee241e6fe4adcef9fb78420c45e8d059d8c632016d45",
     "analysis_method_version": "phase_mapping_v2_matched_trs_v1",
     "bootstrap_block_duration_s": 1.0,
     "bootstrap_replicates": 20000,
