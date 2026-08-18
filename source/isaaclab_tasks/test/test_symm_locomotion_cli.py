@@ -57,7 +57,21 @@ def test_train_defaults_apply_trs_to_in_place_commands():
     command = symm_cli.train_lab_args(args, [])
 
     assert args.tr_min_abs_cmd_vel == 0.0
+    assert command[command.index("--run_name") + 1] == "go2_with_trs_mirror0p1"
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+
+
+def test_train_default_run_name_includes_selected_robot():
+    symm_cli = _load_symm_cli()
+    parser = symm_cli.build_parser()
+
+    for robot, expected_run_name in (("go2", "go2_no_trs"), ("x1", "x1_no_trs")):
+        args = parser.parse_args(["train", "--robot", robot, "--no-trs", "--no-conda-run"])
+        args.robot_spec = symm_cli.get_robot(args.robot)
+
+        command = symm_cli.train_lab_args(args, [])
+
+        assert command[command.index("--run_name") + 1] == expected_run_name
 
 
 def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):
@@ -74,6 +88,7 @@ def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):
 
         video_length_index = command.index("--video_length") + 1
         assert command[video_length_index] == "1500"
+        assert "--tracking_error_direction_test" in command
         assert resolved_checkpoint == checkpoint
 
 
@@ -92,14 +107,60 @@ def test_record_video_length_override_is_preserved(monkeypatch, tmp_path):
     assert command[video_length_index] == "400"
 
 
+def test_record_tracking_direction_test_can_be_disabled(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+    args = parser.parse_args(["record", "--robot", "go2", "--no-tracking-test", "--no-conda-run"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command, _ = symm_cli.record_lab_args(args, [])
+
+    assert "--tracking_error_direction_test" not in command
+
+
+def test_play_tracking_direction_test_is_opt_in(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+    default_args = parser.parse_args(["play", "--robot", "go2", "--no-conda-run"])
+    default_args.robot_spec = symm_cli.get_robot(default_args.robot)
+    tracking_args = parser.parse_args(
+        [
+            "play",
+            "--robot",
+            "go2",
+            "--tracking-test",
+            "--tracking-speed",
+            "0.8",
+            "--tracking-yaw-rate",
+            "0.3",
+            "--no-conda-run",
+        ]
+    )
+    tracking_args.robot_spec = symm_cli.get_robot(tracking_args.robot)
+
+    default_command = symm_cli.play_lab_args(default_args, [])
+    tracking_command = symm_cli.play_lab_args(tracking_args, [])
+
+    assert "--tracking_error_direction_test" not in default_command
+    assert "--tracking_error_direction_test" in tracking_command
+    assert tracking_command[tracking_command.index("--tracking_error_direction_speed") + 1] == "0.8"
+    assert tracking_command[tracking_command.index("--tracking_error_direction_yaw_rate") + 1] == "0.3"
+
+
 def test_gif_conversion_rejects_stale_play_video(monkeypatch, tmp_path, capsys):
     symm_cli = _load_symm_cli()
     checkpoint = tmp_path / "model_9999.pt"
     checkpoint.touch()
-    video_dir = tmp_path / "videos" / "play"
-    video_dir.mkdir(parents=True)
-    (video_dir / "rl-video-step-0.mp4").touch()
-    previous_videos = symm_cli.play_video_snapshot(tmp_path)
+    output_dir = tmp_path / "eval" / "model_9999"
+    output_dir.mkdir(parents=True)
+    (output_dir / "rl-video-step-0.mp4").touch()
+    previous_videos = symm_cli.play_video_snapshot(checkpoint)
     parser = symm_cli.build_parser()
     args = parser.parse_args(["record", "--robot", "go2", "--gif", "--no-conda-run"])
     args.robot_spec = symm_cli.get_robot(args.robot)
@@ -116,9 +177,9 @@ def test_record_rejects_success_code_without_new_video(monkeypatch, tmp_path, ca
     symm_cli = _load_symm_cli()
     checkpoint = tmp_path / "model_9999.pt"
     checkpoint.touch()
-    video_dir = tmp_path / "videos" / "play"
-    video_dir.mkdir(parents=True)
-    (video_dir / "rl-video-step-0.mp4").touch()
+    output_dir = tmp_path / "eval" / "model_9999"
+    output_dir.mkdir(parents=True)
+    (output_dir / "rl-video-step-0.mp4").touch()
     monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
     monkeypatch.setattr(symm_cli, "run_isaaclab", lambda args, lab_args: 0)
 

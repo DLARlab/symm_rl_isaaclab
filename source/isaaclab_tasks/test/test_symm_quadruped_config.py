@@ -108,7 +108,76 @@ def test_running_reward_is_clipped_before_terminal_penalty_is_added():
     assert torch.equal(reward, torch.tensor([0.5, 0.0, -4.0]))
 
 
-def test_policy_observations_include_velocity_and_observable_sagittal_state():
+def test_symmetric_environment_applies_pending_commands_after_reward():
+    calls = []
+    command_term = SimpleNamespace(command=torch.tensor([[1.0]]))
+
+    def apply_pending_resampling():
+        calls.append("apply_pending")
+        command_term.command.fill_(2.0)
+
+    command_term.apply_pending_resampling = apply_pending_resampling
+    command_manager = SimpleNamespace(
+        active_terms=["base_velocity"],
+        compute=lambda **_: calls.append("prepare_command"),
+        get_term=lambda _: command_term,
+    )
+
+    def compute_reward(**_):
+        calls.append("reward")
+        assert torch.equal(command_term.command, torch.tensor([[1.0]]))
+        return torch.ones(1)
+
+    def compute_observation(**_):
+        calls.append("observation")
+        assert torch.equal(command_term.command, torch.tensor([[2.0]]))
+        return {"policy": torch.zeros(1, 1)}
+
+    env = SimpleNamespace(
+        device="cpu",
+        action_manager=SimpleNamespace(
+            process_action=lambda _action: None,
+            apply_action=lambda: None,
+        ),
+        _clamp_processed_joint_position_targets=lambda: None,
+        recorder_manager=SimpleNamespace(
+            active_terms=[],
+            record_pre_step=lambda: None,
+            record_post_physics_decimation_step=lambda: None,
+        ),
+        sim=SimpleNamespace(is_rendering=False, step=lambda **_: None),
+        scene=SimpleNamespace(write_data_to_sim=lambda: None, update=lambda **_: None),
+        _physics_handles_decimation=True,
+        _sim_step_counter=0,
+        cfg=SimpleNamespace(decimation=1, sim=SimpleNamespace(render_interval=1)),
+        episode_length_buf=torch.zeros(1, dtype=torch.long),
+        common_step_counter=0,
+        command_manager=command_manager,
+        event_manager=SimpleNamespace(available_modes=[]),
+        termination_manager=SimpleNamespace(
+            compute=lambda: torch.tensor([False]),
+            terminated=torch.tensor([False]),
+            time_outs=torch.tensor([False]),
+        ),
+        reward_manager=SimpleNamespace(
+            compute=compute_reward,
+            get_term_cfg=lambda _: SimpleNamespace(weight=-1.0),
+        ),
+        step_dt=0.02,
+        _compute_step_diagnostics=lambda *_: {},
+        observation_manager=SimpleNamespace(compute=compute_observation),
+        extras={},
+    )
+    env._apply_pending_command_resampling = lambda: (
+        symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv._apply_pending_command_resampling(env)
+    )
+
+    symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv.step(env, torch.zeros(1, 1))
+
+    assert calls == ["prepare_command", "reward", "apply_pending", "observation"]
+
+
+def test_policy_observations_include_velocity_and_zero_sagittal_state_placeholder():
     env_cfg = UnitreeGo2SymmFlatEnvCfg()
     policy = env_cfg.observations.policy
 
@@ -118,8 +187,17 @@ def test_policy_observations_include_velocity_and_observable_sagittal_state():
     assert policy.base_ang_vel.scale == (0.25, 0.25, 0.25)
     assert policy.velocity_commands.func is symm_quadruped.desired_base_twist
     assert policy.velocity_commands.scale == (2.0, 2.0, 2.0, 0.25, 0.25, 0.25)
-    assert policy.sagittal_plane_state.func is symm_quadruped.sagittal_plane_state
-    assert policy.sagittal_plane_state.params == {"lateral_position_scale": 0.5}
+    assert policy.sagittal_plane_state.func is symm_quadruped.sagittal_plane_state_zero
+    assert policy.sagittal_plane_state.params == {}
+
+
+def test_sagittal_plane_state_zero_preserves_three_zero_dimensions():
+    env = SimpleNamespace(num_envs=2, device="cpu")
+
+    state = symm_quadruped.sagittal_plane_state_zero(env)
+
+    assert state.shape == (2, 3)
+    assert torch.count_nonzero(state) == 0
 
 
 def test_sagittal_plane_state_exposes_lateral_offset_and_wrapped_heading():
@@ -342,11 +420,247 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
     assert env._last_ground_reaction_force_includes_friction
 
 
-def test_gait_command_uses_fixed_zero_yaw_rate():
+def test_gait_command_uses_planar_velocity_curriculum():
     command_cfg = make_gait_velocity_command(symm_quadruped)
 
     assert not command_cfg.heading_command
-    assert command_cfg.ranges.ang_vel_z == (0.0, 0.0)
+    assert command_cfg.ranges.lin_vel_x == (-4.0, 4.0)
+    assert command_cfg.ranges.lin_vel_y == (-1.0, 1.0)
+    assert command_cfg.ranges.ang_vel_z == (-4.0, 4.0)
+    assert command_cfg.min_xy_command_norm == 0.1
+    assert command_cfg.curriculum.enabled
+    assert command_cfg.curriculum.initial_ranges.lin_vel_x == (-0.5, 0.5)
+    assert command_cfg.curriculum.initial_ranges.lin_vel_y == (-0.25, 0.25)
+    assert command_cfg.curriculum.initial_ranges.ang_vel_z == (-0.5, 0.5)
+    assert command_cfg.curriculum.num_bins == (16, 8, 16)
+    assert command_cfg.resampling_time_range == (10.0, 10.0)
+    assert command_cfg.resampling_time_gait == 10.0
+    assert command_cfg.resampling_transition_probabilities == pytest.approx((1.0 / 3.0,) * 3)
+    assert not command_cfg.resample_once_after_reset
+    assert not command_cfg.resample_gait_once_after_reset
+    assert command_cfg.curriculum_tracking_lin_vel_sigma == 0.25
+    assert command_cfg.curriculum_tracking_ang_vel_sigma == 0.25
+    assert command_cfg.curriculum_tracking_lin_vel_threshold == 0.8
+    assert command_cfg.curriculum_tracking_ang_vel_threshold == 0.8
+
+
+def test_gait_command_curriculum_expands_successful_bins():
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    curriculum = symm_quadruped._VelocityCommandBinCurriculum(command_cfg, "cpu")
+    initial_active_bins = curriculum.active_bin_count
+    initial_max_command = curriculum.max_active_abs_command
+    active_bin_ids = curriculum._weights.nonzero(as_tuple=False)
+    boundary_bin_id = active_bin_ids[torch.argmax(active_bin_ids[:, 0])]
+
+    curriculum.update(boundary_bin_id.unsqueeze(0), torch.tensor([True]))
+
+    assert curriculum.active_bin_count > initial_active_bins
+    assert initial_max_command.tolist() == pytest.approx([0.5, 0.25, 0.5])
+    assert curriculum.max_active_abs_command[0].item() == pytest.approx(initial_max_command[0].item() + 0.5)
+    assert curriculum.max_active_abs_command[1].item() == pytest.approx(initial_max_command[1].item() + 0.25)
+    assert curriculum.max_active_abs_command[2].item() == pytest.approx(initial_max_command[2].item() + 0.5)
+
+
+def test_gait_command_curriculum_samples_only_active_bins():
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    curriculum = symm_quadruped._VelocityCommandBinCurriculum(command_cfg, "cpu")
+
+    commands, _ = curriculum.sample(256)
+
+    assert torch.all(commands[:, 0] >= -0.5)
+    assert torch.all(commands[:, 0] <= 0.5)
+    assert torch.all(commands[:, 1] >= -0.25)
+    assert torch.all(commands[:, 1] <= 0.25)
+    assert torch.all(commands[:, 2] >= -0.5)
+    assert torch.all(commands[:, 2] <= 0.5)
+
+
+def test_gait_command_zeroes_forward_commands_at_threshold():
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    command_cfg.rel_standing_envs = -1.0
+    sampled_commands = torch.tensor([[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.1001, 0.0, 0.0]])
+    command = SimpleNamespace(
+        cfg=command_cfg,
+        device="cpu",
+        vel_command_b=torch.zeros_like(sampled_commands),
+        _sampled_command_bins=torch.zeros(3, 3, dtype=torch.long),
+        _command_curriculum=SimpleNamespace(
+            sample=lambda _: (sampled_commands.clone(), torch.zeros(3, 3, dtype=torch.long))
+        ),
+        is_standing_env=torch.zeros(3, dtype=torch.bool),
+    )
+
+    symm_quadruped.GaitVelocityCommand._resample_command(command, torch.arange(3))
+
+    assert torch.equal(command.vel_command_b[:2], torch.zeros(2, 3))
+    assert command.vel_command_b[2, 0].item() == pytest.approx(0.1001)
+
+
+def test_gait_phase_is_continuous_when_period_or_velocity_direction_changes():
+    command = SimpleNamespace(
+        gait_phase=torch.tensor([0.37]),
+        _foot_phase_offsets=torch.tensor([[0.0, 0.5, 0.13, -0.13]]),
+        vel_command_b=torch.tensor([[0.5, 0.0, 0.0]]),
+    )
+    phases_before = symm_quadruped.GaitVelocityCommand.foot_phases(command)
+
+    command.gait_periods = torch.tensor([0.2])
+    command.vel_command_b[:, 0] = -0.5
+    phases_after = symm_quadruped.GaitVelocityCommand.foot_phases(command)
+
+    assert torch.equal(phases_after, phases_before)
+
+
+def test_gait_resampling_transition_modes_are_applied_per_environment(monkeypatch):
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    calls = {}
+    command = SimpleNamespace(
+        cfg=command_cfg,
+        device="cpu",
+        _transition_mode_probabilities=torch.full((3,), 1.0 / 3.0),
+        time_left=torch.zeros(3),
+        gait_time_left=torch.zeros(3),
+        command_counter=torch.zeros(3, dtype=torch.long),
+        _finalize_command_window=lambda env_ids: calls.setdefault("finalized", env_ids.clone()),
+        _resample_command=lambda env_ids: calls.setdefault("velocity", env_ids.clone()),
+        _update_command=lambda: None,
+        _resample_gait_timing=lambda env_ids, transition: calls.setdefault("velocity_only", env_ids.clone()),
+        _resample_gait=lambda env_ids, transition: calls.setdefault("gait", env_ids.clone()),
+    )
+    monkeypatch.setattr(torch, "multinomial", lambda *_args, **_kwargs: torch.tensor([0, 1, 2]))
+
+    symm_quadruped.GaitVelocityCommand._resample_transition(command, torch.arange(3))
+
+    assert torch.equal(calls["finalized"], torch.tensor([0, 2]))
+    assert torch.equal(calls["velocity"], torch.tensor([0, 2]))
+    assert torch.equal(calls["velocity_only"], torch.tensor([0]))
+    assert torch.equal(calls["gait"], torch.tensor([1, 2]))
+    assert torch.equal(command.time_left, torch.full((3,), 10.0))
+    assert torch.equal(command.gait_time_left, command.time_left)
+
+
+def test_gait_command_defers_expired_transition_until_after_reward():
+    calls = []
+    command = SimpleNamespace(
+        cfg=SimpleNamespace(),
+        device="cpu",
+        _transition_mode_probabilities=torch.full((3,), 1.0 / 3.0),
+        time_left=torch.tensor([0.01, 1.0]),
+        _pending_transition_envs=torch.zeros(2, dtype=torch.bool),
+        _advance_gait_phase=lambda _dt: calls.append("phase"),
+        _update_gait_transition=lambda _dt: calls.append("gait_transition"),
+        _update_metrics=lambda: calls.append("metrics"),
+        _resample_transition=lambda env_ids: calls.append(("resample", env_ids.clone())),
+        _update_command=lambda: calls.append("command"),
+    )
+
+    symm_quadruped.GaitVelocityCommand.compute(command, 0.02)
+
+    assert calls == ["phase", "gait_transition", "metrics"]
+    assert torch.equal(command._pending_transition_envs, torch.tensor([True, False]))
+
+    symm_quadruped.GaitVelocityCommand.apply_pending_resampling(command)
+
+    assert len(calls) == 5
+    assert calls[3][0] == "resample"
+    assert torch.equal(calls[3][1], torch.tensor([0]))
+    assert calls[4] == "command"
+    assert not torch.any(command._pending_transition_envs)
+
+
+def test_gait_command_curriculum_uses_walk_these_ways_reward_thresholds():
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    curriculum_update = {}
+    command = SimpleNamespace(
+        cfg=command_cfg,
+        device="cpu",
+        num_envs=3,
+        _command_curriculum=SimpleNamespace(
+            update=lambda bin_ids, success: curriculum_update.update(bin_ids=bin_ids.clone(), success=success.clone())
+        ),
+        _sampled_command_bins=torch.tensor([[1, 0, 0], [2, 0, 0], [3, 0, 0]]),
+        _command_tracking_lin_vel_reward_sum=torch.tensor([8.1, 7.9, 8.1]),
+        _command_tracking_ang_vel_reward_sum=torch.tensor([8.1, 9.0, 7.9]),
+        _command_window_step_count=torch.full((3,), 10.0),
+        _successful_command_window_count=torch.zeros(3),
+        _completed_command_window_count=torch.zeros(3),
+        metrics={
+            "tracking_reward_lin_vel": torch.zeros(3),
+            "tracking_reward_ang_vel": torch.zeros(3),
+            "success_threshold_vel_xy": torch.zeros(3),
+            "success_threshold_vel_yaw": torch.zeros(3),
+            "success_rate": torch.zeros(3),
+        },
+        _update_curriculum_metrics=lambda _env_ids: None,
+    )
+
+    symm_quadruped.GaitVelocityCommand._finalize_command_window(command, torch.arange(3))
+
+    assert torch.equal(curriculum_update["bin_ids"], command._sampled_command_bins)
+    assert torch.equal(curriculum_update["success"], torch.tensor([True, False, False]))
+    assert torch.allclose(command.metrics["tracking_reward_lin_vel"], torch.tensor([0.81, 0.79, 0.81]))
+    assert torch.allclose(command.metrics["tracking_reward_ang_vel"], torch.tensor([0.81, 0.9, 0.79]))
+    assert torch.equal(command.metrics["success_rate"], torch.tensor([1.0, 0.0, 0.0]))
+    assert torch.count_nonzero(command._command_tracking_lin_vel_reward_sum) == 0
+    assert torch.count_nonzero(command._command_tracking_ang_vel_reward_sum) == 0
+    assert torch.count_nonzero(command._command_window_step_count) == 0
+
+    metrics_after_first_finalize = {name: value.clone() for name, value in command.metrics.items()}
+    symm_quadruped.GaitVelocityCommand._finalize_command_window(command, torch.arange(3))
+    for name, value in metrics_after_first_finalize.items():
+        assert torch.equal(command.metrics[name], value)
+
+
+def test_gait_command_accumulates_walk_these_ways_tracking_rewards():
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    command = SimpleNamespace(
+        cfg=command_cfg,
+        vel_command_b=torch.tensor([[1.0, 0.0, 0.5], [0.0, 0.0, 0.0]]),
+        robot=SimpleNamespace(
+            data=SimpleNamespace(
+                root_lin_vel_b=SimpleNamespace(torch=torch.tensor([[0.5, 0.0, 0.0], [0.0, 0.0, 0.0]])),
+                root_ang_vel_b=SimpleNamespace(torch=torch.zeros(2, 3)),
+            )
+        ),
+        _error_xy_sum=torch.zeros(2),
+        _error_yaw_sum=torch.zeros(2),
+        _step_count=torch.zeros(2),
+        _command_tracking_lin_vel_reward_sum=torch.zeros(2),
+        _command_tracking_ang_vel_reward_sum=torch.zeros(2),
+        _command_window_step_count=torch.zeros(2),
+    )
+
+    symm_quadruped.GaitVelocityCommand._update_metrics(command)
+
+    expected_tracking_reward = torch.tensor([math.exp(-1.0), 1.0])
+    assert torch.allclose(command._command_tracking_lin_vel_reward_sum, expected_tracking_reward)
+    assert torch.allclose(command._command_tracking_ang_vel_reward_sum, expected_tracking_reward)
+    assert torch.equal(command._command_window_step_count, torch.ones(2))
+
+
+def test_gait_transition_blends_offsets_and_duty_factor_over_one_cycle():
+    command = SimpleNamespace(
+        cfg=SimpleNamespace(gait_transition_cycles=1.0),
+        device="cpu",
+        gait_periods=torch.tensor([0.5]),
+        _gait_transition_progress=torch.tensor([0.0]),
+        foot_thetas=torch.zeros(1, 4),
+        _foot_theta_transition_start=torch.zeros(1, 4),
+        _foot_theta_transition_target=torch.full((1, 4), 0.5),
+        _foot_phase_offsets=torch.zeros(1, 4),
+        _foot_phase_offset_transition_start=torch.zeros(1, 4),
+        _foot_phase_offset_transition_target=torch.full((1, 4), -0.5),
+        duty_factors=torch.tensor([0.4]),
+        _duty_factor_transition_start=torch.tensor([0.4]),
+        _duty_factor_transition_target=torch.tensor([0.6]),
+    )
+
+    symm_quadruped.GaitVelocityCommand._update_gait_transition(command, 0.25)
+
+    assert torch.equal(command._gait_transition_progress, torch.tensor([0.5]))
+    assert torch.equal(command.foot_thetas, torch.full((1, 4), 0.25))
+    assert torch.equal(command._foot_phase_offsets, torch.full((1, 4), -0.25))
+    assert torch.equal(command.duty_factors, torch.tensor([0.5]))
 
 
 def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty():
@@ -373,7 +687,7 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     assert env_cfg.rewards.straight_line_motion.params["support_loss_weight"] == 0.25
     assert env_cfg.rewards.straight_line_motion.params["lateral_position_scale"] == 0.35
     assert env_cfg.rewards.straight_line_motion.params["heading_scale"] == 0.35
-    assert env_cfg.rewards.straight_line_motion.params["pose_weight"] == 0.30
+    assert env_cfg.rewards.straight_line_motion.params["pose_weight"] == 0.0
     assert env_cfg.rewards.straight_line_motion.params["pitch_scale"] == 0.50
     assert env_cfg.rewards.termination_penalty.func is base_mdp.is_terminated
     assert env_cfg.rewards.termination_penalty.weight == -200.0
@@ -385,6 +699,35 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
     assert env_cfg.rewards.foot_clearance.params["min_command_speed"] == 0.20
+
+
+def test_rewards_use_independent_velocity_tracking_and_roll_terms():
+    env_cfg = SimpleNamespace(rewards=SimpleNamespace())
+
+    configure_rewards(
+        env_cfg,
+        symm_quadruped,
+        joint_names=[f"joint_{index}" for index in range(12)],
+        foot_body_names=[f"foot_{index}" for index in range(4)],
+        foot_sensor_names=[f"contact_{index}" for index in range(4)],
+        foot_sensor_body_names=[f"foot_{index}" for index in range(4)],
+        base_height_range=(0.35, 0.45),
+    )
+
+    assert env_cfg.rewards.track_lin_vel_x_exp.func is symm_quadruped.track_lin_vel_x_exp
+    assert env_cfg.rewards.track_lin_vel_x_exp.weight == 0.5
+    assert env_cfg.rewards.track_lin_vel_x_exp.params["error_scale"] == 0.35
+    assert env_cfg.rewards.track_lin_vel_y_exp.func is symm_quadruped.track_lin_vel_y_exp
+    assert env_cfg.rewards.track_lin_vel_y_exp.weight == 0.5
+    assert env_cfg.rewards.track_lin_vel_y_exp.params["error_scale"] == 0.20
+    assert env_cfg.rewards.track_ang_vel_z_exp.func is symm_quadruped.track_ang_vel_z_exp
+    assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.5
+    assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
+    assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp
+    assert env_cfg.rewards.base_roll_exp.weight == 0.30
+    assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
+    assert env_cfg.rewards.straight_line_motion.params["forward_weight"] == 0.0
+    assert env_cfg.rewards.straight_line_motion.params["straight_weight"] == 0.0
 
 
 def test_rewards_cfg_preserves_deprecated_morphological_symmetry_alias():
@@ -732,6 +1075,61 @@ def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost
     }
     assert torch.equal(env._straight_line_motion_diagnostics["reward"], reward)
     assert all(not value.requires_grad for value in env._straight_line_motion_diagnostics.values())
+
+
+def test_independent_velocity_tracking_and_roll_rewards_only_measure_their_component():
+    roll = 0.25
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(
+            root_quat_w=_tensor_data(
+                torch.tensor(
+                    [
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                        [math.sin(roll / 2.0), 0.0, 0.0, math.cos(roll / 2.0)],
+                    ]
+                )
+            ),
+            root_lin_vel_b=_tensor_data(
+                torch.tensor(
+                    [
+                        [0.0, 0.0, 0.0],
+                        [0.35, 0.0, 0.0],
+                        [0.0, 0.20, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ]
+                )
+            ),
+            root_ang_vel_b=_tensor_data(
+                torch.tensor(
+                    [
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.20],
+                        [0.0, 0.0, 0.0],
+                    ]
+                )
+            ),
+        )
+    )
+    command = torch.zeros(5, 3)
+    env = SimpleNamespace(scene=scene, command_manager=SimpleNamespace(get_command=lambda _: command))
+    expected = math.exp(-1.0)
+
+    x_reward = symm_quadruped.track_lin_vel_x_exp(env, command_name="base_velocity", error_scale=0.35)
+    y_reward = symm_quadruped.track_lin_vel_y_exp(env, command_name="base_velocity", error_scale=0.20)
+    yaw_reward = symm_quadruped.track_ang_vel_z_exp(env, command_name="base_velocity", error_scale=0.20)
+    roll_reward = symm_quadruped.base_roll_exp(env, error_scale=0.25)
+
+    assert x_reward.tolist() == pytest.approx([1.0, expected, 1.0, 1.0, 1.0])
+    assert y_reward.tolist() == pytest.approx([1.0, 1.0, expected, 1.0, 1.0])
+    assert yaw_reward.tolist() == pytest.approx([1.0, 1.0, 1.0, expected, 1.0])
+    assert roll_reward.tolist() == pytest.approx([1.0, 1.0, 1.0, 1.0, expected])
 
 
 def test_straight_line_motion_reward_penalizes_world_lateral_position_and_heading():

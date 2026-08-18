@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+export LD_LIBRARY_PATH="/home/dlar58/anaconda3/envs/symm_rl_isaaclab/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
+export OMNI_KIT_ACCEPT_EULA=YES
+
+exec bash scripts/symm_locomotion/record.sh \
+  --robot x1 \
+  --checkpoint latest \
+  --gif \
+  "$@"

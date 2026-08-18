@@ -280,11 +280,13 @@ Record videos:
 Recordings are 30 seconds by default (1,500 environment steps at 50 Hz).
 Pass `--video-length` to override the length in environment steps.
 
-Play and record also save symmetric rollout diagnostics under the selected
-checkpoint run's `plots/play/` directory by default:
+Play and record save videos, GIFs, tracking errors, and symmetric rollout
+diagnostics together under the selected checkpoint run's `eval/<checkpoint>/`
+directory by default, for example `eval/model_9999/`:
 
 ```text
 sim_data.npz
+tracking_errors.txt
 figure1_linear_velocities_and_position.png
 figure2_E_C_frc_and_contact_forces.png
 figure3_E_C_spd_and_foot_velocities.png

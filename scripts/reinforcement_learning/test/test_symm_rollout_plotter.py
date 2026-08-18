@@ -155,7 +155,7 @@ def test_plotter_records_symmetric_rollout_signals(tmp_path):
     assert plotter._data["foot_clearance_targets"][0].tolist() == pytest.approx([0.08] * 4)
 
 
-def test_plotter_saves_isaacgym_compatible_outputs(tmp_path):
+def test_plotter_saves_isaacgym_compatible_outputs(tmp_path, capsys):
     module = _load_plotter_module()
     env, command_term, robot = _make_env()
     plotter = module.SymmetricRolloutPlotter(env, tmp_path)
@@ -166,8 +166,15 @@ def test_plotter_saves_isaacgym_compatible_outputs(tmp_path):
 
     saved_paths = plotter.save()
 
+    captured = capsys.readouterr()
+    assert "Velocity tracking error summary" in captured.out
+    assert "forward" in captured.out
+    assert "yaw_left" in captured.out
+    assert "backward" in captured.out
+
     expected_names = {
         "sim_data.npz",
+        "tracking_errors.txt",
         "figure1_linear_velocities_and_position.png",
         "figure2_E_C_frc_and_contact_forces.png",
         "figure3_E_C_spd_and_foot_velocities.png",
@@ -181,6 +188,11 @@ def test_plotter_saves_isaacgym_compatible_outputs(tmp_path):
     }
     assert {path.name for path in saved_paths} == expected_names
     assert all(path.stat().st_size > 0 for path in saved_paths)
+    tracking_error_text = (tmp_path / "tracking_errors.txt").read_text(encoding="utf-8")
+    assert "mean(abs(actual - desired))" in tracking_error_text
+    assert "lin_x,0.350000,m/s" in tracking_error_text
+    assert "lin_y,0.100000,m/s" in tracking_error_text
+    assert "yaw,0.150000,rad/s" in tracking_error_text
     with np.load(tmp_path / "sim_data.npz") as data:
         assert data["true_lin_vel"].shape == (2, 3)
         assert data["desired_positions"].shape == (2, 2)
@@ -188,6 +200,14 @@ def test_plotter_saves_isaacgym_compatible_outputs(tmp_path):
         assert data["foot_normal_forces_w"].shape == (2, 4, 3)
         assert data["foot_ground_reaction_forces_w"].shape == (2, 4, 3)
         assert data["ground_reaction_force_includes_friction"].tolist() == [True, True]
+        assert data["velocity_tracking_signed_error"].shape == (2, 3)
+        assert data["velocity_tracking_abs_error"].shape == (2, 3)
+        assert data["velocity_tracking_squared_error"].shape == (2, 3)
+        assert data["velocity_tracking_components"].tolist() == ["lin_x", "lin_y", "yaw"]
+        assert data["velocity_tracking_direction_command_threshold"].item() == pytest.approx(0.05)
+        assert data["velocity_tracking_signed_error"][0].tolist() == pytest.approx([-0.1, 0.1, 0.1])
+        assert data["velocity_tracking_abs_error"][0].tolist() == pytest.approx([0.1, 0.1, 0.1])
+        assert data["velocity_tracking_squared_error"][0].tolist() == pytest.approx([0.01, 0.01, 0.01])
         assert data["raw_actions"].shape == (2, 12)
         assert data["actor_means"].shape == (2, 12)
         assert data["joint_positions"].shape == (2, 12)

@@ -134,10 +134,19 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
 
             self.recorder_manager.record_post_reset(reset_env_ids)
 
+        self._apply_pending_command_resampling()
         self.obs_buf = self.observation_manager.compute(update_history=True)
         self.extras.setdefault("log", {}).update(step_diagnostics)
 
         return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
+
+    def _apply_pending_command_resampling(self) -> None:
+        """Apply deferred command transitions after rewards and resets are complete."""
+        for term_name in self.command_manager.active_terms:
+            command_term = self.command_manager.get_term(term_name)
+            apply_pending_resampling = getattr(command_term, "apply_pending_resampling", None)
+            if apply_pending_resampling is not None:
+                apply_pending_resampling()
 
     def _clamp_processed_joint_position_targets(self) -> None:
         """Clamp the processed joint-position action term to the robot soft limits."""

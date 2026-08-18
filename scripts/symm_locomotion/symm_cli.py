@@ -190,17 +190,27 @@ def resolve_checkpoint(args: argparse.Namespace) -> Path:
     return checkpoints[-1]
 
 
-def play_video_snapshot(run_dir: Path) -> dict[Path, tuple[int, int]]:
-    """Return modification-time and size signatures for existing play MP4s."""
-    video_dir = run_dir / "videos" / "play"
-    if not video_dir.exists():
+def checkpoint_output_name(checkpoint: Path) -> str:
+    """Return the output subdirectory name for a loaded checkpoint."""
+    return checkpoint.stem
+
+
+def checkpoint_output_dir(checkpoint: Path) -> Path:
+    """Return the shared output directory for a loaded checkpoint."""
+    return checkpoint.parent / "eval" / checkpoint_output_name(checkpoint)
+
+
+def play_video_snapshot(checkpoint: Path) -> dict[Path, tuple[int, int]]:
+    """Return modification-time and size signatures for existing checkpoint MP4s."""
+    output_dir = checkpoint_output_dir(checkpoint)
+    if not output_dir.exists():
         return {}
-    return {path: (path.stat().st_mtime_ns, path.stat().st_size) for path in video_dir.glob("*.mp4")}
+    return {path: (path.stat().st_mtime_ns, path.stat().st_size) for path in output_dir.glob("*.mp4")}
 
 
-def latest_play_video(run_dir: Path, previous_videos: dict[Path, tuple[int, int]] | None = None) -> Path | None:
-    """Return the newest play MP4, optionally limited to new or modified files."""
-    current_videos = play_video_snapshot(run_dir)
+def latest_play_video(checkpoint: Path, previous_videos: dict[Path, tuple[int, int]] | None = None) -> Path | None:
+    """Return the newest checkpoint MP4, optionally limited to new or modified files."""
+    current_videos = play_video_snapshot(checkpoint)
     videos = list(current_videos)
     if previous_videos is not None:
         videos = [path for path, signature in current_videos.items() if previous_videos.get(path) != signature]
@@ -235,17 +245,18 @@ def convert_latest_video(
     previous_videos: dict[Path, tuple[int, int]] | None = None,
 ) -> int:
     """Convert the newest newly recorded MP4 for the checkpoint run to GIF."""
-    mp4_path = latest_play_video(checkpoint.parent, previous_videos)
+    output_dir = checkpoint_output_dir(checkpoint)
+    mp4_path = latest_play_video(checkpoint, previous_videos)
     if mp4_path is None:
         if args.dry_run:
             print(
-                f"{log_prefix(args)}would convert the newest MP4 under {checkpoint.parent / 'videos' / 'play'}",
+                f"{log_prefix(args)}would convert the newest MP4 under {output_dir}",
                 flush=True,
             )
             return 0
         qualifier = "new or updated " if previous_videos is not None else ""
         print(
-            f"{log_prefix(args)}No {qualifier}MP4 found under {checkpoint.parent / 'videos' / 'play'}",
+            f"{log_prefix(args)}No {qualifier}MP4 found under {output_dir}",
             flush=True,
         )
         return 1
@@ -315,9 +326,13 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     if args.run_name:
         run_name = args.run_name
     elif args.disable_symmetry:
-        run_name = "no_trs_smoke" if args.smoke else "no_trs"
+        run_name = f"{args.robot_spec.key}_" + ("no_trs_smoke" if args.smoke else "no_trs")
     else:
-        run_name = ("trs_smoke_" if args.smoke else "with_trs_") + f"mirror{coeff_label(args.mirror_loss_coeff)}"
+        run_name = (
+            f"{args.robot_spec.key}_"
+            + ("trs_smoke_" if args.smoke else "with_trs_")
+            + f"mirror{coeff_label(args.mirror_loss_coeff)}"
+        )
 
     command = [
         "train",
@@ -426,6 +441,15 @@ def add_play_args(parser: argparse.ArgumentParser) -> None:
         default=50,
         help="Number of play steps between gait information terminal prints.",
     )
+    parser.add_argument(
+        "--tracking-test",
+        "--tracking_test",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Override commands with a six-direction tracking-error sweep.",
+    )
+    parser.add_argument("--tracking-speed", "--tracking_speed", type=float, default=0.5)
+    parser.add_argument("--tracking-yaw-rate", "--tracking_yaw_rate", type=float, default=0.5)
 
 
 def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
@@ -456,6 +480,14 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         command += ["--kit_args", kit_args]
     if args.print_gait:
         command += ["--print_gait_info", "--print_gait_info_interval", str(args.print_gait_interval)]
+    if args.tracking_test:
+        command += [
+            "--tracking_error_direction_test",
+            "--tracking_error_direction_speed",
+            str(args.tracking_speed),
+            "--tracking_error_direction_yaw_rate",
+            str(args.tracking_yaw_rate),
+        ]
     return command + rollout_plot_lab_args(args) + extra
 
 
@@ -475,6 +507,15 @@ def add_record_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
     parser.add_argument("--kit-args", "--kit_args", default=None)
     parser.add_argument("--viewer", action="store_true", help="Show the Kit viewer while recording.")
+    parser.add_argument(
+        "--tracking-test",
+        "--tracking_test",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Override commands with a six-direction tracking-error sweep while recording.",
+    )
+    parser.add_argument("--tracking-speed", "--tracking_speed", type=float, default=0.5)
+    parser.add_argument("--tracking-yaw-rate", "--tracking_yaw_rate", type=float, default=0.5)
     parser.add_argument("--gif", action="store_true", help="Convert the newest MP4 to GIF after recording.")
     parser.add_argument("--gif-fps", type=int, default=15)
     parser.add_argument("--gif-width", type=int, default=720)
@@ -508,6 +549,14 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
     ]
     if args.viewer:
         command += ["--viz", "kit", "--real-time"]
+    if args.tracking_test:
+        command += [
+            "--tracking_error_direction_test",
+            "--tracking_error_direction_speed",
+            str(args.tracking_speed),
+            "--tracking_error_direction_yaw_rate",
+            str(args.tracking_yaw_rate),
+        ]
     if kit_args:
         command += ["--kit_args", kit_args]
     return command + rollout_plot_lab_args(args) + extra, checkpoint
@@ -673,14 +722,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_isaaclab(args, play_lab_args(args, extra))
         if args.command == "record":
             lab_args, checkpoint = record_lab_args(args, extra)
-            previous_videos = play_video_snapshot(checkpoint.parent) if not args.dry_run else None
+            previous_videos = play_video_snapshot(checkpoint) if not args.dry_run else None
             code = run_isaaclab(args, lab_args)
             if code != 0:
                 return code
-            if previous_videos is not None and latest_play_video(checkpoint.parent, previous_videos) is None:
+            if previous_videos is not None and latest_play_video(checkpoint, previous_videos) is None:
                 print(
                     f"{log_prefix(args)}ERROR: recording finished without a new or updated MP4 under "
-                    f"{checkpoint.parent / 'videos' / 'play'}",
+                    f"{checkpoint_output_dir(checkpoint)}",
                     file=sys.stderr,
                     flush=True,
                 )

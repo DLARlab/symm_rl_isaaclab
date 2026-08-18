@@ -88,7 +88,7 @@ parser.add_argument(
 parser.add_argument(
     "--symm_rollout_plots_dir",
     default=None,
-    help="Directory for symmetric rollout plots. Defaults to <run>/plots/play.",
+    help="Directory for symmetric rollout plots. Defaults to <run>/eval/<checkpoint>.",
 )
 parser.add_argument(
     "--symm_rollout_plot_env_index",
@@ -101,6 +101,24 @@ parser.add_argument(
     type=int,
     default=None,
     help="Maximum number of steps sampled by symmetric rollout plots.",
+)
+parser.add_argument(
+    "--tracking_error_direction_test",
+    action="store_true",
+    default=False,
+    help="Override base velocity commands with a six-direction sweep and print tracking errors.",
+)
+parser.add_argument(
+    "--tracking_error_direction_speed",
+    type=float,
+    default=0.5,
+    help="Linear speed [m/s] used by --tracking_error_direction_test.",
+)
+parser.add_argument(
+    "--tracking_error_direction_yaw_rate",
+    type=float,
+    default=0.5,
+    help="Yaw rate [rad/s] used by --tracking_error_direction_test.",
 )
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
@@ -134,6 +152,15 @@ _SYMM_GAIT_THETAS = (
     ("half-bound-right", (-0.13, 0.13, 0.5, 0.5)),
     ("rotary-gallop", (-0.13, 0.13, 0.63, 0.37)),
     ("transverse-gallop", (0.13, -0.13, 0.63, 0.37)),
+)
+
+_TRACKING_ERROR_DIRECTION_SEQUENCE = (
+    ("forward", (1.0, 0.0, 0.0)),
+    ("backward", (-1.0, 0.0, 0.0)),
+    ("left", (0.0, 1.0, 0.0)),
+    ("right", (0.0, -1.0, 0.0)),
+    ("yaw_left", (0.0, 0.0, 1.0)),
+    ("yaw_right", (0.0, 0.0, -1.0)),
 )
 
 
@@ -193,6 +220,44 @@ def _format_symmetric_gait_info(env, env_index: int = 0) -> str | None:
     )
 
 
+def _tracking_error_direction_command(step: int, total_steps: int) -> tuple[str, tuple[float, float, float]]:
+    """Return the direction-test command for a play step."""
+    segment_count = len(_TRACKING_ERROR_DIRECTION_SEQUENCE)
+    segment_length = max((total_steps + segment_count - 1) // segment_count, 1)
+    segment_index = min(step // segment_length, segment_count - 1)
+    return _TRACKING_ERROR_DIRECTION_SEQUENCE[segment_index]
+
+
+def _apply_tracking_error_direction_command(env, step: int, total_steps: int) -> str | None:
+    """Override base velocity commands for deterministic tracking-error direction testing."""
+    if not args_cli.tracking_error_direction_test:
+        return None
+    try:
+        command_term = env.unwrapped.command_manager.get_term("base_velocity")
+    except Exception:
+        return None
+    if not hasattr(command_term, "vel_command_b"):
+        return None
+
+    direction_name, unit_command = _tracking_error_direction_command(step, total_steps)
+    command = torch.tensor(
+        unit_command,
+        dtype=command_term.vel_command_b.dtype,
+        device=command_term.vel_command_b.device,
+    )
+    command = command.clone()
+    command[:2] *= float(args_cli.tracking_error_direction_speed)
+    command[2] *= float(args_cli.tracking_error_direction_yaw_rate)
+    command_term.vel_command_b[:] = command
+    if hasattr(command_term, "time_left"):
+        command_term.time_left[:] = torch.inf
+    if hasattr(command_term, "is_standing_env"):
+        command_term.is_standing_env[:] = False
+    if hasattr(command_term, "is_heading_env"):
+        command_term.is_heading_env[:] = False
+    return direction_name
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -230,6 +295,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
         log_dir = os.path.dirname(resume_path)
+        checkpoint_output_name = os.path.splitext(os.path.basename(resume_path))[0]
+        checkpoint_eval_dir = os.path.join(log_dir, "eval", checkpoint_output_name)
 
         # set the log directory for the environment
         env_cfg.log_dir = log_dir
@@ -250,7 +317,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # wrap for video recording
         if args_cli.video:
             video_kwargs = {
-                "video_folder": os.path.join(log_dir, "videos", "play"),
+                "video_folder": checkpoint_eval_dir,
                 "step_trigger": lambda step: step == 0,
                 "video_length": args_cli.video_length,
                 "disable_logger": True,
@@ -307,7 +374,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         if args_cli.symm_rollout_plots:
             from symm_rollout_plotter import SymmetricRolloutPlotter
 
-            plots_dir = args_cli.symm_rollout_plots_dir or os.path.join(log_dir, "plots", "play")
+            plots_dir = args_cli.symm_rollout_plots_dir or checkpoint_eval_dir
             rollout_plotter = SymmetricRolloutPlotter(
                 env.unwrapped,
                 output_dir=plots_dir,
@@ -319,10 +386,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         obs = env.get_observations()
         timestep = 0
         gait_info_interval = max(args_cli.print_gait_info_interval, 1)
+        tracking_error_direction_total_steps = (
+            args_cli.video_length if args_cli.video else args_cli.symm_rollout_plot_max_steps
+        )
+        if tracking_error_direction_total_steps is None:
+            tracking_error_direction_total_steps = len(_TRACKING_ERROR_DIRECTION_SEQUENCE) * gait_info_interval
+        last_tracking_error_direction = None
         # simulate environment
         try:
             while True:
                 start_time = time.time()
+                tracking_error_direction = _apply_tracking_error_direction_command(
+                    env,
+                    timestep,
+                    tracking_error_direction_total_steps,
+                )
+                if tracking_error_direction is not None and tracking_error_direction != last_tracking_error_direction:
+                    print(f"[symm_locomotion] tracking direction test: {tracking_error_direction}", flush=True)
+                    last_tracking_error_direction = tracking_error_direction
                 # run everything in inference mode
                 with torch.inference_mode():
                     # agent stepping

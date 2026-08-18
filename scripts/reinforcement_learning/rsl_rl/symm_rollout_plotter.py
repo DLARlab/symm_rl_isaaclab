@@ -79,6 +79,16 @@ class SymmetricRolloutPlotter:
     _MOTOR_ROLE_NAMES = ("Hip/Abad", "Thigh", "Calf")
     _JOINTS_PER_LEG = 3
     _USAGE_SMOOTHING_WINDOW_S = 1.0
+    _TRACKING_ERROR_COMPONENTS = ("lin_x", "lin_y", "yaw")
+    _TRACKING_DIRECTION_SPECS = (
+        ("forward", 0, 1.0, "m/s"),
+        ("backward", 0, -1.0, "m/s"),
+        ("left", 1, 1.0, "m/s"),
+        ("right", 1, -1.0, "m/s"),
+        ("yaw_left", 2, 1.0, "rad/s"),
+        ("yaw_right", 2, -1.0, "rad/s"),
+    )
+    _TRACKING_DIRECTION_COMMAND_THRESHOLD = 0.05
 
     def __init__(
         self,
@@ -494,6 +504,7 @@ class SymmetricRolloutPlotter:
         data["leg_power_magnitude_sums"] = data["leg_joint_power_magnitudes"].sum(axis=-1)
         data["foot_ground_reaction_force_abs_components"] = np.abs(data["foot_ground_reaction_forces_w"])
         data["foot_ground_reaction_force_abs_sums"] = data["foot_ground_reaction_force_abs_components"].sum(axis=-1)
+        data.update(self._velocity_tracking_error_data(data))
         smoothing_half_window_samples = round(0.5 * self._USAGE_SMOOTHING_WINDOW_S / self._step_dt)
         smoothing_window_samples = 2 * smoothing_half_window_samples + 1
         data["usage_plot_smoothing_window_s"] = np.asarray(self._USAGE_SMOOTHING_WINDOW_S)
@@ -513,9 +524,12 @@ class SymmetricRolloutPlotter:
             )
         data_path = self._output_dir / "sim_data.npz"
         np.savez_compressed(data_path, **data)
+        tracking_error_path = self._save_velocity_tracking_error_summary(data)
+        self._print_velocity_tracking_error_summary(data)
 
         paths = [
             data_path,
+            tracking_error_path,
             self._save_velocity_and_position_plot(data),
             self._save_per_foot_plot(
                 data,
@@ -561,6 +575,95 @@ class SymmetricRolloutPlotter:
         ]
         print(f"[symm_locomotion] Saved rollout plots to: {self._output_dir}", flush=True)
         return paths
+
+    def _velocity_tracking_error_data(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """Return velocity tracking error arrays derived from sampled command and measured velocity."""
+        signed_error = data["true_lin_vel"] - data["desired_lin_vel"]
+        abs_error = np.abs(signed_error)
+        squared_error = np.square(signed_error)
+        return {
+            "velocity_tracking_signed_error": signed_error,
+            "velocity_tracking_abs_error": abs_error,
+            "velocity_tracking_squared_error": squared_error,
+            "velocity_tracking_components": np.asarray(self._TRACKING_ERROR_COMPONENTS),
+            "velocity_tracking_direction_command_threshold": np.asarray(self._TRACKING_DIRECTION_COMMAND_THRESHOLD),
+        }
+
+    def _print_velocity_tracking_error_summary(self, data: dict[str, np.ndarray]) -> None:
+        """Print component-wise and direction-bucket velocity tracking errors."""
+        desired_velocity = data["desired_lin_vel"]
+        true_velocity = data["true_lin_vel"]
+        print("[symm_locomotion] Velocity tracking error summary:", flush=True)
+        for component_name, unit, mean_abs_error, rms_error, mean_signed_error in self._tracking_component_rows(data):
+            print(
+                "[symm_locomotion] "
+                f"  {component_name:<5} all samples: "
+                f"MAE={mean_abs_error:.3f} {unit}, "
+                f"RMSE={rms_error:.3f} {unit}, "
+                f"bias={mean_signed_error:+.3f} {unit}",
+                flush=True,
+            )
+
+        threshold = self._TRACKING_DIRECTION_COMMAND_THRESHOLD
+        for direction_name, component_index, sign, unit in self._TRACKING_DIRECTION_SPECS:
+            signed_command = sign * desired_velocity[:, component_index]
+            mask = signed_command > threshold
+            if not np.any(mask):
+                print(
+                    f"[symm_locomotion]   {direction_name:<9}: no samples with command > {threshold:.2f} {unit}",
+                    flush=True,
+                )
+                continue
+            direction_command = signed_command[mask]
+            direction_velocity = sign * true_velocity[mask, component_index]
+            direction_error = direction_velocity - direction_command
+            mean_abs_error = float(np.mean(np.abs(direction_error)))
+            rms_error = float(np.sqrt(np.mean(np.square(direction_error))))
+            mean_command = float(np.mean(direction_command))
+            mean_velocity = float(np.mean(direction_velocity))
+            print(
+                "[symm_locomotion] "
+                f"  {direction_name:<9}: "
+                f"n={int(np.count_nonzero(mask))}, "
+                f"cmd={mean_command:.3f} {unit}, "
+                f"vel={mean_velocity:.3f} {unit}, "
+                f"MAE={mean_abs_error:.3f} {unit}, "
+                f"RMSE={rms_error:.3f} {unit}",
+                flush=True,
+            )
+
+    def _tracking_component_rows(self, data: dict[str, np.ndarray]) -> list[tuple[str, str, float, float, float]]:
+        """Return all-sample velocity tracking error rows for x, y, and yaw."""
+        signed_error = data["velocity_tracking_signed_error"]
+        abs_error = data["velocity_tracking_abs_error"]
+        squared_error = data["velocity_tracking_squared_error"]
+        rows = []
+        for component_index, component_name in enumerate(self._TRACKING_ERROR_COMPONENTS):
+            unit = "rad/s" if component_name == "yaw" else "m/s"
+            rows.append(
+                (
+                    component_name,
+                    unit,
+                    float(np.mean(abs_error[:, component_index])),
+                    float(np.sqrt(np.mean(squared_error[:, component_index]))),
+                    float(np.mean(signed_error[:, component_index])),
+                )
+            )
+        return rows
+
+    def _save_velocity_tracking_error_summary(self, data: dict[str, np.ndarray]) -> Path:
+        """Save mean absolute velocity tracking errors for x, y, and yaw to a text file."""
+        path = self._output_dir / "tracking_errors.txt"
+        lines = [
+            "Velocity tracking errors",
+            "Computed as mean(abs(actual - desired)) across all recorded timesteps.",
+            "",
+            "component,mean_absolute_error,unit",
+        ]
+        for component_name, unit, mean_abs_error, _, _ in self._tracking_component_rows(data):
+            lines.append(f"{component_name},{mean_abs_error:.6f},{unit}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
 
     def _save_velocity_and_position_plot(self, data: dict[str, np.ndarray]) -> Path:
         time_steps = data["time_steps"]
