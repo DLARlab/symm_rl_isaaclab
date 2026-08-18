@@ -106,3 +106,5 @@ docs/superpowers/
 wandb/
 
 nohup.out
+.github/
+.vscode/
