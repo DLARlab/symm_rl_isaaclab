@@ -46,6 +46,7 @@ def leg_permutation_symmetry_penalty(
     command_name: str,
     joint_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
     """Penalize Dobot joint differences under phase-aligned leg permutations.
 
@@ -54,6 +55,7 @@ def leg_permutation_symmetry_penalty(
         command_name: Name of the gait command term.
         joint_cfg: Robot joints in FL, FR, RL, RR order.
         asset_cfg: Robot articulation.
+        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
         The negative leg-permutation symmetry penalty.
@@ -67,6 +69,7 @@ def leg_permutation_symmetry_penalty(
         leg_phase_index=DOBOT_X1_SYMM_LEG_PHASE_INDEX,
         logical_joint_signs=DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
         joint_ranges=DOBOT_X1_SYMM_JOINT_RANGES,
+        phase_sync_tolerance=phase_sync_tolerance,
     )
 
 
@@ -75,6 +78,7 @@ def morphological_symmetry_penalty(
     command_name: str,
     joint_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
     """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
 
@@ -83,6 +87,7 @@ def morphological_symmetry_penalty(
         command_name: Name of the gait command term.
         joint_cfg: Robot joints in FL, FR, RL, RR order.
         asset_cfg: Robot articulation.
+        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
         The negative leg-permutation symmetry penalty.
@@ -100,4 +105,5 @@ def morphological_symmetry_penalty(
         command_name=command_name,
         joint_cfg=joint_cfg,
         asset_cfg=asset_cfg,
+        phase_sync_tolerance=phase_sync_tolerance,
     )

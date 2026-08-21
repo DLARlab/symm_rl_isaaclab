@@ -3,7 +3,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
 from dataclasses import MISSING
+from numbers import Integral, Real
+from typing import Literal
 
 from isaaclab.utils.configclass import configclass
 
@@ -60,10 +63,46 @@ class RslRlSymmetryCfg:
     """Minimum absolute command velocity [m/s] for applying time-reversal losses."""
 
     warmup_iterations: int = 0
-    """Number of PPO iterations before applying time-reversal losses."""
+    """Number of fully unregularized PPO updates before a hard switch or coefficient ramp starts."""
+
+    rampup_iterations: int = 0
+    """Number of PPO updates used to ramp the time-reversal loss coefficients.
+
+    A value of zero preserves the legacy hard-switch behavior after :attr:`warmup_iterations`.
+    """
+
+    ramp_shape: Literal["linear", "half_cosine"] = "linear"
+    """Shape of the time-reversal loss coefficient ramp."""
 
     command_observation_index: int = 3
     """Index of the forward velocity command in the policy observation."""
 
     command_observation_scale: float = 1.0
     """Scale applied to the command observation."""
+
+    def __post_init__(self) -> None:
+        """Validate the time-reversal loss schedule configuration."""
+        self.validate_config()
+
+    def validate_config(self) -> None:
+        """Validate coefficient and schedule values.
+
+        Raises:
+            ValueError: If a coefficient or schedule setting is invalid.
+        """
+        for name, value in (
+            ("warmup_iterations", self.warmup_iterations),
+            ("rampup_iterations", self.rampup_iterations),
+        ):
+            if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
+                raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
+
+        for name, value in (
+            ("mirror_loss_coeff", self.mirror_loss_coeff),
+            ("value_loss_coeff", self.value_loss_coeff),
+        ):
+            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)) or value < 0.0:
+                raise ValueError(f"{name} must be finite and nonnegative; received {value!r}.")
+
+        if self.ramp_shape not in {"linear", "half_cosine"}:
+            raise ValueError(f"ramp_shape must be 'linear' or 'half_cosine'; received {self.ramp_shape!r}.")

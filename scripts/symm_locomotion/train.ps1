@@ -3,10 +3,5 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-param(
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$RemainingArgs
-)
-
-& "$PSScriptRoot\_run.ps1" "train.py" @RemainingArgs
+& "$PSScriptRoot\_run.ps1" "train.py" @args
 exit $LASTEXITCODE

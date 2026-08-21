@@ -71,6 +71,7 @@ Every command accepts:
 --conda-env symm_rl_isaaclab
 --use-conda-run
 --no-conda-run
+--expected-branch BRANCH
 --dry-run
 ```
 
@@ -84,12 +85,21 @@ Training options:
 --mirror
 --tr-value-coef
 --tr-warmup-iterations
+--tr-rampup-iterations
+--tr-ramp-shape linear|half_cosine
 --tr-min-abs-cmd-vel
 --no-trs
 --smoke
 ```
 
 Training and ablation runs default to 20,000 iterations across 512 environments.
+
+`--tr-warmup-iterations` sets the fully unregularized updates before TRS starts.
+`--tr-rampup-iterations 0` preserves the hard switch; positive values ramp both
+TRS coefficients with the selected linear or half-cosine shape.
+
+Use `--expected-branch BRANCH` to abort before launch when the checkout is on a
+different branch or detached HEAD.
 
 `--tr-min-abs-cmd-vel` defaults to `0.0`, so TRS losses also train on
 zero-velocity commands used for in-place behavior.
@@ -114,6 +124,46 @@ selected robot experiment directory. You can also use:
 --model 9999
 --checkpoint PATH_TO_MODEL_PT
 ```
+
+Play and record default to a deterministic six-gait sequence with five seconds
+per gait: trot, bound, front-spread half-bound, hind-spread half-bound, rotary
+gallop, then transverse gallop. Interactive play repeats the sequence; the
+default 30-second recording captures one complete cycle. Use
+`--gait-sequence-duration SECONDS` to change both the dwell time and the
+default one-cycle recording length, or
+`--no-gait-sequence` to restore random gait sampling and the legacy 30-second
+recording length. Playback disables phase-offset noise, retains period noise,
+and resamples the velocity command once at 10 seconds. Velocity resampling and
+sequence-row assignment both refresh period and duty factor from the current x
+command. When they coincide, as they do at 10 seconds, they share one timing
+refresh using the new velocity. The clock is piecewise-integrated and
+re-anchored before every timing change, so common phase is continuous and then
+advances using the new period. The completed transition is recorded under its
+old desired signal; the next policy observation receives the new velocity,
+gait offsets, period, duty factor, and continuous phase together. The playback
+episode time limit is one control step longer than the full gait cycle, which
+keeps its reset pose out of the recording. Physical fall and safety terminations
+remain active; the global row-sequence clock continues across resets while the
+per-environment oscillator phase restarts at zero.
+
+This continuous-clock behavior changes phase observations relative to archived
+v2/v3 checkpoints. Retrain those policies for correctness-aligned deployment,
+or use their archived environment implementation for exact legacy playback.
+
+Training uses a separate ten-row, fore/hind-balanced, time-reversal-closed gait
+library. Its row weights `(4, 4, 1, 1, 1, 1, 1, 1, 1, 1)` assign equal
+probability to the trot, bound, half-bound, and gallop families while splitting
+the half-bound family evenly between two front-spread and two hind-spread rows.
+The closure-only partners do not alter the six-gait playback sequence. The
+shared training configuration sums foot-phase violations over feet and averages
+leg-permutation errors over active synchronized pairs. It weights direct
+foot-phase tracking at `0.30`, leg-permutation symmetry at `0.20`, and the
+hip-action penalty at `0.10`. During each 30-second training episode, velocity
+is sampled at reset and resampled once at 10 seconds, an XY velocity disturbance
+is applied at 15 seconds, and the gait row is resampled once at 20 seconds.
+The velocity resample updates period and duty factor immediately. Playback uses
+the same one-shot velocity schedule without the disturbance while its gait rows
+change every five seconds.
 
 Recordings are 30 seconds by default (1,500 environment steps at 50 Hz).
 Pass `--video-length` to override the length in environment steps.
@@ -182,7 +232,10 @@ directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
 `logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
 `--checkpoint`.
 
-Extra Isaac Lab or Hydra overrides can be passed after `--`:
+Extra Isaac Lab or Hydra overrides can be passed after `--`. Launcher arguments
+before that delimiter are parsed strictly, and the delimiter itself is not
+forwarded. For compatibility, delimiter-free Hydra `key=value` overrides are
+also accepted, while unknown `--options` are rejected by the launcher:
 
 ```bash
 bash scripts/symm_locomotion/train.sh --robot go2 --no-trs -- \

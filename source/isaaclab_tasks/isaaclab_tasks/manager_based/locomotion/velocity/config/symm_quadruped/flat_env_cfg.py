@@ -50,22 +50,40 @@ def _warn_morphological_symmetry_deprecation() -> None:
     )
 
 
+def _warn_foot_periodicity_deprecation() -> None:
+    """Warn when the deprecated foot-phase reward name is used."""
+    warnings.warn(
+        "The 'foot_periodicity' reward is deprecated; use 'foot_phase'.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
 @configclass
 class SymmQuadrupedRewardsCfg(RewardsCfg):
-    """Reward configuration with a deprecated leg-symmetry name alias."""
+    """Reward configuration with deprecated aliases for renamed terms."""
+
+    foot_phase: RewTerm | None = None
+    """Foot contact and speed consistency with the commanded gait phase."""
 
     leg_permutation_symmetry: RewTerm | None = None
-    """Phase-weighted joint symmetry under configured leg permutations."""
+    """Joint symmetry for configured leg pairs commanded in synchrony."""
 
     def __getattr__(self, name: str):
-        """Resolve the deprecated reward name without exposing it as a config field."""
+        """Resolve deprecated reward names without exposing them as config fields."""
+        if name == "foot_periodicity":
+            _warn_foot_periodicity_deprecation()
+            return self.foot_phase
         if name == "morphological_symmetry":
             _warn_morphological_symmetry_deprecation()
             return self.leg_permutation_symmetry
         raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
 
     def __setattr__(self, name: str, value) -> None:
-        """Redirect assignments through the deprecated reward name."""
+        """Redirect assignments through deprecated reward names."""
+        if name == "foot_periodicity":
+            _warn_foot_periodicity_deprecation()
+            name = "foot_phase"
         if name == "morphological_symmetry":
             _warn_morphological_symmetry_deprecation()
             name = "leg_permutation_symmetry"
@@ -132,6 +150,7 @@ def make_gait_velocity_command(
     return mdp_module.GaitVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
+        resampling_time_gait=20.0,
         heading_command=False,
         heading_control_stiffness=0.5,
         rel_standing_envs=0.0,
@@ -144,6 +163,7 @@ def make_gait_velocity_command(
         vel_yaw_success_threshold=0.05,
         vel_yaw_success_rel_threshold=0.25,
         base_height_range=base_height_range,
+        init_foot_theta_weights=mdp_module.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS,
         ranges=mdp_module.GaitVelocityCommandCfg.Ranges(
             lin_vel_x=(-2.0, 2.0),
             lin_vel_y=(0.0, 0.0),
@@ -237,8 +257,8 @@ def configure_rewards(
     env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=0.20)
     env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=-200.0)
     env_cfg.rewards.cmd = None
-    env_cfg.rewards.foot_periodicity = RewTerm(
-        func=mdp_module.foot_periodicity_penalty,
+    env_cfg.rewards.foot_phase = RewTerm(
+        func=mdp_module.foot_phase_penalty,
         weight=0.30,
         params={
             "command_name": "base_velocity",
@@ -289,7 +309,7 @@ def configure_rewards(
         weight=foot_clearance_weight,
         params=foot_clearance_params,
     )
-    env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.15)
+    env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.10)
     env_cfg.rewards.joint_target_limits = RewTerm(
         func=mdp_module.joint_position_target_limit_penalty,
         weight=0.05,
@@ -321,8 +341,8 @@ def configure_rewards(
     )
     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
         func=mdp_module.leg_permutation_symmetry_penalty,
-        weight=0.30,
-        params={"command_name": "base_velocity", "joint_cfg": joint_cfg},
+        weight=0.20,
+        params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
     )
     env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
 

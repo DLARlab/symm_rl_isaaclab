@@ -103,10 +103,6 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
-        self.command_manager.compute(dt=self.step_dt)
-        if "interval" in self.event_manager.available_modes:
-            self.event_manager.apply(mode="interval", dt=self.step_dt)
-
         self.reset_buf = self.termination_manager.compute()
         self.reset_terminated = self.termination_manager.terminated
         self.reset_time_outs = self.termination_manager.time_outs
@@ -122,6 +118,10 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
             self.obs_buf = self.observation_manager.compute()
             self.recorder_manager.record_post_step()
 
+        # Schedule the next desired signal only after scoring and recording the
+        # completed transition under the command/gait that generated its action.
+        self.command_manager.compute(dt=self.step_dt)
+
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
         if len(reset_env_ids) > 0:
             self.recorder_manager.record_pre_reset(reset_env_ids)
@@ -133,6 +133,9 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
                     self.sim.render()
 
             self.recorder_manager.record_post_reset(reset_env_ids)
+
+        if "interval" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="interval", dt=self.step_dt)
 
         self.obs_buf = self.observation_manager.compute(update_history=True)
         self.extras.setdefault("log", {}).update(step_diagnostics)

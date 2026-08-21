@@ -3,30 +3,55 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [string]$ScriptName,
+if ($args.Count -lt 1) {
+    Write-Error "Usage: _run.ps1 SCRIPT_NAME [ARGUMENT ...]"
+    exit 2
+}
 
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$RemainingArgs
-)
+$ScriptName = [string]$args[0]
+$RemainingArgs = @($args | Select-Object -Skip 1)
 
 $DefaultCondaEnv = "symm_rl_isaaclab"
-$CondaPrefix = $env:CONDA_PREFIX
+$CondaPrefix = $null
+$ActiveCondaPrefix = $env:CONDA_PREFIX
+if ($ActiveCondaPrefix) {
+    $ActiveCondaPython = Join-Path $ActiveCondaPrefix "python.exe"
+    if (Test-Path -LiteralPath $ActiveCondaPython) {
+        $CondaPrefix = $ActiveCondaPrefix
+    }
+}
+
 if (-not $CondaPrefix) {
-    $CondaPrefix = Join-Path $HOME ".conda\envs\$DefaultCondaEnv"
+    $DefaultCondaPrefix = Join-Path $HOME ".conda\envs\$DefaultCondaEnv"
+    $DefaultCondaPython = Join-Path $DefaultCondaPrefix "python.exe"
+    if (Test-Path -LiteralPath $DefaultCondaPython) {
+        $CondaPrefix = $DefaultCondaPrefix
+    }
+}
+
+if (-not $CondaPrefix) {
+    Write-Error (
+        "Could not find the '$DefaultCondaEnv' Conda environment. " +
+        "Activate it or install it at '$DefaultCondaPrefix'."
+    )
+    exit 2
 }
 
 $PythonExe = Join-Path $CondaPrefix "python.exe"
 $ScriptPath = Join-Path $PSScriptRoot $ScriptName
-
-if (Test-Path $PythonExe) {
-    $env:CONDA_PREFIX = $CondaPrefix
-    if (-not $env:CONDA_DEFAULT_ENV) {
-        $env:CONDA_DEFAULT_ENV = Split-Path $CondaPrefix -Leaf
-    }
-    & $PythonExe $ScriptPath @RemainingArgs
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$LocalSourcePaths = Get-ChildItem -LiteralPath (Join-Path $RepoRoot "source") -Directory |
+    Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName (Join-Path $_.Name "__init__.py")) } |
+    Sort-Object -Property FullName |
+    ForEach-Object { $_.FullName }
+$LocalPythonPath = $LocalSourcePaths -join [System.IO.Path]::PathSeparator
+if ($env:PYTHONPATH) {
+    $env:PYTHONPATH = $LocalPythonPath + [System.IO.Path]::PathSeparator + $env:PYTHONPATH
 } else {
-    python $ScriptPath @RemainingArgs
+    $env:PYTHONPATH = $LocalPythonPath
 }
+
+$env:CONDA_PREFIX = $CondaPrefix
+$env:CONDA_DEFAULT_ENV = Split-Path $CondaPrefix -Leaf
+& $PythonExe $ScriptPath @RemainingArgs
 exit $LASTEXITCODE

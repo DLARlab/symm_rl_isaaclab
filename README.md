@@ -249,8 +249,11 @@ Direct IsaacLab commands still work:
 ## Gait Phase and Time-Reversal Semantics
 
 The current mapping is recorded in each environment configuration as
-`phase_mapping_version = "same_gait_backward_duty_aware_trs_v2"`. The policy
-observation remains 72D and contains no clock-direction channel.
+`phase_mapping_version = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"`.
+The policy observation remains 72D and contains no clock-direction channel.
+Policies trained with an earlier mapping version should be retrained before
+correctness-aligned v4 deployment; use their archived code and environment
+configuration when exact legacy checkpoint or video reproduction is required.
 
 Ordinary backward locomotion uses the same forward-time gait schedule as
 forward locomotion. For common clock `phi` and fixed leg offsets `theta`, both
@@ -262,7 +265,42 @@ foot_phase = remainder(phi + theta, 1)
 
 Changing command sign changes the desired spatial velocity only; it does not
 change the sampled gait row, `theta`, footfall order, or clock direction. Gait
-period and duty factor continue to depend on the absolute x-command speed.
+period and duty factor continue to depend on the absolute x-command speed. The
+common phase is piecewise-integrated using the period active during each control
+interval. A velocity resample recomputes period and duty factor from the final
+sampled command, including a standing override. Gait-row assignment also
+refreshes timing to retain the configured gait/noise schedule. Before either
+timing change, the clock is re-anchored at the phase reached with the old
+period, so the common phase is continuous and subsequent phase advances use the
+new period. A gait-row change can still shift individual foot phases through
+its new `theta` offsets, while the new duty factor immediately defines the
+desired swing/stance distribution. When velocity and gait change in the same
+control step, their timing refresh is coalesced so period and duty factor are
+sampled only once from the new velocity.
+
+Each completed transition is rewarded, diagnosed, and recorded under the same
+command, gait, period, and duty factor that generated its action, with phase
+advanced through that interval using the old period. Timed resampling then
+atomically publishes the new desired signal in the returned policy observation
+for the next action. Environments terminating on that step skip the timed
+update and receive a fresh command, gait, timing, and phase-zero clock during
+reset.
+
+Each 30-second training episode samples velocity and gait at reset, resamples
+velocity once at 10 seconds, applies the configured XY velocity disturbance at
+15 seconds, and resamples the gait row once at 20 seconds. The 10-second
+velocity change immediately updates period and duty factor; the later gait
+assignment refreshes them again from the unchanged velocity. Play and recording
+also resample velocity only once, at 10 seconds, while running the fixed gait
+sequence. Because the 10-second velocity boundary is also a sequence-row
+boundary, velocity is sampled first and the two events share one timing update.
+Playback disturbances remain disabled.
+
+The timing curve uses dimensionless speed `v* = |v_x| / sqrt(g L)`, where `L`
+is the midpoint of the configured characteristic-length range. It maps to a
+dimensionless period before multiplying by `sqrt(L / g)` and maps directly to
+a dimensionless duty factor. The equations are dimensionally consistent;
+using nominal base height as `L` remains a robot-specific modeling heuristic.
 
 The auxiliary physical time-reversal (TR) pair is a separate mapping. With
 stance duty factor `beta`, swing ratio `1 - beta`, and foot phase `psi`, it
@@ -285,13 +323,25 @@ data augmentation remains disabled (`use_data_augmentation=False`); the
 transformed observations are used only by the auxiliary policy-equivariance
 and value-consistency losses.
 
-The sampled gait library has the following TR closure:
+The training gait library is closed under time reversal:
 
 - Trot is self-reversing.
 - Bound is self-reversing.
-- The two half-bound rows are TR partners.
-- The pure TR partners of the two current gallop rows are not sampled. They
-  have intentionally not been added in this milestone.
+- The two front-spread half-bound rows are TR partners.
+- The two hind-spread half-bound rows are TR partners.
+- Each of the two original gallop rows is paired with its pure TR partner.
+
+The ten row weights are `(4, 4, 1, 1, 1, 1, 1, 1, 1, 1)`. This assigns 25% of
+training samples to each gait family: trot, bound, half-bound, and gallop,
+while splitting half-bound exposure evenly between front- and hind-spread
+rows. The default phase-offset noise uses the archived four-value support
+`(-2, -1, 0, 1) * 0.001` cycles. Play and recording disable phase-offset noise,
+retain the selected run's period noise, and use the fixed six-gait sequence
+with one front-spread and one hind-spread half-bound row. The foot-phase term
+sums its combined contact/speed violation over the four feet, preserving the
+scale used by the selected run. The leg-permutation term averages over only the
+active synchronized pairs, and the hip term is already a normalized weighted
+average. Their weights are `0.30`, `0.20`, and `0.10`, respectively.
 
 The training command deadband is disabled with `min_xy_command_norm=0.0`, so
 sampled low-speed commands remain continuous through zero instead of being

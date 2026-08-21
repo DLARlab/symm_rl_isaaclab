@@ -237,6 +237,19 @@ class DobotX1SymmFlatEnvCfg_PLAY(DobotX1SymmFlatEnvCfg):
 
         self.scene.num_envs = 1
         self.scene.env_spacing = 2.5
+        self.commands.base_velocity.gait_library_version = dobot_mdp.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION
+        self.commands.base_velocity.init_foot_thetas = dobot_mdp.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS
+        self.commands.base_velocity.init_foot_theta_weights = None
+        self.commands.base_velocity.resample_once_after_reset = True
+        self.commands.base_velocity.resample_gait_once_after_reset = True
+        self.commands.base_velocity.gait_sequence_enabled = True
+        self.commands.base_velocity.gait_sequence_duration_s = 5.0
+        self.commands.base_velocity.add_noise_period = True
+        self.commands.base_velocity.add_noise_theta = False
+        self.episode_length_s = (
+            len(self.commands.base_velocity.init_foot_thetas) * self.commands.base_velocity.gait_sequence_duration_s
+            + self.decimation * self.sim.dt
+        )
         self.sim.physics = make_play_physics_cfg()
         configure_play_ground_reaction_force_sensors(self, _DOBOT_X1_FOOT_SENSOR_NAMES)
         self.viewer.eye = (0.0, -4.0, 1.5)

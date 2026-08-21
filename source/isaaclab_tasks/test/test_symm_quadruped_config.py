@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -103,6 +104,77 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
 
 
+def test_environment_rewards_and_records_old_target_before_publishing_new_observation():
+    events = []
+    command_target = {"value": "old"}
+    env = object.__new__(symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv)
+    env._is_closed = True
+    env.sim = SimpleNamespace(device="cpu", is_rendering=False, step=lambda **_: events.append("physics"))
+    env.cfg = SimpleNamespace(decimation=1, sim=SimpleNamespace(dt=0.02, render_interval=1))
+    env._physics_handles_decimation = True
+    env._sim_step_counter = 0
+    env.render_enabled = False
+    env.action_manager = SimpleNamespace(
+        process_action=lambda _: events.append("action"),
+        apply_action=lambda: None,
+    )
+    env._clamp_processed_joint_position_targets = lambda: None
+    env.recorder_manager = SimpleNamespace(
+        active_terms=("transition_trace",),
+        record_pre_step=lambda: None,
+        record_post_physics_decimation_step=lambda: None,
+        record_post_step=lambda: events.append(f"record:{command_target['value']}"),
+    )
+    env.scene = SimpleNamespace(
+        write_data_to_sim=lambda: None,
+        update=lambda **_: None,
+    )
+    env.episode_length_buf = torch.zeros(1, dtype=torch.long)
+    env.common_step_counter = 0
+    env.termination_manager = SimpleNamespace(
+        compute=lambda: torch.zeros(1, dtype=torch.bool),
+        terminated=torch.zeros(1, dtype=torch.bool),
+        time_outs=torch.zeros(1, dtype=torch.bool),
+    )
+
+    def compute_reward(*, dt):
+        events.append(f"reward:{command_target['value']}")
+        return torch.ones(1)
+
+    env.reward_manager = SimpleNamespace(
+        compute=compute_reward,
+        get_term_cfg=lambda _: SimpleNamespace(weight=0.0),
+    )
+
+    def compute_diagnostics(*_):
+        events.append(f"diagnostics:{command_target['value']}")
+        return {}
+
+    env._compute_step_diagnostics = compute_diagnostics
+
+    def resample_command(*, dt):
+        events.append("resample")
+        command_target["value"] = "new"
+
+    env.command_manager = SimpleNamespace(compute=resample_command)
+    env.event_manager = SimpleNamespace(available_modes=())
+
+    def compute_observation(*, update_history=False):
+        events.append(f"observation:{command_target['value']}")
+        return {"policy": torch.zeros((1, 1))}
+
+    env.observation_manager = SimpleNamespace(compute=compute_observation)
+    env.extras = {}
+
+    env.step(torch.zeros((1, 12)))
+
+    assert events.index("physics") < events.index("reward:old")
+    assert events.index("reward:old") < events.index("diagnostics:old")
+    assert events.index("diagnostics:old") < events.index("observation:old")
+    assert events.index("observation:old") < events.index("record:old")
+    assert events.index("record:old") < events.index("resample") < events.index("observation:new")
+
+
 @pytest.mark.parametrize("env_cfg_type", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
 def test_symm_quadruped_command_and_phase_mapping_configuration_is_stable(env_cfg_type):
     command_cfg = env_cfg_type().commands.base_velocity
@@ -110,7 +182,38 @@ def test_symm_quadruped_command_and_phase_mapping_configuration_is_stable(env_cf
     assert command_cfg.ranges.lin_vel_x == (-2.0, 2.0)
     assert command_cfg.min_xy_command_norm == 0.0
     assert command_cfg.phase_mapping_version == symm_quadruped.SYMM_QUADRUPED_PHASE_MAPPING_VERSION
-    assert command_cfg.phase_mapping_version == "same_gait_backward_duty_aware_trs_v2"
+    assert command_cfg.phase_mapping_version == "same_gait_backward_duty_aware_integrated_reward_boundary_v4"
+
+
+@pytest.mark.parametrize(
+    ("train_cfg_type", "play_cfg_type"),
+    (
+        (UnitreeGo2SymmFlatEnvCfg, UnitreeGo2SymmFlatEnvCfg_PLAY),
+        (DobotX1SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg_PLAY),
+    ),
+)
+def test_training_uses_one_shot_velocity_gait_and_push_schedule(train_cfg_type, play_cfg_type):
+    train_cfg = train_cfg_type()
+    train_command = train_cfg.commands.base_velocity
+    play_cfg = play_cfg_type()
+    play_command = play_cfg.commands.base_velocity
+
+    assert train_cfg.episode_length_s == pytest.approx(30.0)
+    assert train_command.resampling_time_range == (10.0, 10.0)
+    assert train_command.resample_once_after_reset is True
+    assert train_command.resampling_time_gait == pytest.approx(20.0)
+    assert train_command.resample_gait_once_after_reset is True
+    assert train_cfg.events.push_robot.mode == "interval"
+    assert train_cfg.events.push_robot.interval_range_s == (15.0, 15.0)
+    assert train_cfg.events.push_robot.params["velocity_range"] == {
+        "x": (-0.25, 0.25),
+        "y": (-0.25, 0.25),
+    }
+
+    assert play_command.resampling_time_range == (10.0, 10.0)
+    assert play_command.resample_once_after_reset is True
+    assert play_command.resample_gait_once_after_reset is True
+    assert play_cfg.events.push_robot is None
 
 
 @pytest.mark.parametrize(
@@ -215,6 +318,42 @@ def test_desired_base_twist_expands_planar_command_to_six_velocities():
     )
 
 
+def test_deprecated_foot_periodicity_function_forwards_to_foot_phase(monkeypatch):
+    expected = torch.tensor([-0.25])
+    captured = {}
+
+    def fake_foot_phase(env, **kwargs):
+        captured["env"] = env
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(symm_quadruped, "foot_phase_penalty", fake_foot_phase)
+    monkeypatch.setattr(symm_quadruped, "_FOOT_PERIODICITY_DEPRECATION_WARNED", False)
+    env = SimpleNamespace()
+    feet_cfg = SimpleNamespace()
+    asset_cfg = SimpleNamespace(name="test_robot")
+
+    with pytest.warns(DeprecationWarning, match="foot_phase_penalty"):
+        result = symm_quadruped.foot_periodicity_penalty(
+            env,
+            command_name="base_velocity",
+            feet_cfg=feet_cfg,
+            foot_sensor_names=("contact_FL",),
+            foot_sensor_body_names=("FL_foot",),
+            force_scale=0.005,
+            asset_cfg=asset_cfg,
+        )
+
+    assert result is expected
+    assert captured["env"] is env
+    assert captured["command_name"] == "base_velocity"
+    assert captured["feet_cfg"] is feet_cfg
+    assert captured["foot_sensor_names"] == ("contact_FL",)
+    assert captured["foot_sensor_body_names"] == ("FL_foot",)
+    assert captured["force_scale"] == 0.005
+    assert captured["asset_cfg"] is asset_cfg
+
+
 def test_deprecated_morphological_symmetry_function_forwards_to_leg_permutation(monkeypatch):
     expected = torch.tensor([-0.25])
     captured = {}
@@ -234,12 +373,14 @@ def test_deprecated_morphological_symmetry_function_forwards_to_leg_permutation(
             env,
             command_name="base_velocity",
             joint_cfg=joint_cfg,
+            phase_sync_tolerance=0.01,
         )
 
     assert result is expected
     assert captured["env"] is env
     assert captured["command_name"] == "base_velocity"
     assert captured["joint_cfg"] is joint_cfg
+    assert captured["phase_sync_tolerance"] == 0.01
 
 
 def test_x1_leg_permutation_adapter_uses_x1_joint_convention(monkeypatch):
@@ -259,16 +400,24 @@ def test_x1_leg_permutation_adapter_uses_x1_joint_convention(monkeypatch):
         env,
         command_name="base_velocity",
         joint_cfg=joint_cfg,
+        phase_sync_tolerance=0.01,
     )
 
     assert result is expected
     assert captured["logical_joint_signs"] == dobot_x1_symm.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS
     assert captured["joint_ranges"] == dobot_x1_symm.DOBOT_X1_SYMM_JOINT_RANGES
+    assert captured["phase_sync_tolerance"] == 0.01
 
 
 def test_deprecated_x1_morphological_symmetry_function_forwards(monkeypatch):
     expected = torch.tensor([-0.75])
-    monkeypatch.setattr(dobot_x1_symm, "leg_permutation_symmetry_penalty", lambda *_, **__: expected)
+    captured = {}
+
+    def fake_leg_permutation(*_, **kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(dobot_x1_symm, "leg_permutation_symmetry_penalty", fake_leg_permutation)
     monkeypatch.setattr(dobot_x1_symm, "_MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED", False)
 
     with pytest.warns(DeprecationWarning, match="leg_permutation_symmetry_penalty"):
@@ -276,9 +425,11 @@ def test_deprecated_x1_morphological_symmetry_function_forwards(monkeypatch):
             SimpleNamespace(),
             command_name="base_velocity",
             joint_cfg=SimpleNamespace(),
+            phase_sync_tolerance=0.01,
         )
 
     assert result is expected
+    assert captured["phase_sync_tolerance"] == 0.01
 
 
 def test_joint_position_targets_are_clamped_to_soft_limits():
@@ -423,8 +574,11 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
         base_height_range=(0.35, 0.45),
     )
 
-    assert env_cfg.rewards.hip_action_penalty.weight == 0.15
+    assert env_cfg.rewards.hip_action_penalty.weight == 0.10
     assert env_cfg.rewards.alive_bonus.weight == 0.20
+    assert env_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
+    assert env_cfg.rewards.foot_phase.weight == 0.30
+    assert "foot_periodicity" not in env_cfg.rewards.__dict__
     assert env_cfg.rewards.cmd is None
     assert env_cfg.rewards.sagittal_plane is None
     assert env_cfg.rewards.straight_line_motion.func is symm_quadruped.straight_line_motion_reward
@@ -441,7 +595,8 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_target_limit_penalty
     assert env_cfg.rewards.joint_target_limits.weight == 0.05
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.30
+    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert env_cfg.rewards.foot_clearance.weight == 0.10
     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
@@ -469,10 +624,53 @@ def test_rewards_cfg_preserves_deprecated_morphological_symmetry_alias():
     assert configured_rewards.leg_permutation_symmetry.weight == 0.42
 
 
+def test_rewards_cfg_preserves_deprecated_foot_periodicity_alias():
+    cfg = SymmQuadrupedRewardsCfg()
+    reward = object()
+    cfg.foot_phase = reward
+
+    with pytest.warns(DeprecationWarning, match="foot_phase"):
+        assert cfg.foot_periodicity is reward
+
+    replacement = object()
+    with pytest.warns(DeprecationWarning, match="foot_phase"):
+        cfg.foot_periodicity = replacement
+
+    assert cfg.foot_phase is replacement
+    assert "foot_periodicity" not in cfg.__dict__
+    serialized = cfg.to_dict()
+    assert "foot_phase" in serialized
+    assert "foot_periodicity" not in serialized
+
+    configured_rewards = DobotX1SymmFlatEnvCfg().rewards
+    with pytest.warns(DeprecationWarning, match="foot_phase"):
+        configured_rewards.from_dict({"foot_periodicity": {"weight": 0.42}})
+    assert configured_rewards.foot_phase.weight == 0.42
+
+
+def test_robot_configs_use_canonical_foot_phase_name_without_deprecation_warning():
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=".*foot_periodicity.*", category=DeprecationWarning)
+        for cfg in (DobotX1SymmFlatEnvCfg(), UnitreeGo2SymmFlatEnvCfg()):
+            serialized = cfg.rewards.to_dict()
+            assert "foot_phase" in serialized
+            assert "foot_periodicity" not in serialized
+
+
 def test_robot_configs_use_robot_specific_foot_clearance_shaping():
     x1_cfg = DobotX1SymmFlatEnvCfg()
     go2_cfg = UnitreeGo2SymmFlatEnvCfg()
 
+    assert x1_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
+    assert go2_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
+    assert x1_cfg.rewards.foot_phase.weight == 0.30
+    assert go2_cfg.rewards.foot_phase.weight == 0.30
+    assert x1_cfg.rewards.hip_action_penalty.weight == 0.10
+    assert go2_cfg.rewards.hip_action_penalty.weight == 0.10
+    assert x1_cfg.rewards.leg_permutation_symmetry.func is dobot_x1_symm.leg_permutation_symmetry_penalty
+    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert go2_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
     assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.04
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
@@ -488,6 +686,39 @@ def test_play_configs_enable_ground_filtered_normal_and_friction_forces():
             sensor_cfg = getattr(cfg.scene, sensor_name)
             assert sensor_cfg.filter_prim_paths_expr == [SYMM_QUADRUPED_GROUND_COLLISION_PATH]
             assert sensor_cfg.track_friction_forces
+
+
+def test_play_configs_enable_fixed_six_gait_sequence_only_for_playback():
+    for train_cfg, play_cfg in (
+        (DobotX1SymmFlatEnvCfg(), DobotX1SymmFlatEnvCfg_PLAY()),
+        (UnitreeGo2SymmFlatEnvCfg(), UnitreeGo2SymmFlatEnvCfg_PLAY()),
+    ):
+        train_command = train_cfg.commands.base_velocity
+        play_command = play_cfg.commands.base_velocity
+
+        assert train_command.gait_library_version == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
+        assert train_command.init_foot_thetas == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS
+        assert train_command.init_foot_theta_weights == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS
+        assert train_cfg.commands.base_velocity.gait_sequence_enabled is False
+        assert play_command.gait_library_version == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION
+        expected_play_gaits = (
+            (0.0, 0.5, 0.5, 0.0),
+            (0.0, 0.0, 0.5, 0.5),
+            (0.13, -0.13, 0.5, 0.5),
+            (0.0, 0.0, 0.63, 0.37),
+            (-0.13, 0.13, 0.63, 0.37),
+            (0.13, -0.13, 0.63, 0.37),
+        )
+        assert play_command.init_foot_thetas == expected_play_gaits
+        assert expected_play_gaits == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS
+        assert play_command.init_foot_theta_weights is None
+        assert play_command.gait_sequence_enabled is True
+        assert play_command.gait_sequence_duration_s == 5.0
+        assert play_command.add_noise_period is True
+        assert play_command.add_noise_theta is False
+        assert len(play_command.init_foot_thetas) == 6
+        assert play_cfg.terminations.time_out is not None
+        assert play_cfg.episode_length_s == pytest.approx(30.02)
 
 
 def test_robot_configs_use_requested_pitch_and_height_postures():

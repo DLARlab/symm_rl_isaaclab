@@ -130,8 +130,8 @@ installed_version = metadata.version("rsl-rl-lib")
 _SYMM_GAIT_THETAS = (
     ("trot", (0.0, 0.5, 0.5, 0.0)),
     ("bound", (0.0, 0.0, 0.5, 0.5)),
-    ("half-bound-left", (0.13, -0.13, 0.5, 0.5)),
-    ("half-bound-right", (-0.13, 0.13, 0.5, 0.5)),
+    ("front-spread-half-bound", (0.13, -0.13, 0.5, 0.5)),
+    ("hind-spread-half-bound", (0.0, 0.0, 0.63, 0.37)),
     ("rotary-gallop", (-0.13, 0.13, 0.63, 0.37)),
     ("transverse-gallop", (0.13, -0.13, 0.63, 0.37)),
 )

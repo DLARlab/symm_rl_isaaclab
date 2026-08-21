@@ -20,6 +20,8 @@ def configure_symm_quadruped_ppo(
     mirror_loss_coeff: float = 0.1,
     min_abs_command_velocity: float = 0.0,
     warmup_iterations: int = 500,
+    rampup_iterations: int = 0,
+    ramp_shape: str = "linear",
 ) -> None:
     """Apply the shared symmetric quadruped PPO/TRS defaults to a runner config.
 
@@ -31,7 +33,9 @@ def configure_symm_quadruped_ppo(
         value_loss_coeff: Weight for the value-function TRS consistency loss.
         mirror_loss_coeff: Weight for the policy mirror loss.
         min_abs_command_velocity: Minimum forward command velocity [m/s] for TRS losses.
-        warmup_iterations: Number of PPO iterations before applying TRS losses.
+        warmup_iterations: Number of fully unregularized PPO updates before applying TRS losses.
+        rampup_iterations: Number of PPO updates used to ramp the TRS loss coefficients.
+        ramp_shape: Shape of the TRS loss coefficient ramp.
     """
     cfg.max_iterations = 20000
     cfg.save_interval = 1000
@@ -54,6 +58,8 @@ def configure_symm_quadruped_ppo(
         value_loss_coeff=value_loss_coeff,
         min_abs_command_velocity=min_abs_command_velocity,
         warmup_iterations=warmup_iterations,
+        rampup_iterations=rampup_iterations,
+        ramp_shape=ramp_shape,
         command_observation_index=9,
         command_observation_scale=2.0,
     )

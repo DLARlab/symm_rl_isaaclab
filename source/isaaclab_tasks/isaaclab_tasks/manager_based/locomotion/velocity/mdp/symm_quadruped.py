@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import MISSING, dataclass
@@ -40,8 +41,41 @@ SYMM_QUADRUPED_LEG_JOINT_IDS = {
 SYMM_QUADRUPED_LEG_PHASE_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 """Default mapping from logical leg tags to gait phase columns."""
 
-SYMM_QUADRUPED_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_trs_v2"
-"""Audit identifier for the shared gait and time-reversal phase semantics."""
+SYMM_QUADRUPED_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"
+"""Audit identifier for the continuous gait clock and transition-aligned desired signal."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION = "time_reversal_closed_v2"
+"""Audit identifier for the fore/hind-balanced, time-reversal-closed training gait library."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION = "canonical_six_play_v2"
+"""Audit identifier for the six-row playback library with front- and hind-spread half-bounds."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS = (
+    (0.0, 0.5, 0.5, 0.0),
+    (0.0, 0.0, 0.5, 0.5),
+    (0.13, -0.13, 0.5, 0.5),
+    (0.0, 0.0, 0.63, 0.37),
+    (-0.13, 0.13, 0.63, 0.37),
+    (0.13, -0.13, 0.63, 0.37),
+)
+"""Canonical trot, bound, mixed half-bound, and gallop rows used for playback."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS = (
+    (0.0, 0.5, 0.5, 0.0),
+    (0.0, 0.0, 0.5, 0.5),
+    (0.13, -0.13, 0.5, 0.5),
+    (-0.13, 0.13, 0.5, 0.5),
+    (0.0, 0.0, 0.63, 0.37),
+    (0.0, 0.0, 0.37, 0.63),
+    (-0.13, 0.13, 0.63, 0.37),
+    (0.13, -0.13, 0.63, 0.37),
+    (0.13, -0.13, 0.37, 0.63),
+    (-0.13, 0.13, 0.37, 0.63),
+)
+"""Fore/hind-balanced training rows closed under the shared time-reversal phase mapping."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS = (4.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+"""Training row weights yielding equal trot, bound, half-bound, and gallop family mass."""
 
 SYMM_QUADRUPED_POLICY_OBS_DIM = 72
 """Dimension of the shared symmetric quadruped policy observation."""
@@ -111,6 +145,7 @@ SYMM_QUADRUPED_LEG_PAIRS = (
 """Default leg pairs compared by the leg-permutation symmetry reward."""
 
 _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = False
+_FOOT_PERIODICITY_DEPRECATION_WARNED = False
 
 
 @configclass
@@ -145,8 +180,14 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     phase_mapping_version: str = SYMM_QUADRUPED_PHASE_MAPPING_VERSION
     """Audit metadata identifying the gait and time-reversal phase semantics."""
 
+    gait_library_version: str = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
+    """Audit metadata identifying the configured gait-row library."""
+
     resample_once_after_reset: bool = False
-    """Whether velocity commands resample only once after the episode reset."""
+    """Whether to perform exactly one timed velocity resample after the reset-time sample.
+
+    When false, velocity resampling continues at every timer expiration.
+    """
 
     @configclass
     class Ranges:
@@ -189,7 +230,17 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     """Time between gait parameter resampling [s]."""
 
     resample_gait_once_after_reset: bool = False
-    """Whether gait parameters resample only once after the episode reset."""
+    """Whether to perform exactly one timed gait resample after the reset-time sample.
+
+    When false, gait resampling continues at every timer expiration. This option
+    is bypassed when :attr:`gait_sequence_enabled` is true.
+    """
+
+    gait_sequence_enabled: bool = False
+    """Whether to cycle through :attr:`init_foot_thetas` in order using the global rollout clock."""
+
+    gait_sequence_duration_s: float = 5.0
+    """Duration [s] assigned to each gait when :attr:`gait_sequence_enabled` is true."""
 
     calculate_from_sampling_curve: bool = True
     """Whether to derive period and duty factor from commanded forward speed."""
@@ -210,17 +261,17 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     """Smoothness coefficient for stance/swing indicator shaping."""
 
     base_height_range: tuple[float, float] = (0.35, 0.45)
-    """Nominal base height range [m] used by the old period/duty-factor curve."""
+    """Characteristic-length range [m] used by the dimensionless period/duty-factor curve."""
 
-    init_foot_thetas: tuple[tuple[float, float, float, float], ...] = (
-        (0.0, 0.5, 0.5, 0.0),
-        (0.0, 0.0, 0.5, 0.5),
-        (0.13, -0.13, 0.5, 0.5),
-        (-0.13, 0.13, 0.5, 0.5),
-        (-0.13, 0.13, 0.63, 0.37),
-        (0.13, -0.13, 0.63, 0.37),
-    )
+    init_foot_thetas: tuple[tuple[float, float, float, float], ...] = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS
     """Foot phase offsets for FL, FR, RL, and RR."""
+
+    init_foot_theta_weights: tuple[float, ...] | None = None
+    """Optional nonnegative sampling weights corresponding to :attr:`init_foot_thetas`.
+
+    When unset, gait rows are sampled uniformly for compatibility with custom
+    gait libraries.
+    """
 
 
 class GaitVelocityCommand(CommandTerm):
@@ -246,12 +297,54 @@ class GaitVelocityCommand(CommandTerm):
         self._step_count = torch.zeros(self.num_envs, device=self.device)
 
         self.init_foot_thetas = torch.tensor(cfg.init_foot_thetas, dtype=torch.float32, device=self.device)
+        if (
+            self.init_foot_thetas.ndim != 2
+            or self.init_foot_thetas.shape[0] == 0
+            or self.init_foot_thetas.shape[1] != 4
+        ):
+            raise ValueError(
+                "init_foot_thetas must be a nonempty two-dimensional array with four phase offsets per row; "
+                f"received shape {tuple(self.init_foot_thetas.shape)}."
+            )
+        if not torch.all(torch.isfinite(self.init_foot_thetas)):
+            raise ValueError("init_foot_thetas must contain only finite phase offsets.")
+
+        if cfg.init_foot_theta_weights is None:
+            self.foot_theta_sampling_weights = None
+        else:
+            sampling_weights = torch.tensor(cfg.init_foot_theta_weights, dtype=torch.float32, device=self.device)
+            if sampling_weights.ndim != 1 or sampling_weights.shape[0] != self.init_foot_thetas.shape[0]:
+                received_shape = (
+                    sampling_weights.shape[0] if sampling_weights.ndim == 1 else tuple(sampling_weights.shape)
+                )
+                raise ValueError(
+                    "init_foot_theta_weights must contain one value per gait row; "
+                    f"received {received_shape} weights for {self.init_foot_thetas.shape[0]} rows."
+                )
+            if not torch.all(torch.isfinite(sampling_weights)) or torch.any(sampling_weights < 0.0):
+                raise ValueError("init_foot_theta_weights must contain only finite, nonnegative values.")
+            weight_sum = sampling_weights.sum()
+            if not torch.isfinite(weight_sum) or weight_sum <= 0.0:
+                raise ValueError("init_foot_theta_weights must have a finite, positive sum.")
+            self.foot_theta_sampling_weights = sampling_weights / weight_sum
+
+        if isinstance(cfg.noise_level_theta, bool) or not isinstance(cfg.noise_level_theta, int):
+            raise ValueError("noise_level_theta must be a nonnegative integer.")
+        if cfg.noise_level_theta < 0:
+            raise ValueError("noise_level_theta must be a nonnegative integer.")
+        if not math.isfinite(cfg.noise_scale_theta) or cfg.noise_scale_theta < 0.0:
+            raise ValueError("noise_scale_theta must be finite and nonnegative.")
         self.foot_thetas = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self.device)
         self.duty_factors = torch.full((self.num_envs,), cfg.duty_factor, dtype=torch.float32, device=self.device)
         self.gait_periods = torch.full((self.num_envs,), cfg.gait_period, dtype=torch.float32, device=self.device)
+        self._common_gait_phase_at_anchor = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self._gait_phase_anchor_steps = torch.full(
+            (self.num_envs,), int(env.common_step_counter), dtype=torch.long, device=self.device
+        )
         self.kappa = torch.full((self.num_envs,), cfg.kappa, dtype=torch.float32, device=self.device)
         self.gait_time_left = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.gait_sequence_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
 
         self.metrics["gait_period"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["duty_factor"] = torch.zeros(self.num_envs, device=self.device)
@@ -266,43 +359,56 @@ class GaitVelocityCommand(CommandTerm):
 
     def compute(self, dt: float):
         self._update_metrics()
-        self.time_left -= dt
-        resample_env_ids = (self.time_left <= 0.0).nonzero().flatten()
+        active_env_ids = self._active_resampling_env_ids()
+        self.time_left[active_env_ids] -= dt
+        resample_env_ids = active_env_ids[self.time_left[active_env_ids] <= 0.0]
+        empty_env_ids = resample_env_ids[:0]
+        velocity_resampled_env_ids = empty_env_ids
         if len(resample_env_ids) > 0:
             if self.cfg.resample_once_after_reset:
-                allowed_env_ids = resample_env_ids[self.command_counter[resample_env_ids] <= 1]
+                allowed_env_ids = resample_env_ids[self.command_counter[resample_env_ids] == 1]
                 if len(allowed_env_ids) > 0:
                     self._resample(allowed_env_ids)
-                exhausted_env_ids = resample_env_ids[self.command_counter[resample_env_ids] > 1]
-                if len(exhausted_env_ids) > 0:
-                    self.time_left[exhausted_env_ids] = torch.inf
+                    velocity_resampled_env_ids = allowed_env_ids
+                self.time_left[resample_env_ids] = torch.inf
             else:
                 self._resample(resample_env_ids)
+                velocity_resampled_env_ids = resample_env_ids
         self._update_command()
 
-        if self.cfg.resampling_time_gait <= 0.0:
+        if self.cfg.gait_sequence_enabled:
+            gait_resampled_env_ids = self._update_gait_sequence(active_env_ids)
+            self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, gait_resampled_env_ids)
             return
-        self.gait_time_left -= dt
-        env_ids = (self.gait_time_left <= 0.0).nonzero(as_tuple=False).flatten()
+        if self.cfg.resampling_time_gait <= 0.0:
+            self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, empty_env_ids)
+            return
+        gait_resampled_env_ids = empty_env_ids
+        self.gait_time_left[active_env_ids] -= dt
+        env_ids = active_env_ids[self.gait_time_left[active_env_ids] <= 0.0]
         if len(env_ids) > 0:
             if self.cfg.resample_gait_once_after_reset:
-                allowed_env_ids = env_ids[self.gait_counter[env_ids] <= 1]
+                allowed_env_ids = env_ids[self.gait_counter[env_ids] == 1]
                 if len(allowed_env_ids) > 0:
                     self._resample_gait(allowed_env_ids)
-                exhausted_env_ids = env_ids[self.gait_counter[env_ids] > 1]
-                if len(exhausted_env_ids) > 0:
-                    self.gait_time_left[exhausted_env_ids] = torch.inf
+                    gait_resampled_env_ids = allowed_env_ids
+                self.gait_time_left[env_ids] = torch.inf
             else:
                 self._resample_gait(env_ids)
+                gait_resampled_env_ids = env_ids
+        self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, gait_resampled_env_ids)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, float]:
         if env_ids is None:
             env_ids = slice(None)
+        env_ids_tensor = self._resolve_env_ids(env_ids)
+        self._common_gait_phase_at_anchor[env_ids_tensor] = 0.0
+        self._gait_phase_anchor_steps[env_ids_tensor] = int(self._env.common_step_counter)
 
-        denom = self._step_count[env_ids].clamp_min(1.0)
-        mean_error_xy = self._error_xy_sum[env_ids] / denom
-        mean_error_yaw = self._error_yaw_sum[env_ids] / denom
-        command = self.vel_command_b[env_ids]
+        denom = self._step_count[env_ids_tensor].clamp_min(1.0)
+        mean_error_xy = self._error_xy_sum[env_ids_tensor] / denom
+        mean_error_yaw = self._error_yaw_sum[env_ids_tensor] / denom
+        command = self.vel_command_b[env_ids_tensor]
         xy_success_threshold = (
             self.cfg.vel_xy_success_threshold
             + self.cfg.vel_xy_success_rel_threshold * torch.linalg.norm(command[:, :2], dim=-1)
@@ -310,29 +416,43 @@ class GaitVelocityCommand(CommandTerm):
         yaw_success_threshold = self.cfg.vel_yaw_success_threshold + self.cfg.vel_yaw_success_rel_threshold * torch.abs(
             command[:, 2]
         )
-        self.metrics["error_vel_xy"][env_ids] = mean_error_xy
-        self.metrics["error_vel_yaw"][env_ids] = mean_error_yaw
-        self.metrics["success_threshold_vel_xy"][env_ids] = xy_success_threshold
-        self.metrics["success_threshold_vel_yaw"][env_ids] = yaw_success_threshold
-        self.metrics["success_rate"][env_ids] = (
+        self.metrics["error_vel_xy"][env_ids_tensor] = mean_error_xy
+        self.metrics["error_vel_yaw"][env_ids_tensor] = mean_error_yaw
+        self.metrics["success_threshold_vel_xy"][env_ids_tensor] = xy_success_threshold
+        self.metrics["success_threshold_vel_yaw"][env_ids_tensor] = yaw_success_threshold
+        self.metrics["success_rate"][env_ids_tensor] = (
             (mean_error_xy < xy_success_threshold) & (mean_error_yaw < yaw_success_threshold)
         ).float()
 
-        extras = super().reset(env_ids)
+        extras = super().reset(env_ids_tensor)
         self._env.extras.setdefault("log", {})["Metrics/success_rate"] = extras.pop("success_rate")
-        self._error_xy_sum[env_ids] = 0.0
-        self._error_yaw_sum[env_ids] = 0.0
-        self._step_count[env_ids] = 0.0
-        self.gait_counter[env_ids] = 0
-        self._resample_gait(env_ids)
+        self._error_xy_sum[env_ids_tensor] = 0.0
+        self._error_yaw_sum[env_ids_tensor] = 0.0
+        self._step_count[env_ids_tensor] = 0.0
+        self.gait_counter[env_ids_tensor] = 0
+        if self.cfg.gait_sequence_enabled:
+            self._update_gait_sequence(env_ids_tensor, force=True)
+        else:
+            self.gait_sequence_indices[env_ids_tensor] = -1
+            self._resample_gait(env_ids_tensor)
         return extras
+
+    def common_gait_phases(self) -> torch.Tensor:
+        """Return the continuous piecewise-integrated gait clock in cycle units.
+
+        The clock advances from each environment's anchor using the period that
+        is active for that interval. Timing changes re-anchor before replacing
+        the period, preserving common phase at the update boundary.
+        """
+        elapsed_steps = self._env.common_step_counter - self._gait_phase_anchor_steps
+        elapsed_time = elapsed_steps.to(dtype=self.gait_periods.dtype) * self._env.step_dt
+        return self._common_gait_phase_at_anchor + elapsed_time / self.gait_periods.clamp_min(
+            torch.finfo(self.gait_periods.dtype).eps
+        )
 
     def foot_phases(self) -> torch.Tensor:
         """Foot phases for FL, FR, RL, and RR in cycle units."""
-        phase_ratio = (
-            self._env.episode_length_buf.to(dtype=self.gait_periods.dtype) * self._env.step_dt / self.gait_periods
-        )
-        return compute_same_gait_foot_phases(phase_ratio.unsqueeze(-1), self.foot_thetas)
+        return compute_same_gait_foot_phases(self.common_gait_phases().unsqueeze(-1), self.foot_thetas)
 
     def phase_ratios(self) -> torch.Tensor:
         """Swing and stance phase ratios."""
@@ -351,19 +471,83 @@ class GaitVelocityCommand(CommandTerm):
         )
 
     def _resample_gait(self, env_ids: Sequence[int]):
-        if isinstance(env_ids, slice):
-            env_ids_tensor = torch.arange(self.num_envs, device=self.device)
-        else:
-            env_ids_tensor = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        if self.cfg.gait_sequence_enabled:
+            self._update_gait_sequence(env_ids, force=True)
+            return
+        env_ids_tensor = self._resolve_env_ids(env_ids)
         if len(env_ids_tensor) == 0:
             return
 
-        choices = torch.randint(
-            low=0, high=self.init_foot_thetas.shape[0], size=(len(env_ids_tensor),), device=self.device
+        if self.foot_theta_sampling_weights is None:
+            choices = torch.randint(
+                low=0, high=self.init_foot_thetas.shape[0], size=(len(env_ids_tensor),), device=self.device
+            )
+        else:
+            choices = torch.multinomial(
+                self.foot_theta_sampling_weights,
+                num_samples=len(env_ids_tensor),
+                replacement=True,
+            )
+        self._assign_gait(env_ids_tensor, choices, add_theta_noise=self.cfg.add_noise_theta)
+        self.gait_time_left[env_ids_tensor] = self.cfg.resampling_time_gait
+        self.gait_counter[env_ids_tensor] += 1
+
+    def _update_gait_sequence(
+        self,
+        env_ids: Sequence[int] | slice | None = None,
+        *,
+        force: bool = False,
+    ) -> torch.Tensor:
+        """Apply the globally timed gait sequence and return changed environment IDs."""
+        duration_s = self.cfg.gait_sequence_duration_s
+        if not math.isfinite(duration_s) or duration_s <= 0.0:
+            raise ValueError(f"gait_sequence_duration_s must be finite and positive; received {duration_s!r}.")
+        if self.init_foot_thetas.shape[0] == 0:
+            raise ValueError("init_foot_thetas must contain at least one gait for fixed-sequence playback.")
+
+        steps_per_gait = round(duration_s / self._env.step_dt)
+        if steps_per_gait < 1:
+            raise ValueError(
+                "gait_sequence_duration_s must span at least one environment step; "
+                f"received duration {duration_s!r} s with step_dt {self._env.step_dt!r} s."
+            )
+        if env_ids is None:
+            env_ids = slice(None)
+        if isinstance(env_ids, slice):
+            env_ids_tensor = torch.arange(self.num_envs, device=self.device)[env_ids]
+        else:
+            env_ids_tensor = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        if len(env_ids_tensor) == 0:
+            return env_ids_tensor
+
+        gait_index = (self._env.common_step_counter // steps_per_gait) % self.init_foot_thetas.shape[0]
+        choices = torch.full((len(env_ids_tensor),), gait_index, dtype=torch.long, device=self.device)
+        changed = (
+            torch.ones_like(choices, dtype=torch.bool)
+            if force
+            else self.gait_sequence_indices[env_ids_tensor] != choices
         )
+        if not torch.any(changed):
+            return env_ids_tensor[:0]
+
+        changed_env_ids = env_ids_tensor[changed]
+        changed_choices = choices[changed]
+        self._assign_gait(changed_env_ids, changed_choices, add_theta_noise=False)
+        self.gait_sequence_indices[changed_env_ids] = changed_choices
+        self.gait_time_left[changed_env_ids] = torch.inf
+        return changed_env_ids
+
+    def _assign_gait(
+        self,
+        env_ids_tensor: torch.Tensor,
+        choices: torch.Tensor,
+        *,
+        add_theta_noise: bool,
+    ) -> None:
+        """Assign gait rows and refresh velocity-derived timing."""
         self.foot_thetas[env_ids_tensor] = self.init_foot_thetas[choices]
 
-        if self.cfg.add_noise_theta:
+        if add_theta_noise and self.cfg.noise_level_theta > 0:
             theta_noise = torch.randint(
                 low=-self.cfg.noise_level_theta,
                 high=self.cfg.noise_level_theta,
@@ -372,21 +556,8 @@ class GaitVelocityCommand(CommandTerm):
             ).to(torch.float32)
             self.foot_thetas[env_ids_tensor] += theta_noise * self.cfg.noise_scale_theta
 
-        if self.cfg.calculate_from_sampling_curve:
-            cmd_x = self.command[env_ids_tensor, 0]
-            self.gait_periods[env_ids_tensor] = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
-            self.duty_factors[env_ids_tensor] = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(
-                min=0.1, max=0.9
-            )
-        else:
-            self.gait_periods[env_ids_tensor] = self.cfg.gait_period
-            self.duty_factors[env_ids_tensor] = self.cfg.duty_factor
-
         self.kappa[env_ids_tensor] = self.cfg.kappa
-        self.gait_time_left[env_ids_tensor] = self.cfg.resampling_time_gait
-        self.gait_counter[env_ids_tensor] += 1
-        self.metrics["gait_period"][env_ids_tensor] = self.gait_periods[env_ids_tensor]
-        self.metrics["duty_factor"][env_ids_tensor] = self.duty_factors[env_ids_tensor]
+        self._update_gait_timing(env_ids_tensor)
 
     def _update_metrics(self):
         error_xy = torch.linalg.norm(self.vel_command_b[:, :2] - self.robot.data.root_lin_vel_b.torch[:, :2], dim=-1)
@@ -396,17 +567,20 @@ class GaitVelocityCommand(CommandTerm):
         self._step_count += 1.0
 
     def _resample_command(self, env_ids: Sequence[int]):
-        r = torch.empty(len(env_ids), device=self.device)
-        self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
-        self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
-        self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
+        env_ids_tensor = self._resolve_env_ids(env_ids)
+        r = torch.empty(len(env_ids_tensor), device=self.device)
+        self.vel_command_b[env_ids_tensor, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
+        self.vel_command_b[env_ids_tensor, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
+        self.vel_command_b[env_ids_tensor, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
         if self.cfg.min_xy_command_norm > 0.0:
-            command_norm = torch.linalg.norm(self.vel_command_b[env_ids, :2], dim=1)
-            self.vel_command_b[env_ids, :2] *= (command_norm > self.cfg.min_xy_command_norm).unsqueeze(1)
+            command_norm = torch.linalg.norm(self.vel_command_b[env_ids_tensor, :2], dim=1)
+            self.vel_command_b[env_ids_tensor, :2] *= (command_norm > self.cfg.min_xy_command_norm).unsqueeze(1)
         if self.cfg.heading_command:
-            self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
-            self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
-        self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
+            self.heading_target[env_ids_tensor] = r.uniform_(*self.cfg.ranges.heading)
+            self.is_heading_env[env_ids_tensor] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
+        self.is_standing_env[env_ids_tensor] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
+        standing_env_ids = env_ids_tensor[self.is_standing_env[env_ids_tensor]]
+        self.vel_command_b[standing_env_ids, :] = 0.0
 
     def _update_command(self):
         if self.cfg.heading_command:
@@ -422,20 +596,95 @@ class GaitVelocityCommand(CommandTerm):
         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
         self.vel_command_b[standing_env_ids, :] = 0.0
 
-    def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+    def _resolve_env_ids(self, env_ids: Sequence[int] | slice) -> torch.Tensor:
+        """Resolve environment indices to a device-local tensor."""
+        if isinstance(env_ids, slice):
+            return torch.arange(self.num_envs, device=self.device)[env_ids]
+        return torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+
+    def _active_resampling_env_ids(self) -> torch.Tensor:
+        """Return environments eligible for post-reward command scheduling."""
+        reset_buf = getattr(getattr(self, "_env", None), "reset_buf", None)
+        if reset_buf is None:
+            return torch.arange(len(self.time_left), device=self.time_left.device)
+        return (~reset_buf.to(dtype=torch.bool)).nonzero(as_tuple=False).flatten()
+
+    def _update_velocity_resampled_gait_timing(
+        self,
+        velocity_resampled_env_ids: torch.Tensor,
+        gait_resampled_env_ids: torch.Tensor,
+    ) -> None:
+        """Refresh timing for velocity changes not already refreshed by a gait change."""
+        if len(velocity_resampled_env_ids) == 0:
+            return
+        if len(gait_resampled_env_ids) == 0:
+            self._update_gait_timing(velocity_resampled_env_ids)
+            return
+
+        gait_already_refreshed = torch.zeros(self.num_envs, dtype=torch.bool, device=velocity_resampled_env_ids.device)
+        gait_already_refreshed[gait_resampled_env_ids] = True
+        velocity_only_env_ids = velocity_resampled_env_ids[~gait_already_refreshed[velocity_resampled_env_ids]]
+        if len(velocity_only_env_ids) > 0:
+            self._update_gait_timing(velocity_only_env_ids)
+
+    def _update_gait_timing(self, env_ids: Sequence[int] | slice) -> None:
+        """Update period and duty factor after velocity or gait resampling."""
+        env_ids_tensor = self._resolve_env_ids(env_ids)
+        if len(env_ids_tensor) == 0:
+            return
+
+        self._anchor_common_gait_phase(env_ids_tensor)
+
+        if self.cfg.calculate_from_sampling_curve:
+            cmd_x = self.command[env_ids_tensor, 0]
+            gait_periods = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
+            duty_factors = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(min=0.1, max=0.9)
+        else:
+            gait_periods = torch.full_like(self.gait_periods[env_ids_tensor], self.cfg.gait_period)
+            duty_factors = torch.full_like(self.duty_factors[env_ids_tensor], self.cfg.duty_factor)
+        self.gait_periods[env_ids_tensor] = gait_periods
+        self.duty_factors[env_ids_tensor] = duty_factors
+        self.metrics["gait_period"][env_ids_tensor] = gait_periods
+        self.metrics["duty_factor"][env_ids_tensor] = duty_factors
+
+    def _anchor_common_gait_phase(self, env_ids: Sequence[int] | slice) -> None:
+        """Preserve current common phase before a timing change."""
+        env_ids_tensor = self._resolve_env_ids(env_ids)
+        if len(env_ids_tensor) == 0:
+            return
+        current_phase = torch.remainder(self.common_gait_phases()[env_ids_tensor], 1.0)
+        self._common_gait_phase_at_anchor[env_ids_tensor] = current_phase
+        self._gait_phase_anchor_steps[env_ids_tensor] = int(self._env.common_step_counter)
+
+    def _dimensionless_forward_speed(
+        self, cmd_forward_velocity: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return dimensionless speed with its characteristic length and gravity."""
         lower_bound, upper_bound = self.cfg.base_height_range
-        length = torch.tensor((lower_bound + upper_bound) * 0.5, device=self.device, dtype=torch.float32)
-        gravity = torch.tensor(9.81, device=self.device, dtype=torch.float32)
+        if (
+            not math.isfinite(lower_bound)
+            or not math.isfinite(upper_bound)
+            or lower_bound <= 0.0
+            or upper_bound <= 0.0
+            or lower_bound > upper_bound
+        ):
+            raise ValueError(
+                "base_height_range must contain finite, positive, ordered characteristic lengths; "
+                f"received {self.cfg.base_height_range!r}."
+            )
+        length = cmd_forward_velocity.new_tensor((lower_bound + upper_bound) * 0.5)
+        gravity = cmd_forward_velocity.new_tensor(9.81)
         velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
+        return velocity_star, length, gravity
+
+    def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+        velocity_star, length, gravity = self._dimensionless_forward_speed(cmd_forward_velocity)
         random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
         period_star = 2.55 * torch.exp(-0.975 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
         return period_star * torch.sqrt(length / gravity)
 
     def _compute_duty_factor_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
-        lower_bound, upper_bound = self.cfg.base_height_range
-        length = torch.tensor((lower_bound + upper_bound) * 0.5, device=self.device, dtype=torch.float32)
-        gravity = torch.tensor(9.81, device=self.device, dtype=torch.float32)
-        velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
+        velocity_star, _, _ = self._dimensionless_forward_speed(cmd_forward_velocity)
         random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
         return 0.5588 * torch.exp(-0.681 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
 
@@ -785,6 +1034,52 @@ def base_height_range_penalty(
     return -(1.0 - torch.exp(-5.0 * deviation))
 
 
+def foot_phase_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    feet_cfg: SceneEntityCfg,
+    foot_sensor_names: Sequence[str] | None = None,
+    foot_sensor_body_names: Sequence[str] | None = None,
+    force_scale: float = 0.001,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize foot contact in swing and foot speed in stance according to gait phase.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait command term.
+        feet_cfg: Foot bodies in FL, FR, RL, and RR order.
+        foot_sensor_names: Single-body foot contact sensor names.
+        foot_sensor_body_names: Expected body name for each contact sensor.
+        force_scale: Contact-force shaping scale [1/N].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        The non-positive gait-phase penalty summed over the configured feet.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    foot_speeds = torch.linalg.norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
+    speed_weights = gait_command.periodic_speed_weights()
+    if foot_speeds.shape[-1] == 0 or speed_weights.shape != foot_speeds.shape:
+        raise ValueError(
+            "Foot speeds and periodic weights must contain the same nonzero set of feet; "
+            f"received shapes {tuple(foot_speeds.shape)} and {tuple(speed_weights.shape)}."
+        )
+    per_foot_penalty = (1.0 - torch.exp(-2.0 * foot_speeds)) * speed_weights
+    if foot_sensor_names is not None:
+        foot_forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
+        force_weights = gait_command.periodic_force_weights()
+        if foot_forces.shape != foot_speeds.shape or force_weights.shape != foot_speeds.shape:
+            raise ValueError(
+                "Foot forces, speeds, and periodic weights must use the same foot layout; "
+                f"received shapes {tuple(foot_forces.shape)}, {tuple(foot_speeds.shape)}, "
+                f"and {tuple(force_weights.shape)}."
+            )
+        per_foot_penalty += (1.0 - torch.exp(-force_scale * foot_forces)) * force_weights
+    return per_foot_penalty.sum(dim=-1)
+
+
 def foot_periodicity_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -794,18 +1089,24 @@ def foot_periodicity_penalty(
     force_scale: float = 0.001,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalty for foot contact in swing and foot speed in stance."""
-    asset: Articulation = env.scene[asset_cfg.name]
-    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
-    reward = torch.zeros(env.num_envs, device=env.device)
-    if foot_sensor_names is not None:
-        foot_forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
-        reward += torch.sum(
-            (1.0 - torch.exp(-force_scale * foot_forces)) * gait_command.periodic_force_weights(), dim=-1
+    """Call :func:`foot_phase_penalty` through its deprecated name."""
+    global _FOOT_PERIODICITY_DEPRECATION_WARNED
+    if not _FOOT_PERIODICITY_DEPRECATION_WARNED:
+        warnings.warn(
+            "foot_periodicity_penalty() is deprecated; use foot_phase_penalty().",
+            DeprecationWarning,
+            stacklevel=2,
         )
-    foot_speeds = torch.linalg.norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
-    reward += torch.sum((1.0 - torch.exp(-2.0 * foot_speeds)) * gait_command.periodic_speed_weights(), dim=-1)
-    return reward
+        _FOOT_PERIODICITY_DEPRECATION_WARNED = True
+    return foot_phase_penalty(
+        env,
+        command_name=command_name,
+        feet_cfg=feet_cfg,
+        foot_sensor_names=foot_sensor_names,
+        foot_sensor_body_names=foot_sensor_body_names,
+        force_scale=force_scale,
+        asset_cfg=asset_cfg,
+    )
 
 
 def contact_collision_count(
@@ -1141,8 +1442,9 @@ def leg_permutation_symmetry_penalty(
     logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
+    phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
-    """Penalize phase-aligned joint differences under leg permutations.
+    """Penalize joint differences for leg pairs commanded in synchrony.
 
     Args:
         env: The environment instance.
@@ -1154,37 +1456,50 @@ def leg_permutation_symmetry_penalty(
         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
         joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
         leg_pairs: Logical leg pairs to compare.
+        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
-        The negative leg-permutation symmetry penalty.
+        The negative penalty after averaging over the active synchronous leg pairs.
     """
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
     joint_pos = asset.data.joint_pos.torch[:, joint_cfg.joint_ids]
     leg_joint_ids = leg_joint_ids or SYMM_QUADRUPED_LEG_JOINT_IDS
     leg_phase_index = leg_phase_index or SYMM_QUADRUPED_LEG_PHASE_INDEX
-    logical_signs = torch.tensor(logical_joint_signs, dtype=torch.float32, device=env.device)
+    logical_signs = torch.tensor(logical_joint_signs, dtype=joint_pos.dtype, device=joint_pos.device)
     joint_pos = joint_pos.reshape(joint_pos.shape[0], len(logical_joint_signs), -1) * logical_signs.unsqueeze(0)
     joint_pos = joint_pos.reshape(joint_pos.shape[0], -1)
-    joint_range = torch.tensor(joint_ranges, dtype=torch.float32, device=env.device)
+    joint_range = torch.tensor(joint_ranges, dtype=joint_pos.dtype, device=joint_pos.device)
 
-    def leg_permutation_error(tag_a: str, tag_b: str) -> torch.Tensor:
-        sign = torch.tensor([-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0], device=env.device)
+    if not 0.0 <= phase_sync_tolerance <= 0.5:
+        raise ValueError(f"Expected phase_sync_tolerance to be within [0.0, 0.5] cycles, got {phase_sync_tolerance}.")
+
+    def leg_permutation_error(tag_a: str, tag_b: str) -> tuple[torch.Tensor, torch.Tensor]:
+        sign = torch.tensor(
+            [-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0],
+            dtype=joint_pos.dtype,
+            device=joint_pos.device,
+        )
         phase_a = gait_command.foot_thetas[:, leg_phase_index[tag_a]]
         phase_b = gait_command.foot_thetas[:, leg_phase_index[tag_b]]
-        phase_delta = torch.atan2(torch.sin(phase_a - phase_b), torch.cos(phase_a - phase_b))
-        phase_weight = torch.exp(-((phase_delta / 0.25) ** 2)).unsqueeze(-1)
+        phase_delta = phase_a - phase_b
+        phase_distance = torch.minimum(torch.remainder(phase_delta, 1.0), torch.remainder(-phase_delta, 1.0))
+        is_synchronous = phase_distance <= phase_sync_tolerance
         joint_a = joint_pos[:, leg_joint_ids[tag_a]]
         joint_b = joint_pos[:, leg_joint_ids[tag_b]]
         error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b) / (joint_range.unsqueeze(0) + 1.0e-6)
-        error = error * phase_weight
         weights = torch.softmax(error / 0.5, dim=-1)
-        return torch.sum(weights * error, dim=-1)
+        pair_error = torch.sum(weights * error, dim=-1)
+        return torch.where(is_synchronous, pair_error, 0.0), is_synchronous
 
-    error_sum = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    error_sum = torch.zeros(env.num_envs, dtype=joint_pos.dtype, device=joint_pos.device)
+    synchronous_pair_count = torch.zeros_like(error_sum)
     for tag_a, tag_b in leg_pairs:
-        error_sum += leg_permutation_error(tag_a, tag_b)
-    return -(1.0 - torch.exp(-5.0 * error_sum / max(len(leg_pairs), 1)))
+        pair_error, is_synchronous = leg_permutation_error(tag_a, tag_b)
+        error_sum += pair_error
+        synchronous_pair_count += is_synchronous
+    mean_error = error_sum / synchronous_pair_count.clamp_min(1.0)
+    return -(1.0 - torch.exp(-5.0 * mean_error))
 
 
 def morphological_symmetry_penalty(
@@ -1197,6 +1512,7 @@ def morphological_symmetry_penalty(
     logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
+    phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
     """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
 
@@ -1210,6 +1526,7 @@ def morphological_symmetry_penalty(
         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
         joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
         leg_pairs: Logical leg pairs to compare.
+        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
         The negative leg-permutation symmetry penalty.
@@ -1232,6 +1549,7 @@ def morphological_symmetry_penalty(
         logical_joint_signs=logical_joint_signs,
         joint_ranges=joint_ranges,
         leg_pairs=leg_pairs,
+        phase_sync_tolerance=phase_sync_tolerance,
     )
 
 

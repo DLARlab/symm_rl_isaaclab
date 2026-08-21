@@ -7,14 +7,89 @@
 
 from __future__ import annotations
 
+import math
+from numbers import Integral, Real
+
 import torch
 import torch.nn as nn
 from rsl_rl.algorithms import PPO
 from tensordict import TensorDict
 
+_TRS_RAMP_SHAPES = frozenset({"linear", "half_cosine"})
+
+
+def time_reversal_loss_scale(
+    iteration: int,
+    warmup_iterations: int,
+    rampup_iterations: int,
+    ramp_shape: str,
+) -> float:
+    """Return the time-reversal auxiliary-loss scale for one PPO update.
+
+    Args:
+        iteration: Absolute zero-based PPO learning iteration.
+        warmup_iterations: Number of fully unregularized PPO updates before the ramp starts.
+        rampup_iterations: Number of PPO updates in the coefficient ramp. Zero selects a hard switch.
+        ramp_shape: Ramp interpolation shape, either ``"linear"`` or ``"half_cosine"``.
+
+    Returns:
+        The coefficient scale in the closed interval [0, 1].
+
+    Raises:
+        ValueError: If a schedule setting is invalid.
+    """
+    for name, value in (
+        ("warmup_iterations", warmup_iterations),
+        ("rampup_iterations", rampup_iterations),
+    ):
+        if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
+            raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
+    if ramp_shape not in _TRS_RAMP_SHAPES:
+        raise ValueError(f"ramp_shape must be one of {sorted(_TRS_RAMP_SHAPES)!r}; received {ramp_shape!r}.")
+
+    if iteration < warmup_iterations:
+        return 0.0
+    if rampup_iterations == 0:
+        return 1.0
+
+    progress = min(max((iteration - warmup_iterations) / rampup_iterations, 0.0), 1.0)
+    if ramp_shape == "linear":
+        return progress
+    return 0.5 * (1.0 - math.cos(math.pi * progress))
+
+
+def time_reversal_weighted_losses(
+    effective_mirror_coeff: float,
+    effective_value_coeff: float,
+    mean_symmetry_loss: float | None,
+    mean_tr_value_loss: float | None,
+) -> tuple[float, float, float]:
+    """Return weighted time-reversal loss contributions for per-update logging.
+
+    Args:
+        effective_mirror_coeff: Effective policy-equivariance loss coefficient.
+        effective_value_coeff: Effective value-consistency loss coefficient.
+        mean_symmetry_loss: Mean raw policy-equivariance loss for the PPO update.
+        mean_tr_value_loss: Mean raw value-consistency loss for the PPO update.
+
+    Returns:
+        Weighted policy, weighted value, and total auxiliary contributions.
+    """
+    weighted_symmetry = (
+        effective_mirror_coeff * mean_symmetry_loss
+        if effective_mirror_coeff > 0.0 and mean_symmetry_loss is not None
+        else 0.0
+    )
+    weighted_tr_value = (
+        effective_value_coeff * mean_tr_value_loss
+        if effective_value_coeff > 0.0 and mean_tr_value_loss is not None
+        else 0.0
+    )
+    return weighted_symmetry, weighted_tr_value, weighted_symmetry + weighted_tr_value
+
 
 class TimeReversalPPO(PPO):
-    """PPO with time-reversal warmup, action, and value losses."""
+    """PPO with scheduled auxiliary time-reversal policy and value losses."""
 
     _MIN_ACTOR_STD = 1.0e-6
     _MAX_ACTOR_STD = 1.0
@@ -25,6 +100,7 @@ class TimeReversalPPO(PPO):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._validate_time_reversal_configuration()
         self.current_learning_iteration = 0
         self._time_reversal_update_count = 0
         self._actor_mean_abort_count = 0
@@ -38,7 +114,16 @@ class TimeReversalPPO(PPO):
     def update(self) -> dict[str, float]:  # noqa: C901
         """Run PPO updates with optional time-reversal regularization."""
         time_reversal_enabled = self._time_reversal_enabled()
-        time_reversal_active = time_reversal_enabled and self.current_learning_iteration >= self._warmup_iterations()
+        trs_scale, effective_mirror_coeff, effective_tr_value_coeff = self._effective_time_reversal_coefficients()
+        time_reversal_active = (
+            time_reversal_enabled
+            and trs_scale > 0.0
+            and (
+                bool(self.symmetry["use_data_augmentation"])
+                or effective_mirror_coeff > 0.0
+                or effective_tr_value_coeff > 0.0
+            )
+        )
 
         mean_value_loss = 0
         mean_surrogate_loss = 0
@@ -158,11 +243,10 @@ class TimeReversalPPO(PPO):
                     time_reversal_mask,
                 )
 
-                if self.symmetry["use_mirror_loss"]:
-                    loss += self.symmetry["mirror_loss_coeff"] * symmetry_loss
-                value_loss_coeff = float(self.symmetry.get("value_loss_coeff", 0.0))
-                if value_loss_coeff > 0.0:
-                    loss += value_loss_coeff * tr_value_loss
+                if effective_mirror_coeff > 0.0:
+                    loss += effective_mirror_coeff * symmetry_loss
+                if effective_tr_value_coeff > 0.0:
+                    loss += effective_tr_value_coeff * tr_value_loss
 
             elif self.symmetry:
                 symmetry_loss = symmetry_loss.detach()
@@ -214,6 +298,13 @@ class TimeReversalPPO(PPO):
         if mean_tr_value_loss is not None:
             mean_tr_value_loss /= num_updates
 
+        weighted_symmetry, weighted_tr_value, weighted_trs_total = time_reversal_weighted_losses(
+            effective_mirror_coeff,
+            effective_tr_value_coeff,
+            mean_symmetry_loss,
+            mean_tr_value_loss,
+        )
+
         action_diagnostics = self._action_diagnostics_from_storage()
         self._update_actor_mean_safety(action_diagnostics["diagnostics/actor_mean_abs_max"])
         self.storage.clear()
@@ -225,6 +316,12 @@ class TimeReversalPPO(PPO):
             "surrogate": mean_surrogate_loss,
             "entropy": mean_entropy,
             "actor_bound": mean_actor_bound_loss,
+            "trs_scale": trs_scale,
+            "effective_mirror_coeff": effective_mirror_coeff,
+            "effective_tr_value_coeff": effective_tr_value_coeff,
+            "weighted_symmetry": weighted_symmetry,
+            "weighted_tr_value": weighted_tr_value,
+            "weighted_trs_total": weighted_trs_total,
         }
         if self.rnd:
             loss_dict["rnd"] = mean_rnd_loss
@@ -237,12 +334,54 @@ class TimeReversalPPO(PPO):
         return loss_dict
 
     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
-        """Load algorithm state and keep the TRS warmup counter aligned when possible."""
+        """Load algorithm state and align the TRS schedule to the next PPO update.
+
+        RSL-RL 5.0.1 saves ``iter`` after completing that indexed update. The
+        loaded mapping is ephemeral, so it is advanced here before the runner
+        restores its counter. This keeps the runner, TensorBoard step, and
+        auxiliary schedule aligned to the next absolute update.
+        """
         load_iteration = super().load(loaded_dict, load_cfg, strict)
         if load_iteration and "iter" in loaded_dict:
-            self.current_learning_iteration = int(loaded_dict["iter"])
+            next_iteration = int(loaded_dict["iter"]) + 1
+            loaded_dict["iter"] = next_iteration
+            self.current_learning_iteration = next_iteration
             self._time_reversal_update_count = self.current_learning_iteration
         return load_iteration
+
+    def _validate_time_reversal_configuration(self) -> None:
+        """Validate target coefficients and schedule settings without mutating them."""
+        if self.symmetry is None:
+            return
+
+        for name in ("mirror_loss_coeff", "value_loss_coeff"):
+            value = self.symmetry.get(name, 0.0)
+            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)) or value < 0.0:
+                raise ValueError(f"{name} must be finite and nonnegative; received {value!r}.")
+
+        time_reversal_loss_scale(
+            iteration=0,
+            warmup_iterations=self.symmetry.get("warmup_iterations", 0),
+            rampup_iterations=self.symmetry.get("rampup_iterations", 0),
+            ramp_shape=self.symmetry.get("ramp_shape", "linear"),
+        )
+
+    def _effective_time_reversal_coefficients(self) -> tuple[float, float, float]:
+        """Return the shared schedule scale and effective actor/value coefficients."""
+        if not self._time_reversal_enabled():
+            return 0.0, 0.0, 0.0
+
+        scale = time_reversal_loss_scale(
+            iteration=self.current_learning_iteration,
+            warmup_iterations=self.symmetry.get("warmup_iterations", 0),
+            rampup_iterations=self.symmetry.get("rampup_iterations", 0),
+            ramp_shape=self.symmetry.get("ramp_shape", "linear"),
+        )
+        mirror_coeff = (
+            float(self.symmetry.get("mirror_loss_coeff", 0.0)) * scale if self.symmetry["use_mirror_loss"] else 0.0
+        )
+        value_coeff = float(self.symmetry.get("value_loss_coeff", 0.0)) * scale
+        return scale, mirror_coeff, value_coeff
 
     def _time_reversal_enabled(self) -> bool:
         if self.symmetry is None:
@@ -272,7 +411,11 @@ class TimeReversalPPO(PPO):
     def _masked_mse(prediction: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         mask = mask.expand_as(prediction)
         denom = mask.sum().clamp_min(1.0)
-        return ((prediction - target).pow(2) * mask).sum() / denom
+        selected = mask > 0.0
+        safe_prediction = torch.where(selected, prediction, torch.zeros_like(prediction))
+        safe_target = torch.where(selected, target, torch.zeros_like(target))
+        squared_error = (safe_prediction - safe_target).pow(2)
+        return squared_error.sum() / denom
 
     def _clamp_actor_std(self) -> None:
         """Keep RSL-RL's scalar Gaussian std parameter positive and finite."""
