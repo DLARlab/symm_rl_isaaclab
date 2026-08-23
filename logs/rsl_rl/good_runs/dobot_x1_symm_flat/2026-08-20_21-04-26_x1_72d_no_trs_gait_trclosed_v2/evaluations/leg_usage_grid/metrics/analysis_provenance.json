@@ -1,0 +1,13 @@
+{
+  "analysis_method_version": "leg_usage_grid_v1",
+  "analyzer_path": "D:\\symm_rl_isaaclab\\scripts\\symm_locomotion\\analyze_leg_usage.py",
+  "analyzer_sha256": "c25a4cfc9f09d070d20066fdbac55dda4f8381b2092e4e26a6f36c94298b0aea",
+  "generated_at_utc": "2026-08-22T18:09:24.099338+00:00",
+  "git_branch": "72d-symm-v4-integration",
+  "git_commit": "4219c7d3a3163ead7f9924bd3d5787637d036bf2",
+  "input_study_identity_sha256": "e6de4fec233682b2c4eab5cb6f30ead4b9381c8892dfd41ea2dbe6155823077a",
+  "input_study_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2_family_balanced_halfbound_frontrear_phasev4_contclock_footphase0p30_legperm0p20_hip0p10_sync_tol0p02_seed42\\evaluations\\leg_usage_grid\\study.json",
+  "input_study_sha256": "c1ae8c8d8f36de8afb99376dfd6e437399a2462b1a1cb7cf58798f52d0ef95fc",
+  "record_sha256": "3cfa5362d9e0176cdea8120db90218de4719d1163db68842decae862a01a2b6e",
+  "schema_version": 1
+}

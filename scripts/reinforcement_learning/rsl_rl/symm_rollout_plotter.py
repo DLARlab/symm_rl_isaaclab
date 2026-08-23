@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 
 import matplotlib
@@ -131,6 +134,11 @@ class SymmetricRolloutPlotter:
                 "Symmetric rollout leg-usage plots require exactly "
                 f"{expected_joint_count} leg-major joints, received {len(self._joint_names)}."
             )
+        self._joint_effort_limits = (
+            self._robot.data.joint_effort_limits.torch[env_index, self._joint_ids].detach().cpu().numpy()
+        )
+        if not np.all(np.isfinite(self._joint_effort_limits)) or np.any(self._joint_effort_limits <= 0.0):
+            raise ValueError("Symmetric rollout leg-usage plots require finite, positive joint effort limits.")
         self._output_dir = Path(output_dir)
         self._step_dt = float(env.step_dt)
         self._max_samples = max_samples
@@ -161,12 +169,17 @@ class SymmetricRolloutPlotter:
             "desired_lin_vel": [],
             "base_positions": [],
             "desired_positions": [],
+            "foot_thetas": [],
+            "gait_periods": [],
+            "duty_factors": [],
+            "common_gait_phases": [],
             "E_C_frc": [],
             "E_C_spd": [],
             "foot_normal_forces_w": [],
             "foot_ground_reaction_forces_w": [],
             "ground_reaction_force_includes_friction": [],
             "episode_done": [],
+            "rewards": [],
             "foot_forces": [],
             "foot_velocities": [],
             "raw_actions": [],
@@ -204,6 +217,7 @@ class SymmetricRolloutPlotter:
         actions: torch.Tensor | None = None,
         actor_means: torch.Tensor | None = None,
         dones: torch.Tensor | None = None,
+        rewards: torch.Tensor | None = None,
     ) -> None:
         """Record one post-step sample from the selected environment.
 
@@ -211,6 +225,7 @@ class SymmetricRolloutPlotter:
             actions: Raw policy actions before the environment wrapper applies optional clipping.
             actor_means: Deterministic actor means. During inference these are the same as :paramref:`actions`.
             dones: Post-step episode-end mask. It prevents smoothing across resets.
+            rewards: Optional post-step task rewards.
         """
         if self._max_samples is not None and len(self._data["time_steps"]) >= self._max_samples:
             self._env._capture_rollout_diagnostics = False
@@ -408,6 +423,22 @@ class SymmetricRolloutPlotter:
         self._data["desired_lin_vel"].append(command.numpy())
         self._data["base_positions"].append(root_position.numpy())
         self._data["desired_positions"].append(self._desired_position.copy())
+        foot_thetas = getattr(self._command_term, "foot_thetas", None)
+        gait_periods = getattr(self._command_term, "gait_periods", None)
+        duty_factors = getattr(self._command_term, "duty_factors", None)
+        common_gait_phases = getattr(self._command_term, "common_gait_phases", None)
+        self._data["foot_thetas"].append(
+            np.full(4, np.nan) if foot_thetas is None else foot_thetas[env_index].detach().cpu().numpy()
+        )
+        self._data["gait_periods"].append(
+            float("nan") if gait_periods is None else float(gait_periods[env_index].detach().cpu())
+        )
+        self._data["duty_factors"].append(
+            float("nan") if duty_factors is None else float(duty_factors[env_index].detach().cpu())
+        )
+        self._data["common_gait_phases"].append(
+            float("nan") if common_gait_phases is None else float(common_gait_phases()[env_index].detach().cpu())
+        )
         cached_periodic_force_weights = getattr(self._env, "_last_periodic_force_weights", None)
         periodic_force_weights = (
             self._command_term.periodic_force_weights()[env_index]
@@ -426,6 +457,7 @@ class SymmetricRolloutPlotter:
         self._data["foot_ground_reaction_forces_w"].append(foot_ground_reaction_forces_w.numpy())
         self._data["ground_reaction_force_includes_friction"].append(ground_reaction_force_includes_friction)
         self._data["episode_done"].append(episode_done)
+        self._data["rewards"].append(float("nan") if rewards is None else float(rewards[env_index].detach().cpu()))
         self._data["foot_forces"].append(contact_force_norms.numpy())
         self._data["foot_velocities"].append(torch.linalg.norm(foot_velocity, dim=-1).detach().cpu().numpy())
         self._data["raw_actions"].append(actions[env_index].detach().cpu().numpy())
@@ -460,20 +492,11 @@ class SymmetricRolloutPlotter:
         if self._max_samples is not None and len(self._data["time_steps"]) >= self._max_samples:
             self._env._capture_rollout_diagnostics = False
 
-    def save(self) -> list[Path]:
-        """Save sampled arrays and diagnostic figures.
-
-        Returns:
-            Paths of the files that were saved. The list is empty when no samples were recorded.
-        """
-        self._env._capture_rollout_diagnostics = False
-        if not self._data["time_steps"]:
-            print("[symm_locomotion] No rollout samples were collected; skipping plots.", flush=True)
-            return []
-
-        self._output_dir.mkdir(parents=True, exist_ok=True)
+    def _prepare_data(self, extra_data: Mapping[str, object] | None = None) -> dict[str, np.ndarray]:
+        """Prepare recorded and derived arrays for serialization."""
         data = {name: np.asarray(values) for name, values in self._data.items()}
         data["joint_names"] = np.asarray(self._joint_names)
+        data["joint_effort_limits"] = self._joint_effort_limits.copy()
         data["leg_names"] = np.asarray(self._LEG_NAMES)
         data["motor_role_names"] = np.asarray(self._MOTOR_ROLE_NAMES)
         data["leg_joint_torques"] = data["joint_torques"].reshape(
@@ -511,8 +534,67 @@ class SymmetricRolloutPlotter:
                 smoothing_window_samples,
                 episode_ends=data["episode_done"],
             )
+        if extra_data is not None:
+            conflicts = sorted(set(data).intersection(extra_data))
+            if conflicts:
+                raise ValueError(f"Extra rollout data cannot replace recorded fields: {conflicts}.")
+            data.update({name: np.asarray(value) for name, value in extra_data.items()})
+        return data
+
+    def save_data(self, extra_data: Mapping[str, object] | None = None) -> Path | None:
+        """Save sampled arrays without rendering diagnostic figures.
+
+        Args:
+            extra_data: Optional scalar or array metadata to include in the NPZ archive.
+
+        Returns:
+            Path to ``sim_data.npz``, or ``None`` when no samples were recorded.
+        """
+        self._env._capture_rollout_diagnostics = False
+        if not self._data["time_steps"]:
+            print("[symm_locomotion] No rollout samples were collected; skipping data save.", flush=True)
+            return None
+
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        data = self._prepare_data(extra_data)
         data_path = self._output_dir / "sim_data.npz"
-        np.savez_compressed(data_path, **data)
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            dir=self._output_dir,
+            prefix=".sim_data.",
+            suffix=".tmp.npz",
+        )
+        os.close(file_descriptor)
+        temporary_path = Path(temporary_name)
+        try:
+            np.savez_compressed(temporary_path, **data)
+            temporary_path.replace(data_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        print(f"[symm_locomotion] Saved rollout data to: {data_path}", flush=True)
+        return data_path
+
+    def save(
+        self,
+        *,
+        extra_data: Mapping[str, object] | None = None,
+        render_plots: bool = True,
+    ) -> list[Path]:
+        """Save sampled arrays and, by default, diagnostic figures.
+
+        Args:
+            extra_data: Optional scalar or array metadata to include in the NPZ archive.
+            render_plots: Whether to render the legacy diagnostic figures.
+
+        Returns:
+            Paths of the files that were saved. The list is empty when no samples were recorded.
+        """
+        data_path = self.save_data(extra_data=extra_data)
+        if data_path is None:
+            return []
+        if not render_plots:
+            return [data_path]
+        with np.load(data_path, allow_pickle=False) as archive:
+            data = {name: archive[name] for name in archive.files}
 
         paths = [
             data_path,

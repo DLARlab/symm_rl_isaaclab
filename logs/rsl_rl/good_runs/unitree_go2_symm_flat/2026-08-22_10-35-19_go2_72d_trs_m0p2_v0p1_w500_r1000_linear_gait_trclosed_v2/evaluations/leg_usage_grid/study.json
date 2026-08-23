@@ -1,0 +1,1346 @@
+{
+  "aggregation": {
+    "overall": "equal mean of trot, bound, half_bound, and gallop family means",
+    "primary_balance_metric": "mean absolute per-cell front/hind imbalance; signed values never cancel",
+    "tracking_qualified": "reported alongside all valid cells using the declared per-cell tracking threshold",
+    "within_family": "equal mean across selected gait rows and velocities"
+  },
+  "cells": [
+    {
+      "family": "trot",
+      "gait_index": 0,
+      "gait_name": "trot",
+      "id": "gait_00_trot__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "relative_output_dir": "cells/gait_00_trot/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "trot",
+      "gait_index": 0,
+      "gait_name": "trot",
+      "id": "gait_00_trot__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "relative_output_dir": "cells/gait_00_trot/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "trot",
+      "gait_index": 0,
+      "gait_name": "trot",
+      "id": "gait_00_trot__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "relative_output_dir": "cells/gait_00_trot/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "trot",
+      "gait_index": 0,
+      "gait_name": "trot",
+      "id": "gait_00_trot__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "relative_output_dir": "cells/gait_00_trot/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "trot",
+      "gait_index": 0,
+      "gait_name": "trot",
+      "id": "gait_00_trot__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "relative_output_dir": "cells/gait_00_trot/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "trot",
+      "gait_index": 0,
+      "gait_name": "trot",
+      "id": "gait_00_trot__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "relative_output_dir": "cells/gait_00_trot/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "bound",
+      "gait_index": 1,
+      "gait_name": "bound",
+      "id": "gait_01_bound__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_01_bound/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "bound",
+      "gait_index": 1,
+      "gait_name": "bound",
+      "id": "gait_01_bound__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_01_bound/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "bound",
+      "gait_index": 1,
+      "gait_name": "bound",
+      "id": "gait_01_bound__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_01_bound/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "bound",
+      "gait_index": 1,
+      "gait_name": "bound",
+      "id": "gait_01_bound__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_01_bound/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "bound",
+      "gait_index": 1,
+      "gait_name": "bound",
+      "id": "gait_01_bound__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_01_bound/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "bound",
+      "gait_index": 1,
+      "gait_name": "bound",
+      "id": "gait_01_bound__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_01_bound/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 2,
+      "gait_name": "half_bound_front_a",
+      "id": "gait_02_half_bound__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_02_half_bound/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 2,
+      "gait_name": "half_bound_front_a",
+      "id": "gait_02_half_bound__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_02_half_bound/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 2,
+      "gait_name": "half_bound_front_a",
+      "id": "gait_02_half_bound__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_02_half_bound/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 2,
+      "gait_name": "half_bound_front_a",
+      "id": "gait_02_half_bound__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_02_half_bound/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 2,
+      "gait_name": "half_bound_front_a",
+      "id": "gait_02_half_bound__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_02_half_bound/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 2,
+      "gait_name": "half_bound_front_a",
+      "id": "gait_02_half_bound__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_02_half_bound/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 3,
+      "gait_name": "half_bound_front_b",
+      "id": "gait_03_half_bound__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_03_half_bound/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 3,
+      "gait_name": "half_bound_front_b",
+      "id": "gait_03_half_bound__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_03_half_bound/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 3,
+      "gait_name": "half_bound_front_b",
+      "id": "gait_03_half_bound__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_03_half_bound/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 3,
+      "gait_name": "half_bound_front_b",
+      "id": "gait_03_half_bound__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_03_half_bound/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 3,
+      "gait_name": "half_bound_front_b",
+      "id": "gait_03_half_bound__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_03_half_bound/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 3,
+      "gait_name": "half_bound_front_b",
+      "id": "gait_03_half_bound__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "relative_output_dir": "cells/gait_03_half_bound/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 4,
+      "gait_name": "half_bound_hind_a",
+      "id": "gait_04_half_bound__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_04_half_bound/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 4,
+      "gait_name": "half_bound_hind_a",
+      "id": "gait_04_half_bound__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_04_half_bound/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 4,
+      "gait_name": "half_bound_hind_a",
+      "id": "gait_04_half_bound__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_04_half_bound/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 4,
+      "gait_name": "half_bound_hind_a",
+      "id": "gait_04_half_bound__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_04_half_bound/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 4,
+      "gait_name": "half_bound_hind_a",
+      "id": "gait_04_half_bound__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_04_half_bound/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 4,
+      "gait_name": "half_bound_hind_a",
+      "id": "gait_04_half_bound__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_04_half_bound/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 5,
+      "gait_name": "half_bound_hind_b",
+      "id": "gait_05_half_bound__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_05_half_bound/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 5,
+      "gait_name": "half_bound_hind_b",
+      "id": "gait_05_half_bound__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_05_half_bound/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 5,
+      "gait_name": "half_bound_hind_b",
+      "id": "gait_05_half_bound__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_05_half_bound/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 5,
+      "gait_name": "half_bound_hind_b",
+      "id": "gait_05_half_bound__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_05_half_bound/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 5,
+      "gait_name": "half_bound_hind_b",
+      "id": "gait_05_half_bound__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_05_half_bound/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "half_bound",
+      "gait_index": 5,
+      "gait_name": "half_bound_hind_b",
+      "id": "gait_05_half_bound__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_05_half_bound/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 6,
+      "gait_name": "gallop_a",
+      "id": "gait_06_gallop__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_06_gallop/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 6,
+      "gait_name": "gallop_a",
+      "id": "gait_06_gallop__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_06_gallop/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 6,
+      "gait_name": "gallop_a",
+      "id": "gait_06_gallop__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_06_gallop/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 6,
+      "gait_name": "gallop_a",
+      "id": "gait_06_gallop__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_06_gallop/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 6,
+      "gait_name": "gallop_a",
+      "id": "gait_06_gallop__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_06_gallop/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 6,
+      "gait_name": "gallop_a",
+      "id": "gait_06_gallop__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_06_gallop/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 7,
+      "gait_name": "gallop_b",
+      "id": "gait_07_gallop__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_07_gallop/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 7,
+      "gait_name": "gallop_b",
+      "id": "gait_07_gallop__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_07_gallop/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 7,
+      "gait_name": "gallop_b",
+      "id": "gait_07_gallop__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_07_gallop/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 7,
+      "gait_name": "gallop_b",
+      "id": "gait_07_gallop__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_07_gallop/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 7,
+      "gait_name": "gallop_b",
+      "id": "gait_07_gallop__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_07_gallop/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 7,
+      "gait_name": "gallop_b",
+      "id": "gait_07_gallop__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "relative_output_dir": "cells/gait_07_gallop/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 8,
+      "gait_name": "gallop_c",
+      "id": "gait_08_gallop__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_08_gallop/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 8,
+      "gait_name": "gallop_c",
+      "id": "gait_08_gallop__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_08_gallop/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 8,
+      "gait_name": "gallop_c",
+      "id": "gait_08_gallop__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_08_gallop/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 8,
+      "gait_name": "gallop_c",
+      "id": "gait_08_gallop__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_08_gallop/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 8,
+      "gait_name": "gallop_c",
+      "id": "gait_08_gallop__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_08_gallop/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 8,
+      "gait_name": "gallop_c",
+      "id": "gait_08_gallop__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_08_gallop/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 9,
+      "gait_name": "gallop_d",
+      "id": "gait_09_gallop__vx_neg_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_09_gallop/vx_neg_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 9,
+      "gait_name": "gallop_d",
+      "id": "gait_09_gallop__vx_neg_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_09_gallop/vx_neg_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 9,
+      "gait_name": "gallop_d",
+      "id": "gait_09_gallop__vx_neg_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_09_gallop/vx_neg_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": -0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 9,
+      "gait_name": "gallop_d",
+      "id": "gait_09_gallop__vx_pos_0p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_09_gallop/vx_pos_0p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 0.5
+    },
+    {
+      "family": "gallop",
+      "gait_index": 9,
+      "gait_name": "gallop_d",
+      "id": "gait_09_gallop__vx_pos_1p0__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_09_gallop/vx_pos_1p0/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.0
+    },
+    {
+      "family": "gallop",
+      "gait_index": 9,
+      "gait_name": "gallop_d",
+      "id": "gait_09_gallop__vx_pos_1p5__seed_0042",
+      "measure_steps": 500,
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "relative_output_dir": "cells/gait_09_gallop/vx_pos_1p5/seed_0042",
+      "seed": 42,
+      "settle_steps": 250,
+      "step_dt": 0.02,
+      "total_steps": 750,
+      "velocity_mps": 1.5
+    }
+  ],
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2_seed42\\model_19999.pt",
+    "sha256": "57aeaef5ee6e998c199bd8e3017223844692f0cb10724c23580ce36633779489"
+  },
+  "config_provenance": {
+    "files": {
+      "logs/rsl_rl/unitree_go2_symm_flat/2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2_seed42/params/agent.yaml": "2e9b1ed37ddd12795a82f1176e8527358b454fb072584ddbdaa348365f0e425c",
+      "logs/rsl_rl/unitree_go2_symm_flat/2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2_seed42/params/env.yaml": "cb87171bcef854df5d758a84f092ca67b4077c78f8d66f648b3ba85fa74a96ad"
+    },
+    "missing_files": [],
+    "sha256": "4a315c0a433e51974c88a56db0ddce65b048375c8002a88db84d448361a4ffb4"
+  },
+  "created_at_utc": "2026-08-22T15:36:42.625750+00:00",
+  "episode_length_s": 15.040000000000001,
+  "evaluation_seed": 42,
+  "gait_library_version": "time_reversal_closed_v2",
+  "gaits": [
+    {
+      "family": "trot",
+      "index": 0,
+      "name": "trot",
+      "phases": [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      "time_reversal_partner": 0,
+      "training_weight": 4.0,
+      "weight": 4.0
+    },
+    {
+      "family": "bound",
+      "index": 1,
+      "name": "bound",
+      "phases": [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      "time_reversal_partner": 1,
+      "training_weight": 4.0,
+      "weight": 4.0
+    },
+    {
+      "family": "half_bound",
+      "index": 2,
+      "name": "half_bound_front_a",
+      "phases": [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      "time_reversal_partner": 3,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "half_bound",
+      "index": 3,
+      "name": "half_bound_front_b",
+      "phases": [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      "time_reversal_partner": 2,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "half_bound",
+      "index": 4,
+      "name": "half_bound_hind_a",
+      "phases": [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      "time_reversal_partner": 5,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "half_bound",
+      "index": 5,
+      "name": "half_bound_hind_b",
+      "phases": [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      "time_reversal_partner": 4,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "gallop",
+      "index": 6,
+      "name": "gallop_a",
+      "phases": [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      "time_reversal_partner": 8,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "gallop",
+      "index": 7,
+      "name": "gallop_b",
+      "phases": [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      "time_reversal_partner": 9,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "gallop",
+      "index": 8,
+      "name": "gallop_c",
+      "phases": [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      "time_reversal_partner": 6,
+      "training_weight": 1.0,
+      "weight": 1.0
+    },
+    {
+      "family": "gallop",
+      "index": 9,
+      "name": "gallop_d",
+      "phases": [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ],
+      "time_reversal_partner": 7,
+      "training_weight": 1.0,
+      "weight": 1.0
+    }
+  ],
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "method_version": "leg_usage_grid_v1",
+  "nominal_profile": true,
+  "output_root": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2_seed42\\evaluations\\leg_usage_grid",
+  "render_cell_plots": false,
+  "robot": "go2",
+  "runtime_overrides": [],
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "source_provenance": {
+    "files": {
+      "scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py": "c2f4f53a939e747eec6bdf18dea42431325ae25ef2d0882c4a40b8cb0596a21a",
+      "scripts/reinforcement_learning/rsl_rl/symm_rollout_plotter.py": "65af760487cfb116ccd49df09287836018e2572b00093e71b54a845387c6f026",
+      "scripts/symm_locomotion/analyze_leg_usage.py": "c25a4cfc9f09d070d20066fdbac55dda4f8381b2092e4e26a6f36c94298b0aea",
+      "scripts/symm_locomotion/symm_cli.py": "6c4861ff64222755fb8234fac4432c241b1a40d196844894b90760ac1a930314",
+      "source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py": "86dbdf0c78a1623742a59b4e12fa7c01cbd25b98673bc04873b52d18b58c709c",
+      "source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py": "03d37b5b851f3038cec6441098563fbae3011919541a662ccf0c772bf7a5517c"
+    },
+    "git_branch": "72d-symm-v4-integration",
+    "git_commit": "4219c7d3a3163ead7f9924bd3d5787637d036bf2",
+    "missing_files": [],
+    "sha256": "21b801c6ecfe97b0de0dbd25d9cebc903cd2a200af63de2ab9a008091ed909a1"
+  },
+  "step_dt": 0.02,
+  "study_identity_sha256": "bc25608af0b8acc4ad8eb5bb4c6dc4fd90073c6d0c76c10b273a7ec585d3f004",
+  "task": "Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0",
+  "total_steps": 750,
+  "velocities_mps": [
+    -1.5,
+    -1.0,
+    -0.5,
+    0.5,
+    1.0,
+    1.5
+  ]
+}

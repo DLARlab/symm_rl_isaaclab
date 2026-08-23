@@ -1,0 +1,13 @@
+{
+  "analysis_method_version": "leg_usage_grid_v1",
+  "analyzer_path": "D:\\symm_rl_isaaclab\\scripts\\symm_locomotion\\analyze_leg_usage.py",
+  "analyzer_sha256": "c25a4cfc9f09d070d20066fdbac55dda4f8381b2092e4e26a6f36c94298b0aea",
+  "generated_at_utc": "2026-08-22T16:20:42.697723+00:00",
+  "git_branch": "72d-symm-v4-integration",
+  "git_commit": "4219c7d3a3163ead7f9924bd3d5787637d036bf2",
+  "input_study_identity_sha256": "bc25608af0b8acc4ad8eb5bb4c6dc4fd90073c6d0c76c10b273a7ec585d3f004",
+  "input_study_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2_seed42\\evaluations\\leg_usage_grid\\study.json",
+  "input_study_sha256": "022aad9a38a8601613ef914885907425cc93c6bd59d5fa33adcaf5b15472b00c",
+  "record_sha256": "89e622b8e0bd04638b0cbb42abde508b88cd5e9f1703b3522e0eb045cab3d1d3",
+  "schema_version": 1
+}

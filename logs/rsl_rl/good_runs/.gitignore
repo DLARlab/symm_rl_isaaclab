@@ -3,6 +3,10 @@
 !**/
 !**
 
+# Never publish interpreter or test caches copied with an analysis folder.
+**/__pycache__/
+**/*.py[cod]
+
 # Keep iteration checkpoints local by default, then explicitly publish only
 # the numerically latest checkpoint from each curated training run.
 **/model_*.pt
@@ -18,6 +22,9 @@
 !/dobot_x1_symm_flat/2026-08-02_10-35-06_x1_no_trs_20k_512/model_19999.pt
 !/dobot_x1_symm_flat/2026-08-02_21-02-49_x1_trs_m0p1_v0p05_w500_minv0_20k_512/model_19999.pt
 !/dobot_x1_symm_flat/2026-08-02_21-07-58_x1_trs_m0p3_v0p15_w500_minv0_20k_512/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/model_19999.pt
+!/dobot_x1_symm_flat/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/model_19999.pt
 
 !/unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs/model_9999.pt
 !/unitree_go2_symm_flat/2026-07-13_01-30-42_more_trs_lr1e4_fixed_zero_lateral/model_9999.pt
@@ -28,3 +35,7 @@
 !/unitree_go2_symm_flat/2026-07-31_22-48-38_go2_trs_m0p2_v0p1_w500_20k_512/model_19999.pt
 !/unitree_go2_symm_flat/2026-08-01_11-09-46_go2_trs_m0p1_v0p05_w500_minv0_20k_512/model_19999.pt
 !/unitree_go2_symm_flat/2026-08-01_22-39-14_go2_trs_m0p3_v0p15_w500_minv0_20k_512/model_19999.pt
+!/unitree_go2_symm_flat/2026-08-20_21-04-16_go2_72d_no_trs_gait_trclosed_v2/model_19999.pt
+!/unitree_go2_symm_flat/2026-08-21_10-22-39_go2_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/model_19999.pt
+!/unitree_go2_symm_flat/2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/model_19999.pt
+!/unitree_go2_symm_flat/2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2/model_19999.pt

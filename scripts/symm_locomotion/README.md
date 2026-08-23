@@ -29,6 +29,7 @@ Windows PowerShell:
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
+.\scripts\symm_locomotion\analyze_leg_usage.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\compare.ps1 --robots go2 x1
 .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
 ```
@@ -41,6 +42,7 @@ bash scripts/symm_locomotion/train.sh --robot x1 --iterations 20000 --num-envs 5
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
+bash scripts/symm_locomotion/analyze_leg_usage.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/compare.sh --robots go2 x1
 bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 ```
@@ -50,6 +52,7 @@ Direct Python style still works from an activated environment:
 ```bash
 python scripts/symm_locomotion/train.py --robot go2 --iterations 20000 --no-trs
 python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
+python scripts/symm_locomotion/analyze_leg_usage.py --robot go2 --checkpoint latest
 ```
 
 The generic launcher accepts the command as its first argument:
@@ -231,6 +234,120 @@ Relative `--run` values are resolved under the selected robot's routine log
 directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
 `logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
 `--checkpoint`.
+
+## Leg-usage grid evaluation
+
+`analyze_leg_usage.py`, `analyze_leg_usage.ps1`, and
+`analyze_leg_usage.sh` evaluate a checkpoint at fixed commands and then produce
+the leg-usage tables and figures. The default protocol is
+the Cartesian grid of all ten time-reversal-closed v2 training gait rows and
+`vx = -1.5, -1.0, -0.5, +0.5, +1.0, +1.5 m/s`. Every cell runs in its own
+episode with zero lateral/yaw command and the nominal evaluation profile. Its
+first 5 seconds are settling time and the following 10 seconds are measured.
+
+```powershell
+.\scripts\symm_locomotion\analyze_leg_usage.ps1 `
+  --robot go2 --run 2026-08-21_example --model 19999 `
+  --expected-branch 72d-symm-v4-integration
+```
+
+The utility resolves `--run`, `--model`, and `--checkpoint latest` in the same
+way as `play` and `record`. It compiles the selected gait and velocity sequence
+into a shared `study.json` plan consumed by the playback process. This keeps
+the model loaded while the runner executes one isolated gait/velocity cell at
+a time and prints completed-cell counts and an ETA. Customize the plan with:
+
+```text
+--velocities -1.5 -1.0 -0.5 0.5 1.0 1.5
+--gait_indices 0 1 2 3 4 5 6 7 8 9
+--settle_s 5.0
+--measure_s 10.0
+--evaluation_seed 42
+--render_cell_plots
+--resume
+--analyze_only
+```
+
+Settling and measurement durations must be exact positive multiples of the
+robot control step (`0.02 s` for Go2 and X1). Detailed per-cell plots are off
+by default; the compressed raw arrays needed for analysis are always retained.
+
+All artifacts are stored directly under the resolved training run, without a
+checkpoint-named intermediate folder:
+
+```text
+<training-run>/evaluations/leg_usage_grid/
+  study.json
+  cells/gait_00_trot/vx_neg_0p5/seed_0042/...
+  metrics/cell_metrics.csv
+  metrics/family_metrics.csv
+  metrics/overall_metrics.json
+  metrics/analysis_provenance.json
+  metrics/coverage.csv
+  metrics/REPORT.md
+  figures/trot.svg
+  figures/bound.svg
+  figures/half_bound.svg
+  figures/gallop.svg
+  figures/overall.svg
+  figures/coverage.svg
+```
+
+The manifest records the resolved checkpoint path, iteration and SHA-256,
+source/configuration hashes, exact grid, timing, and seed. A folder can contain
+only one checkpoint/protocol: a mismatch is rejected instead of overwriting or
+mixing data. Use `--resume` to continue an interrupted identical grid, or
+`--analyze-only` to regenerate summaries from its existing cell files. Any
+Isaac Lab/Hydra arguments forwarded after `--` are recorded in order as part of
+the immutable protocol; repeat them for `--resume` or `--analyze-only`.
+Analyze-only verifies the recorded manifest and checkpoint without requiring
+the current source hash to equal the recording source. It writes the current
+analyzer and Git identity to `metrics/analysis_provenance.json`.
+
+Front/hind imbalance is `100 * (front - hind) / (front + hind)`. Tables retain
+that signed value for diagnosis, while primary summaries average its absolute
+value so forward/backward or gait-row signs cannot cancel. Rows and velocities
+are equally weighted within each family; the overall value is an equal mean of
+the trot, bound, half-bound, and gallop family means. Missing, short, terminated,
+invalid, and nonpositive-progress cells remain explicit in coverage outputs.
+Per-distance metrics are reported only for positive commanded-direction
+progress. Tracking quality is retained, not filtered: each cell must pass both
+`tracking_rmse_mps <= 0.05 + 0.25 * abs(vx)` and
+`yaw_tracking_rmse_radps <= 0.05`. Category and overall figures use
+tracking-qualified cells; tables retain both views. Normalized
+torque uses the 12 action-ordered effort limits recorded from the loaded robot.
+Directed progress uses commanded-sign world-x displacement across the same
+intervals as effort integration, with integrated body-x velocity retained as a
+consistency diagnostic.
+
+After every run in a `gait_famility_v3_analysis/study.json` cohort has a
+completed grid, combine the fixed-grid results with the existing matched
+training-efficiency table using:
+
+```powershell
+.\isaaclab.bat -p .\scripts\symm_locomotion\update_gait_family_v3_analysis.py `
+  .\logs\rsl_rl\unitree_go2_symm_flat\gait_famility_v3_analysis
+```
+
+The updater preserves the legacy report and tables. It adds
+`FIXED_GRID_COMPARISON.md`, two fixed-grid CSV tables, a provenance JSON file,
+and three prefixed SVG figures in the same analysis directory. Before writing,
+it requires complete grids with current analysis provenance and validates that
+all runs used identical robot, task, gait, velocity, timing, seed, nominal
+profile, runtime-override, source, analyzer, terminal-horizon, and aggregation
+settings. Headline comparisons use the exact cross-run intersection of
+gait/velocity cells that are valid and planar-velocity-tracking-qualified for
+every policy. Yaw RMSE, yaw pass counts, and the strict combined planar-plus-yaw
+flag remain explicit audit results without relaxing its threshold. Per-run
+coverage, all-planned-cell audit values, and each policy's own observed strict
+tracking subset remain available separately. To select or reorder a subset,
+repeat `--run RUN_PATH` or `--run LABEL=RUN_PATH`; the default is the ordered
+cohort in the existing analysis `study.json`.
+
+The cross-run torque domain uses raw torque squared. If recorded
+`joint_effort_limits` are PhysX's `1e9 N m` sentinel instead of physical robot
+limits, normalized torque-squared is marked unavailable and is never used for
+figures, ranks, Pareto status, or per-directed-meter comparisons.
 
 Extra Isaac Lab or Hydra overrides can be passed after `--`. Launcher arguments
 before that delimiter are parsed strictly, and the delimiter itself is not

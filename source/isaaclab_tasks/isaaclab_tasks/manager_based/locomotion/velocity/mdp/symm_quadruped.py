@@ -77,6 +77,37 @@ SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS = (
 SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS = (4.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 """Training row weights yielding equal trot, bound, half-bound, and gallop family mass."""
 
+SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES = (
+    "trot",
+    "bound",
+    "half_bound_front_a",
+    "half_bound_front_b",
+    "half_bound_hind_a",
+    "half_bound_hind_b",
+    "gallop_a",
+    "gallop_b",
+    "gallop_c",
+    "gallop_d",
+)
+"""Stable row names for the time-reversal-closed training gait library."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES = (
+    "trot",
+    "bound",
+    "half_bound",
+    "half_bound",
+    "half_bound",
+    "half_bound",
+    "gallop",
+    "gallop",
+    "gallop",
+    "gallop",
+)
+"""Gait-family label corresponding to each training gait row."""
+
+SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_TIME_REVERSAL_PARTNERS = (0, 1, 3, 2, 5, 4, 8, 9, 6, 7)
+"""Training-row index reached by applying the shared time-reversal phase mapping."""
+
 SYMM_QUADRUPED_POLICY_OBS_DIM = 72
 """Dimension of the shared symmetric quadruped policy observation."""
 
@@ -345,6 +376,10 @@ class GaitVelocityCommand(CommandTerm):
         self.gait_time_left = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.gait_sequence_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        self._evaluation_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._evaluation_forward_velocity = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self._evaluation_gait_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        self._evaluation_deterministic_timing = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         self.metrics["gait_period"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["duty_factor"] = torch.zeros(self.num_envs, device=self.device)
@@ -356,6 +391,81 @@ class GaitVelocityCommand(CommandTerm):
     def command(self) -> torch.Tensor:
         """Desired base velocity command in the base frame."""
         return self.vel_command_b
+
+    def set_evaluation_scenario(
+        self,
+        vx_mps: float,
+        gait_index: int,
+        env_ids: Sequence[int] | slice | None = None,
+        *,
+        deterministic_timing: bool = True,
+    ) -> None:
+        """Fix the command and gait for deterministic evaluation environments.
+
+        The override fixes forward velocity, zeroes lateral and yaw velocity,
+        selects one configured gait row without phase noise, and suspends timed
+        command and gait resampling. Calling :meth:`reset` while the override is
+        active reapplies the same scenario.
+
+        Args:
+            vx_mps: Forward velocity command [m/s].
+            gait_index: Index into :attr:`init_foot_thetas`.
+            env_ids: Environment indices to override. When omitted, all environments are used.
+            deterministic_timing: Whether to bypass gait period and duty-factor noise.
+
+        Raises:
+            IndexError: If an environment or gait index is out of range.
+            TypeError: If :paramref:`gait_index` is not an integer.
+            ValueError: If :paramref:`vx_mps` is not finite.
+        """
+        if isinstance(gait_index, bool) or not isinstance(gait_index, int):
+            raise TypeError(f"gait_index must be an integer; received {gait_index!r}.")
+        if gait_index < 0 or gait_index >= self.init_foot_thetas.shape[0]:
+            raise IndexError(f"gait_index must be in [0, {self.init_foot_thetas.shape[0]}); received {gait_index}.")
+        try:
+            forward_velocity = float(vx_mps)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"vx_mps must be finite; received {vx_mps!r}.") from exc
+        if not math.isfinite(forward_velocity):
+            raise ValueError(f"vx_mps must be finite; received {vx_mps!r}.")
+
+        env_ids_tensor = self._resolve_optional_env_ids(env_ids)
+        self._validate_evaluation_env_ids(env_ids_tensor)
+        if len(env_ids_tensor) == 0:
+            return
+
+        self._evaluation_active[env_ids_tensor] = True
+        self._evaluation_forward_velocity[env_ids_tensor] = forward_velocity
+        self._evaluation_gait_indices[env_ids_tensor] = gait_index
+        self._evaluation_deterministic_timing[env_ids_tensor] = deterministic_timing
+        self._assign_evaluation_command(env_ids_tensor)
+        choices = self._evaluation_gait_indices[env_ids_tensor]
+        self._assign_gait(env_ids_tensor, choices, add_theta_noise=False)
+        self.gait_sequence_indices[env_ids_tensor] = -1
+        self.time_left[env_ids_tensor] = torch.inf
+        self.gait_time_left[env_ids_tensor] = torch.inf
+
+    def clear_evaluation_scenario(self, env_ids: Sequence[int] | slice | None = None) -> None:
+        """Restore normal command and gait sampling for evaluation environments.
+
+        Normal sampling resumes on the next command computation or reset.
+
+        Args:
+            env_ids: Environment indices to clear. When omitted, all environments are used.
+
+        Raises:
+            IndexError: If an environment index is out of range.
+        """
+        env_ids_tensor = self._resolve_optional_env_ids(env_ids)
+        self._validate_evaluation_env_ids(env_ids_tensor)
+        if len(env_ids_tensor) == 0:
+            return
+        self._evaluation_active[env_ids_tensor] = False
+        self._evaluation_forward_velocity[env_ids_tensor] = 0.0
+        self._evaluation_gait_indices[env_ids_tensor] = -1
+        self._evaluation_deterministic_timing[env_ids_tensor] = False
+        self.time_left[env_ids_tensor] = 0.0
+        self.gait_time_left[env_ids_tensor] = 0.0
 
     def compute(self, dt: float):
         self._update_metrics()
@@ -430,11 +540,9 @@ class GaitVelocityCommand(CommandTerm):
         self._error_yaw_sum[env_ids_tensor] = 0.0
         self._step_count[env_ids_tensor] = 0.0
         self.gait_counter[env_ids_tensor] = 0
-        if self.cfg.gait_sequence_enabled:
-            self._update_gait_sequence(env_ids_tensor, force=True)
-        else:
+        if not self.cfg.gait_sequence_enabled:
             self.gait_sequence_indices[env_ids_tensor] = -1
-            self._resample_gait(env_ids_tensor)
+        self._resample_gait(env_ids_tensor)
         return extras
 
     def common_gait_phases(self) -> torch.Tensor:
@@ -471,11 +579,24 @@ class GaitVelocityCommand(CommandTerm):
         )
 
     def _resample_gait(self, env_ids: Sequence[int]):
-        if self.cfg.gait_sequence_enabled:
-            self._update_gait_sequence(env_ids, force=True)
-            return
         env_ids_tensor = self._resolve_env_ids(env_ids)
         if len(env_ids_tensor) == 0:
+            return
+
+        evaluation_mask = self._evaluation_mask(env_ids_tensor)
+        evaluation_env_ids = env_ids_tensor[evaluation_mask]
+        if len(evaluation_env_ids) > 0:
+            choices = self._evaluation_gait_indices[evaluation_env_ids]
+            self._assign_gait(evaluation_env_ids, choices, add_theta_noise=False)
+            self.gait_sequence_indices[evaluation_env_ids] = -1
+            self.gait_time_left[evaluation_env_ids] = torch.inf
+            self.gait_counter[evaluation_env_ids] += 1
+
+        env_ids_tensor = env_ids_tensor[~evaluation_mask]
+        if len(env_ids_tensor) == 0:
+            return
+        if self.cfg.gait_sequence_enabled:
+            self._update_gait_sequence(env_ids_tensor, force=True)
             return
 
         if self.foot_theta_sampling_weights is None:
@@ -566,8 +687,36 @@ class GaitVelocityCommand(CommandTerm):
         self._error_yaw_sum += error_yaw
         self._step_count += 1.0
 
+    def _resample(self, env_ids: Sequence[int]) -> None:
+        """Resample normal environments while preserving fixed evaluation scenarios."""
+        env_ids_tensor = self._resolve_env_ids(env_ids)
+        evaluation_mask = self._evaluation_mask(env_ids_tensor)
+        if not torch.any(evaluation_mask):
+            super()._resample(env_ids_tensor)
+            return
+
+        normal_env_ids = env_ids_tensor[~evaluation_mask]
+        if len(normal_env_ids) > 0:
+            super()._resample(normal_env_ids)
+        evaluation_env_ids = env_ids_tensor[evaluation_mask]
+        self._resample_command(evaluation_env_ids)
+        self.command_counter[evaluation_env_ids] += 1
+
     def _resample_command(self, env_ids: Sequence[int]):
         env_ids_tensor = self._resolve_env_ids(env_ids)
+        evaluation_mask = self._evaluation_mask(env_ids_tensor)
+        if torch.any(evaluation_mask):
+            normal_env_ids = env_ids_tensor[~evaluation_mask]
+            if len(normal_env_ids) > 0:
+                self._resample_random_command(normal_env_ids)
+            evaluation_env_ids = env_ids_tensor[evaluation_mask]
+            self._assign_evaluation_command(evaluation_env_ids)
+            self.time_left[evaluation_env_ids] = torch.inf
+            return
+        self._resample_random_command(env_ids_tensor)
+
+    def _resample_random_command(self, env_ids_tensor: torch.Tensor) -> None:
+        """Apply the configured random command sampler to environment indices."""
         r = torch.empty(len(env_ids_tensor), device=self.device)
         self.vel_command_b[env_ids_tensor, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
         self.vel_command_b[env_ids_tensor, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
@@ -602,12 +751,41 @@ class GaitVelocityCommand(CommandTerm):
             return torch.arange(self.num_envs, device=self.device)[env_ids]
         return torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
 
+    def _resolve_optional_env_ids(self, env_ids: Sequence[int] | slice | None) -> torch.Tensor:
+        """Resolve optional environment indices to a device-local tensor."""
+        return self._resolve_env_ids(slice(None) if env_ids is None else env_ids)
+
+    def _validate_evaluation_env_ids(self, env_ids: torch.Tensor) -> None:
+        """Validate environment indices accepted by the evaluation API."""
+        if torch.any((env_ids < 0) | (env_ids >= self.num_envs)):
+            raise IndexError(f"env_ids must be in [0, {self.num_envs}); received {env_ids.tolist()}.")
+
+    def _evaluation_mask(self, env_ids_tensor: torch.Tensor) -> torch.Tensor:
+        """Return the active evaluation-override mask for environment indices."""
+        evaluation_active = getattr(self, "_evaluation_active", None)
+        if evaluation_active is None:
+            return torch.zeros(len(env_ids_tensor), dtype=torch.bool, device=env_ids_tensor.device)
+        return evaluation_active[env_ids_tensor]
+
+    def _assign_evaluation_command(self, env_ids_tensor: torch.Tensor) -> None:
+        """Apply fixed planar commands to evaluation environments."""
+        self.vel_command_b[env_ids_tensor, :] = 0.0
+        self.vel_command_b[env_ids_tensor, 0] = self._evaluation_forward_velocity[env_ids_tensor]
+        self.heading_target[env_ids_tensor] = 0.0
+        self.is_heading_env[env_ids_tensor] = False
+        self.is_standing_env[env_ids_tensor] = False
+
     def _active_resampling_env_ids(self) -> torch.Tensor:
         """Return environments eligible for post-reward command scheduling."""
         reset_buf = getattr(getattr(self, "_env", None), "reset_buf", None)
         if reset_buf is None:
-            return torch.arange(len(self.time_left), device=self.time_left.device)
-        return (~reset_buf.to(dtype=torch.bool)).nonzero(as_tuple=False).flatten()
+            active_mask = torch.ones(len(self.time_left), dtype=torch.bool, device=self.time_left.device)
+        else:
+            active_mask = ~reset_buf.to(dtype=torch.bool)
+        evaluation_active = getattr(self, "_evaluation_active", None)
+        if evaluation_active is not None:
+            active_mask &= ~evaluation_active
+        return active_mask.nonzero(as_tuple=False).flatten()
 
     def _update_velocity_resampled_gait_timing(
         self,
@@ -636,9 +814,33 @@ class GaitVelocityCommand(CommandTerm):
         self._anchor_common_gait_phase(env_ids_tensor)
 
         if self.cfg.calculate_from_sampling_curve:
+            deterministic_timing = getattr(self, "_evaluation_deterministic_timing", None)
+            deterministic_mask = (
+                torch.zeros(len(env_ids_tensor), dtype=torch.bool, device=env_ids_tensor.device)
+                if deterministic_timing is None
+                else deterministic_timing[env_ids_tensor]
+            )
             cmd_x = self.command[env_ids_tensor, 0]
-            gait_periods = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
-            duty_factors = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(min=0.1, max=0.9)
+            if torch.any(deterministic_mask):
+                gait_periods = torch.empty_like(self.gait_periods[env_ids_tensor])
+                duty_factors = torch.empty_like(self.duty_factors[env_ids_tensor])
+                stochastic_mask = ~deterministic_mask
+                if torch.any(stochastic_mask):
+                    stochastic_cmd_x = cmd_x[stochastic_mask]
+                    gait_periods[stochastic_mask] = self._compute_period_from_forward_velocity(stochastic_cmd_x)
+                    duty_factors[stochastic_mask] = self._compute_duty_factor_from_forward_velocity(stochastic_cmd_x)
+                deterministic_cmd_x = cmd_x[deterministic_mask]
+                gait_periods[deterministic_mask] = self._compute_period_from_forward_velocity(
+                    deterministic_cmd_x, add_noise_period=False
+                )
+                duty_factors[deterministic_mask] = self._compute_duty_factor_from_forward_velocity(
+                    deterministic_cmd_x, add_noise_period=False
+                )
+                gait_periods.clamp_min_(0.1)
+                duty_factors.clamp_(min=0.1, max=0.9)
+            else:
+                gait_periods = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
+                duty_factors = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(min=0.1, max=0.9)
         else:
             gait_periods = torch.full_like(self.gait_periods[env_ids_tensor], self.cfg.gait_period)
             duty_factors = torch.full_like(self.duty_factors[env_ids_tensor], self.cfg.duty_factor)
@@ -677,15 +879,23 @@ class GaitVelocityCommand(CommandTerm):
         velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
         return velocity_star, length, gravity
 
-    def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+    def _compute_period_from_forward_velocity(
+        self, cmd_forward_velocity: torch.Tensor, *, add_noise_period: bool | None = None
+    ) -> torch.Tensor:
         velocity_star, length, gravity = self._dimensionless_forward_speed(cmd_forward_velocity)
-        random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
+        if add_noise_period is None:
+            add_noise_period = self.cfg.add_noise_period
+        random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if add_noise_period else 0.0
         period_star = 2.55 * torch.exp(-0.975 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
         return period_star * torch.sqrt(length / gravity)
 
-    def _compute_duty_factor_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+    def _compute_duty_factor_from_forward_velocity(
+        self, cmd_forward_velocity: torch.Tensor, *, add_noise_period: bool | None = None
+    ) -> torch.Tensor:
         velocity_star, _, _ = self._dimensionless_forward_speed(cmd_forward_velocity)
-        random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
+        if add_noise_period is None:
+            add_noise_period = self.cfg.add_noise_period
+        random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if add_noise_period else 0.0
         return 0.5588 * torch.exp(-0.681 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
 
 

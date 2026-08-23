@@ -1,0 +1,4259 @@
+--- git commit ---
+d1a28980f884bb9f7d9c1d0bb167e6724f253dc9
+
+
+--- git status ---
+On branch jding/symm-72d-trs-milestone
+Your branch is up to date with 'origin/jding/symm-72d-trs-milestone'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   README.md
+	modified:   scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+	modified:   scripts/symm_locomotion/README.md
+	modified:   scripts/symm_locomotion/_run.ps1
+	modified:   scripts/symm_locomotion/symm_cli.py
+	modified:   scripts/symm_locomotion/train.ps1
+	modified:   source/isaaclab_rl/changelog.d/go2-symm-trs.rst
+	modified:   source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/env.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+	modified:   source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_config.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_phase_mapping.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.codex_tmp/
+	source/isaaclab_rl/test/test_rsl_rl_symmetry_cfg.py
+	source/isaaclab_tasks/changelog.d/leg-permutation-synchrony.rst
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/README.md b/README.md
+index fb3bdde4e..5fb73b5fa 100644
+--- a/README.md
++++ b/README.md
+@@ -249,8 +249,11 @@ Direct IsaacLab commands still work:
+ ## Gait Phase and Time-Reversal Semantics
+ 
+ The current mapping is recorded in each environment configuration as
+-`phase_mapping_version = "same_gait_backward_duty_aware_trs_v2"`. The policy
+-observation remains 72D and contains no clock-direction channel.
++`phase_mapping_version = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"`.
++The policy observation remains 72D and contains no clock-direction channel.
++Policies trained with an earlier mapping version should be retrained before
++correctness-aligned v4 deployment; use their archived code and environment
++configuration when exact legacy checkpoint or video reproduction is required.
+ 
+ Ordinary backward locomotion uses the same forward-time gait schedule as
+ forward locomotion. For common clock `phi` and fixed leg offsets `theta`, both
+@@ -262,7 +265,42 @@ foot_phase = remainder(phi + theta, 1)
+ 
+ Changing command sign changes the desired spatial velocity only; it does not
+ change the sampled gait row, `theta`, footfall order, or clock direction. Gait
+-period and duty factor continue to depend on the absolute x-command speed.
++period and duty factor continue to depend on the absolute x-command speed. The
++common phase is piecewise-integrated using the period active during each control
++interval. A velocity resample recomputes period and duty factor from the final
++sampled command, including a standing override. Gait-row assignment also
++refreshes timing to retain the configured gait/noise schedule. Before either
++timing change, the clock is re-anchored at the phase reached with the old
++period, so the common phase is continuous and subsequent phase advances use the
++new period. A gait-row change can still shift individual foot phases through
++its new `theta` offsets, while the new duty factor immediately defines the
++desired swing/stance distribution. When velocity and gait change in the same
++control step, their timing refresh is coalesced so period and duty factor are
++sampled only once from the new velocity.
++
++Each completed transition is rewarded, diagnosed, and recorded under the same
++command, gait, period, and duty factor that generated its action, with phase
++advanced through that interval using the old period. Timed resampling then
++atomically publishes the new desired signal in the returned policy observation
++for the next action. Environments terminating on that step skip the timed
++update and receive a fresh command, gait, timing, and phase-zero clock during
++reset.
++
++Each 30-second training episode samples velocity and gait at reset, resamples
++velocity once at 10 seconds, applies the configured XY velocity disturbance at
++15 seconds, and resamples the gait row once at 20 seconds. The 10-second
++velocity change immediately updates period and duty factor; the later gait
++assignment refreshes them again from the unchanged velocity. Play and recording
++also resample velocity only once, at 10 seconds, while running the fixed gait
++sequence. Because the 10-second velocity boundary is also a sequence-row
++boundary, velocity is sampled first and the two events share one timing update.
++Playback disturbances remain disabled.
++
++The timing curve uses dimensionless speed `v* = |v_x| / sqrt(g L)`, where `L`
++is the midpoint of the configured characteristic-length range. It maps to a
++dimensionless period before multiplying by `sqrt(L / g)` and maps directly to
++a dimensionless duty factor. The equations are dimensionally consistent;
++using nominal base height as `L` remains a robot-specific modeling heuristic.
+ 
+ The auxiliary physical time-reversal (TR) pair is a separate mapping. With
+ stance duty factor `beta`, swing ratio `1 - beta`, and foot phase `psi`, it
+@@ -285,13 +323,25 @@ data augmentation remains disabled (`use_data_augmentation=False`); the
+ transformed observations are used only by the auxiliary policy-equivariance
+ and value-consistency losses.
+ 
+-The sampled gait library has the following TR closure:
++The training gait library is closed under time reversal:
+ 
+ - Trot is self-reversing.
+ - Bound is self-reversing.
+-- The two half-bound rows are TR partners.
+-- The pure TR partners of the two current gallop rows are not sampled. They
+-  have intentionally not been added in this milestone.
++- The two front-spread half-bound rows are TR partners.
++- The two hind-spread half-bound rows are TR partners.
++- Each of the two original gallop rows is paired with its pure TR partner.
++
++The ten row weights are `(4, 4, 1, 1, 1, 1, 1, 1, 1, 1)`. This assigns 25% of
++training samples to each gait family: trot, bound, half-bound, and gallop,
++while splitting half-bound exposure evenly between front- and hind-spread
++rows. The default phase-offset noise uses the archived four-value support
++`(-2, -1, 0, 1) * 0.001` cycles. Play and recording disable phase-offset noise,
++retain the selected run's period noise, and use the fixed six-gait sequence
++with one front-spread and one hind-spread half-bound row. The foot-phase term
++sums its combined contact/speed violation over the four feet, preserving the
++scale used by the selected run. The leg-permutation term averages over only the
++active synchronized pairs, and the hip term is already a normalized weighted
++average. Their weights are `0.30`, `0.20`, and `0.10`, respectively.
+ 
+ The training command deadband is disabled with `min_xy_command_norm=0.0`, so
+ sampled low-speed commands remain continuous through zero instead of being
+diff --git a/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py b/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+index cf9ccb018..e6cce4379 100644
+--- a/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
++++ b/scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py
+@@ -130,8 +130,8 @@ installed_version = metadata.version("rsl-rl-lib")
+ _SYMM_GAIT_THETAS = (
+     ("trot", (0.0, 0.5, 0.5, 0.0)),
+     ("bound", (0.0, 0.0, 0.5, 0.5)),
+-    ("half-bound-left", (0.13, -0.13, 0.5, 0.5)),
+-    ("half-bound-right", (-0.13, 0.13, 0.5, 0.5)),
++    ("front-spread-half-bound", (0.13, -0.13, 0.5, 0.5)),
++    ("hind-spread-half-bound", (0.0, 0.0, 0.63, 0.37)),
+     ("rotary-gallop", (-0.13, 0.13, 0.63, 0.37)),
+     ("transverse-gallop", (0.13, -0.13, 0.63, 0.37)),
+ )
+diff --git a/scripts/symm_locomotion/README.md b/scripts/symm_locomotion/README.md
+index c4a893c44..5a350adbf 100644
+--- a/scripts/symm_locomotion/README.md
++++ b/scripts/symm_locomotion/README.md
+@@ -71,6 +71,7 @@ Every command accepts:
+ --conda-env symm_rl_isaaclab
+ --use-conda-run
+ --no-conda-run
++--expected-branch BRANCH
+ --dry-run
+ ```
+ 
+@@ -84,6 +85,8 @@ Training options:
+ --mirror
+ --tr-value-coef
+ --tr-warmup-iterations
++--tr-rampup-iterations
++--tr-ramp-shape linear|half_cosine
+ --tr-min-abs-cmd-vel
+ --no-trs
+ --smoke
+@@ -91,6 +94,13 @@ Training options:
+ 
+ Training and ablation runs default to 20,000 iterations across 512 environments.
+ 
++`--tr-warmup-iterations` sets the fully unregularized updates before TRS starts.
++`--tr-rampup-iterations 0` preserves the hard switch; positive values ramp both
++TRS coefficients with the selected linear or half-cosine shape.
++
++Use `--expected-branch BRANCH` to abort before launch when the checkout is on a
++different branch or detached HEAD.
++
+ `--tr-min-abs-cmd-vel` defaults to `0.0`, so TRS losses also train on
+ zero-velocity commands used for in-place behavior.
+ 
+@@ -115,6 +125,46 @@ selected robot experiment directory. You can also use:
+ --checkpoint PATH_TO_MODEL_PT
+ ```
+ 
++Play and record default to a deterministic six-gait sequence with five seconds
++per gait: trot, bound, front-spread half-bound, hind-spread half-bound, rotary
++gallop, then transverse gallop. Interactive play repeats the sequence; the
++default 30-second recording captures one complete cycle. Use
++`--gait-sequence-duration SECONDS` to change both the dwell time and the
++default one-cycle recording length, or
++`--no-gait-sequence` to restore random gait sampling and the legacy 30-second
++recording length. Playback disables phase-offset noise, retains period noise,
++and resamples the velocity command once at 10 seconds. Velocity resampling and
++sequence-row assignment both refresh period and duty factor from the current x
++command. When they coincide, as they do at 10 seconds, they share one timing
++refresh using the new velocity. The clock is piecewise-integrated and
++re-anchored before every timing change, so common phase is continuous and then
++advances using the new period. The completed transition is recorded under its
++old desired signal; the next policy observation receives the new velocity,
++gait offsets, period, duty factor, and continuous phase together. The playback
++episode time limit is one control step longer than the full gait cycle, which
++keeps its reset pose out of the recording. Physical fall and safety terminations
++remain active; the global row-sequence clock continues across resets while the
++per-environment oscillator phase restarts at zero.
++
++This continuous-clock behavior changes phase observations relative to archived
++v2/v3 checkpoints. Retrain those policies for correctness-aligned deployment,
++or use their archived environment implementation for exact legacy playback.
++
++Training uses a separate ten-row, fore/hind-balanced, time-reversal-closed gait
++library. Its row weights `(4, 4, 1, 1, 1, 1, 1, 1, 1, 1)` assign equal
++probability to the trot, bound, half-bound, and gallop families while splitting
++the half-bound family evenly between two front-spread and two hind-spread rows.
++The closure-only partners do not alter the six-gait playback sequence. The
++shared training configuration sums foot-phase violations over feet and averages
++leg-permutation errors over active synchronized pairs. It weights direct
++foot-phase tracking at `0.30`, leg-permutation symmetry at `0.20`, and the
++hip-action penalty at `0.10`. During each 30-second training episode, velocity
++is sampled at reset and resampled once at 10 seconds, an XY velocity disturbance
++is applied at 15 seconds, and the gait row is resampled once at 20 seconds.
++The velocity resample updates period and duty factor immediately. Playback uses
++the same one-shot velocity schedule without the disturbance while its gait rows
++change every five seconds.
++
+ Recordings are 30 seconds by default (1,500 environment steps at 50 Hz).
+ Pass `--video-length` to override the length in environment steps.
+ 
+@@ -182,7 +232,10 @@ directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
+ `logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
+ `--checkpoint`.
+ 
+-Extra Isaac Lab or Hydra overrides can be passed after `--`:
++Extra Isaac Lab or Hydra overrides can be passed after `--`. Launcher arguments
++before that delimiter are parsed strictly, and the delimiter itself is not
++forwarded. For compatibility, delimiter-free Hydra `key=value` overrides are
++also accepted, while unknown `--options` are rejected by the launcher:
+ 
+ ```bash
+ bash scripts/symm_locomotion/train.sh --robot go2 --no-trs -- \
+diff --git a/scripts/symm_locomotion/_run.ps1 b/scripts/symm_locomotion/_run.ps1
+index 6a8345832..8916a2892 100644
+--- a/scripts/symm_locomotion/_run.ps1
++++ b/scripts/symm_locomotion/_run.ps1
+@@ -3,30 +3,55 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+ 
+-param(
+-    [Parameter(Mandatory = $true, Position = 0)]
+-    [string]$ScriptName,
++if ($args.Count -lt 1) {
++    Write-Error "Usage: _run.ps1 SCRIPT_NAME [ARGUMENT ...]"
++    exit 2
++}
+ 
+-    [Parameter(ValueFromRemainingArguments = $true)]
+-    [string[]]$RemainingArgs
+-)
++$ScriptName = [string]$args[0]
++$RemainingArgs = @($args | Select-Object -Skip 1)
+ 
+ $DefaultCondaEnv = "symm_rl_isaaclab"
+-$CondaPrefix = $env:CONDA_PREFIX
++$CondaPrefix = $null
++$ActiveCondaPrefix = $env:CONDA_PREFIX
++if ($ActiveCondaPrefix) {
++    $ActiveCondaPython = Join-Path $ActiveCondaPrefix "python.exe"
++    if (Test-Path -LiteralPath $ActiveCondaPython) {
++        $CondaPrefix = $ActiveCondaPrefix
++    }
++}
++
+ if (-not $CondaPrefix) {
+-    $CondaPrefix = Join-Path $HOME ".conda\envs\$DefaultCondaEnv"
++    $DefaultCondaPrefix = Join-Path $HOME ".conda\envs\$DefaultCondaEnv"
++    $DefaultCondaPython = Join-Path $DefaultCondaPrefix "python.exe"
++    if (Test-Path -LiteralPath $DefaultCondaPython) {
++        $CondaPrefix = $DefaultCondaPrefix
++    }
++}
++
++if (-not $CondaPrefix) {
++    Write-Error (
++        "Could not find the '$DefaultCondaEnv' Conda environment. " +
++        "Activate it or install it at '$DefaultCondaPrefix'."
++    )
++    exit 2
+ }
+ 
+ $PythonExe = Join-Path $CondaPrefix "python.exe"
+ $ScriptPath = Join-Path $PSScriptRoot $ScriptName
+-
+-if (Test-Path $PythonExe) {
+-    $env:CONDA_PREFIX = $CondaPrefix
+-    if (-not $env:CONDA_DEFAULT_ENV) {
+-        $env:CONDA_DEFAULT_ENV = Split-Path $CondaPrefix -Leaf
+-    }
+-    & $PythonExe $ScriptPath @RemainingArgs
++$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
++$LocalSourcePaths = Get-ChildItem -LiteralPath (Join-Path $RepoRoot "source") -Directory |
++    Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName (Join-Path $_.Name "__init__.py")) } |
++    Sort-Object -Property FullName |
++    ForEach-Object { $_.FullName }
++$LocalPythonPath = $LocalSourcePaths -join [System.IO.Path]::PathSeparator
++if ($env:PYTHONPATH) {
++    $env:PYTHONPATH = $LocalPythonPath + [System.IO.Path]::PathSeparator + $env:PYTHONPATH
+ } else {
+-    python $ScriptPath @RemainingArgs
++    $env:PYTHONPATH = $LocalPythonPath
+ }
++
++$env:CONDA_PREFIX = $CondaPrefix
++$env:CONDA_DEFAULT_ENV = Split-Path $CondaPrefix -Leaf
++& $PythonExe $ScriptPath @RemainingArgs
+ exit $LASTEXITCODE
+diff --git a/scripts/symm_locomotion/symm_cli.py b/scripts/symm_locomotion/symm_cli.py
+index 880c05843..de14c540b 100644
+--- a/scripts/symm_locomotion/symm_cli.py
++++ b/scripts/symm_locomotion/symm_cli.py
+@@ -8,6 +8,7 @@
+ from __future__ import annotations
+ 
+ import argparse
++import math
+ import os
+ import re
+ import shlex
+@@ -22,10 +23,26 @@ DEFAULT_TRAINING_ITERATIONS = 20000
+ DEFAULT_MIRROR_LOSS_COEFF = 0.1
+ DEFAULT_TR_VALUE_COEFF = 0.05
+ DEFAULT_TR_WARMUP_ITERATIONS = 500
++DEFAULT_TR_RAMPUP_ITERATIONS = 0
++DEFAULT_TR_RAMP_SHAPE = "linear"
+ DEFAULT_TR_MIN_ABS_CMD_VEL = 0.0
++LEGACY_ABLATION_MIRROR_LOSS_COEFF = 0.2
++LEGACY_ABLATION_TR_VALUE_COEFF = 0.05
+ DEFAULT_VIDEO_DURATION_S = 30.0
++DEFAULT_GAIT_SEQUENCE_DURATION_S = 5.0
++GAIT_SEQUENCE_COUNT = 6
+ DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
+ 
++TR_RAMP_SHAPES = ("linear", "half_cosine")
++TR_SCHEDULE_VARIANTS = ("no_trs", "hard", "linear", "delayed_linear", "half_cosine")
++TR_SCHEDULE_SETTINGS = {
++    "no_trs": (True, 0, 0, "linear"),
++    "hard": (False, 500, 0, "linear"),
++    "linear": (False, 0, 2000, "linear"),
++    "delayed_linear": (False, 500, 1500, "linear"),
++    "half_cosine": (False, 0, 2000, "half_cosine"),
++}
++
+ 
+ @dataclass(frozen=True)
+ class RobotSpec:
+@@ -67,11 +84,82 @@ ROBOT_ALIASES = {
+ DEFAULT_ROBOT = "go2"
+ 
+ 
++class _StoreExplicitAction(argparse.Action):
++    """Store an argument and record that it was provided on the command line."""
++
++    def __call__(
++        self,
++        parser: argparse.ArgumentParser,
++        namespace: argparse.Namespace,
++        values: object,
++        option_string: str | None = None,
++    ) -> None:
++        del parser, option_string
++        setattr(namespace, self.dest, values)
++        setattr(namespace, f"_{self.dest}_explicit", True)
++
++
+ def repo_root() -> Path:
+     """Return the Isaac Lab repository root."""
+     return Path(__file__).resolve().parents[2]
+ 
+ 
++def repo_subprocess_environment() -> dict[str, str]:
++    """Return an environment that imports packages from the launcher checkout.
++
++    Returns:
++        A copy of the current process environment with every local project under
++        ``source`` placed before any existing ``PYTHONPATH`` entries.
++    """
++    environment = os.environ.copy()
++    source_root = repo_root() / "source"
++    local_projects = sorted(
++        (
++            path.resolve()
++            for path in source_root.iterdir()
++            if path.is_dir() and (path / path.name / "__init__.py").is_file()
++        ),
++        key=str,
++    )
++    inherited_paths = environment.get("PYTHONPATH", "").split(os.pathsep)
++    python_paths = list(
++        dict.fromkeys([*(str(path) for path in local_projects), *(path for path in inherited_paths if path)])
++    )
++    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
++    return environment
++
++
++def git_branch() -> str:
++    """Return the branch checked out in the launcher repository."""
++    result = subprocess.run(
++        ["git", "-C", str(repo_root()), "branch", "--show-current"],
++        capture_output=True,
++        check=False,
++        text=True,
++    )
++    if result.returncode != 0:
++        raise ValueError(f"Unable to read the Git branch for {repo_root()}: {result.stderr.strip()}")
++    return result.stdout.strip()
++
++
++def validate_expected_branch(args: argparse.Namespace) -> None:
++    """Reject a launch from a branch other than the optional expected branch.
++
++    Args:
++        args: Parsed launcher arguments containing ``expected_branch``.
++
++    Raises:
++        ValueError: If the repository is detached or its branch does not match.
++    """
++    expected_branch = args.expected_branch
++    if expected_branch is None:
++        return
++    branch = git_branch()
++    if branch != expected_branch:
++        actual = branch or "<detached HEAD>"
++        raise ValueError(f"Expected branch '{expected_branch}', but current branch is '{actual}' in {repo_root()}.")
++
++
+ def robot_choices() -> tuple[str, ...]:
+     """Return accepted robot keys and aliases."""
+     return tuple(sorted((*ROBOT_SPECS.keys(), *ROBOT_ALIASES.keys())))
+@@ -140,7 +228,12 @@ def run_isaaclab(args: argparse.Namespace, isaaclab_args: list[str]) -> int:
+     print(log_prefix(args) + command_to_string(command), flush=True)
+     if args.dry_run:
+         return 0
+-    return subprocess.run(command, cwd=repo_root(), check=False).returncode
++    return subprocess.run(
++        command,
++        cwd=repo_root(),
++        env=repo_subprocess_environment(),
++        check=False,
++    ).returncode
+ 
+ 
+ def model_iteration(path: Path) -> int:
+@@ -255,7 +348,12 @@ def convert_latest_video(
+     print(log_prefix(args) + command_to_string(command), flush=True)
+     if args.dry_run:
+         return 0
+-    return subprocess.run(command, cwd=repo_root(), check=False).returncode
++    return subprocess.run(
++        command,
++        cwd=repo_root(),
++        env=repo_subprocess_environment(),
++        check=False,
++    ).returncode
+ 
+ 
+ def add_common_args(parser: argparse.ArgumentParser) -> None:
+@@ -264,6 +362,12 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
+     parser.add_argument("--conda-env", default=CONDA_ENV, help="Conda env used for Isaac Lab commands.")
+     parser.add_argument("--use-conda-run", action="store_true", help="Force wrapping commands with conda run.")
+     parser.add_argument("--no-conda-run", action="store_true", help="Run the Isaac Lab wrapper directly.")
++    parser.add_argument(
++        "--expected-branch",
++        "--expected_branch",
++        default=None,
++        help="Abort unless the launcher repository has this Git branch checked out.",
++    )
+     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
+ 
+ 
+@@ -300,6 +404,20 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
+         type=int,
+         default=DEFAULT_TR_WARMUP_ITERATIONS,
+     )
++    parser.add_argument(
++        "--tr-rampup-iterations",
++        "--tr_rampup_iterations",
++        dest="tr_rampup_iterations",
++        type=int,
++        default=DEFAULT_TR_RAMPUP_ITERATIONS,
++    )
++    parser.add_argument(
++        "--tr-ramp-shape",
++        "--tr_ramp_shape",
++        dest="tr_ramp_shape",
++        choices=TR_RAMP_SHAPES,
++        default=DEFAULT_TR_RAMP_SHAPE,
++    )
+     parser.add_argument(
+         "--tr-min-abs-cmd-vel",
+         "--tr_min_abs_cmd_vel",
+@@ -319,6 +437,13 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
+         run_name = args.run_name
+     elif args.disable_symmetry:
+         run_name = "no_trs_smoke" if args.smoke else "no_trs"
++    elif args.tr_rampup_iterations > 0:
++        seed_label = args.seed if args.seed is not None else "default"
++        run_name = (
++            f"{args.robot_spec.key}_trs_{args.tr_ramp_shape}_m{coeff_label(args.mirror_loss_coeff)}"
++            f"_v{coeff_label(args.tr_value_coeff)}_w{args.tr_warmup_iterations}"
++            f"_r{args.tr_rampup_iterations}_seed{seed_label}"
++        )
+     else:
+         run_name = ("trs_smoke_" if args.smoke else "with_trs_") + f"mirror{coeff_label(args.mirror_loss_coeff)}"
+ 
+@@ -343,12 +468,19 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
+             "agent.algorithm.symmetry_cfg.use_mirror_loss=False",
+             "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0",
+             "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0",
++            f"agent.algorithm.symmetry_cfg.warmup_iterations={args.tr_warmup_iterations}",
++            f"agent.algorithm.symmetry_cfg.rampup_iterations={args.tr_rampup_iterations}",
++            f"agent.algorithm.symmetry_cfg.ramp_shape={args.tr_ramp_shape}",
++            f"agent.algorithm.symmetry_cfg.min_abs_command_velocity={args.tr_min_abs_cmd_vel}",
+         ]
+     else:
+         command += [
++            "agent.algorithm.symmetry_cfg.use_data_augmentation=False",
+             f"agent.algorithm.symmetry_cfg.mirror_loss_coeff={args.mirror_loss_coeff}",
+             f"agent.algorithm.symmetry_cfg.value_loss_coeff={args.tr_value_coeff}",
+             f"agent.algorithm.symmetry_cfg.warmup_iterations={args.tr_warmup_iterations}",
++            f"agent.algorithm.symmetry_cfg.rampup_iterations={args.tr_rampup_iterations}",
++            f"agent.algorithm.symmetry_cfg.ramp_shape={args.tr_ramp_shape}",
+             f"agent.algorithm.symmetry_cfg.min_abs_command_velocity={args.tr_min_abs_cmd_vel}",
+         ]
+     return command + extra
+@@ -405,11 +537,64 @@ def rollout_plot_lab_args(args: argparse.Namespace) -> list[str]:
+     return command
+ 
+ 
++def add_gait_sequence_args(parser: argparse.ArgumentParser) -> None:
++    """Add deterministic gait-sequence options shared by play and record."""
++    gait_group = parser.add_mutually_exclusive_group()
++    gait_group.add_argument(
++        "--gait-sequence",
++        "--gait_sequence",
++        dest="gait_sequence",
++        action="store_true",
++        default=True,
++        help="Cycle through all configured gait rows in order (default).",
++    )
++    gait_group.add_argument(
++        "--no-gait-sequence",
++        "--no_gait_sequence",
++        dest="gait_sequence",
++        action="store_false",
++        help="Restore random gait sampling during playback.",
++    )
++    parser.add_argument(
++        "--gait-sequence-duration",
++        "--gait_sequence_duration",
++        dest="gait_sequence_duration_s",
++        type=float,
++        default=DEFAULT_GAIT_SEQUENCE_DURATION_S,
++        help="Duration [s] assigned to each configured gait row.",
++    )
++
++
++def gait_sequence_lab_args(args: argparse.Namespace) -> list[str]:
++    """Build Hydra overrides for deterministic gait sequencing."""
++    duration_s = args.gait_sequence_duration_s
++    if args.gait_sequence and (not math.isfinite(duration_s) or duration_s <= 0.0):
++        raise ValueError(f"Gait sequence duration must be finite and positive; received {duration_s!r}.")
++    steps_per_gait = round(duration_s / args.robot_spec.step_dt) if args.gait_sequence else 0
++    if args.gait_sequence and steps_per_gait < 1:
++        raise ValueError(
++            "Gait sequence duration must span at least one environment step; "
++            f"received {duration_s!r} s with step_dt {args.robot_spec.step_dt!r} s."
++        )
++    enabled = str(args.gait_sequence).lower()
++    episode_length_s = (
++        (GAIT_SEQUENCE_COUNT * steps_per_gait + 1) * args.robot_spec.step_dt
++        if args.gait_sequence
++        else DEFAULT_VIDEO_DURATION_S
++    )
++    return [
++        f"env.commands.base_velocity.gait_sequence_enabled={enabled}",
++        f"env.commands.base_velocity.gait_sequence_duration_s={duration_s}",
++        f"env.episode_length_s={episode_length_s}",
++    ]
++
++
+ def add_play_args(parser: argparse.ArgumentParser) -> None:
+     """Add play command options."""
+     add_common_args(parser)
+     add_checkpoint_args(parser)
+     add_rollout_plot_args(parser)
++    add_gait_sequence_args(parser)
+     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
+     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
+     parser.add_argument("--kit-args", "--kit_args", default=None)
+@@ -459,7 +644,7 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
+         command += ["--kit_args", kit_args]
+     if args.print_gait:
+         command += ["--print_gait_info", "--print_gait_info_interval", str(args.print_gait_interval)]
+-    return command + rollout_plot_lab_args(args) + extra
++    return command + gait_sequence_lab_args(args) + rollout_plot_lab_args(args) + extra
+ 
+ 
+ def add_record_args(parser: argparse.ArgumentParser) -> None:
+@@ -467,13 +652,14 @@ def add_record_args(parser: argparse.ArgumentParser) -> None:
+     add_common_args(parser)
+     add_checkpoint_args(parser)
+     add_rollout_plot_args(parser)
++    add_gait_sequence_args(parser)
+     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
+     parser.add_argument(
+         "--video-length",
+         "--video_length",
+         type=int,
+         default=None,
+-        help="Recording length in environment steps. Defaults to 30 seconds for the selected robot.",
++        help="Recording length in environment steps. Defaults to one fixed gait cycle, or 30 seconds when disabled.",
+     )
+     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
+     parser.add_argument("--kit-args", "--kit_args", default=None)
+@@ -485,13 +671,18 @@ def add_record_args(parser: argparse.ArgumentParser) -> None:
+ 
+ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[str], Path]:
+     """Build Isaac Lab arguments for video recording."""
++    gait_args = gait_sequence_lab_args(args)
+     checkpoint = resolve_checkpoint(args)
+     print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
+     kit_args = default_kit_args() if args.kit_args is None else args.kit_args
+     video_length = (
+         args.video_length
+         if args.video_length is not None
+-        else round(DEFAULT_VIDEO_DURATION_S / args.robot_spec.step_dt)
++        else (
++            GAIT_SEQUENCE_COUNT * round(args.gait_sequence_duration_s / args.robot_spec.step_dt)
++            if args.gait_sequence
++            else round(DEFAULT_VIDEO_DURATION_S / args.robot_spec.step_dt)
++        )
+     )
+     command = [
+         "play",
+@@ -513,42 +704,105 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
+         command += ["--viz", "kit", "--real-time"]
+     if kit_args:
+         command += ["--kit_args", kit_args]
+-    return command + rollout_plot_lab_args(args) + extra, checkpoint
++    return command + gait_args + rollout_plot_lab_args(args) + extra, checkpoint
+ 
+ 
+ def add_ablation_args(parser: argparse.ArgumentParser) -> None:
+     """Add ablation command options."""
+     add_common_args(parser)
++    parser.set_defaults(_mirror_loss_coeff_explicit=False, _tr_value_coeff_explicit=False)
+     parser.add_argument("--num-envs", "--num_envs", type=int, default=DEFAULT_NUM_ENVS)
+     parser.add_argument(
+         "--iterations", "--max-iterations", "--max_iterations", type=int, default=DEFAULT_TRAINING_ITERATIONS
+     )
+     parser.add_argument("--seeds", type=int, nargs="+", default=[1])
+-    parser.add_argument("--mirror", "--mirror-loss-coeff", dest="mirror_loss_coeff", type=float, default=0.2)
+-    parser.add_argument("--tr-value-coef", "--tr_value_coef", dest="tr_value_coeff", type=float, default=0.05)
++    parser.add_argument(
++        "--mirror",
++        "--mirror-loss-coeff",
++        dest="mirror_loss_coeff",
++        type=float,
++        default=LEGACY_ABLATION_MIRROR_LOSS_COEFF,
++        action=_StoreExplicitAction,
++    )
++    parser.add_argument(
++        "--tr-value-coef",
++        "--tr_value_coef",
++        dest="tr_value_coeff",
++        type=float,
++        default=LEGACY_ABLATION_TR_VALUE_COEFF,
++        action=_StoreExplicitAction,
++    )
+     parser.add_argument(
+         "--tr-warmup-iterations", "--tr_warmup_iterations", dest="tr_warmup_iterations", type=int, default=1000
+     )
++    parser.add_argument(
++        "--tr-rampup-iterations",
++        "--tr_rampup_iterations",
++        dest="tr_rampup_iterations",
++        type=int,
++        default=DEFAULT_TR_RAMPUP_ITERATIONS,
++    )
++    parser.add_argument(
++        "--tr-ramp-shape",
++        "--tr_ramp_shape",
++        dest="tr_ramp_shape",
++        choices=TR_RAMP_SHAPES,
++        default=DEFAULT_TR_RAMP_SHAPE,
++    )
+     parser.add_argument(
+         "--tr-min-abs-cmd-vel", "--tr_min_abs_cmd_vel", dest="tr_min_abs_cmd_vel", type=float, default=0.0
+     )
+     parser.add_argument("--only", choices=("both", "with_trs", "no_trs"), default="both")
++    parser.add_argument(
++        "--schedule-variants",
++        "--schedule_variants",
++        nargs="+",
++        choices=TR_SCHEDULE_VARIANTS,
++        default=None,
++        help="Run an explicit matched schedule study; --mirror and --tr-value-coef are required.",
++    )
+ 
+ 
+ def run_ablation(args: argparse.Namespace, extra: list[str]) -> int:
+     """Run the symmetry ablation variants."""
+-    variants = ["with_trs", "no_trs"] if args.only == "both" else [args.only]
++    if args.schedule_variants is None:
++        variants = ["with_trs", "no_trs"] if args.only == "both" else [args.only]
++        mirror_loss_coeff = args.mirror_loss_coeff
++        tr_value_coeff = args.tr_value_coeff
++    else:
++        if not args._mirror_loss_coeff_explicit or not args._tr_value_coeff_explicit:
++            raise ValueError("Schedule ablations require explicit --mirror and --tr-value-coef values.")
++        variants = args.schedule_variants
++        mirror_loss_coeff = args.mirror_loss_coeff
++        tr_value_coeff = args.tr_value_coeff
++
+     for seed in args.seeds:
+         for variant in variants:
+             train_args = argparse.Namespace(**vars(args))
+             train_args.seed = seed
+             train_args.smoke = False
+-            train_args.disable_symmetry = variant == "no_trs"
+-            train_args.run_name = (
+-                f"ablation_with_trs_seed{seed}_mirror{coeff_label(args.mirror_loss_coeff)}"
+-                if variant == "with_trs"
+-                else f"ablation_no_trs_seed{seed}"
+-            )
++            train_args.mirror_loss_coeff = mirror_loss_coeff
++            train_args.tr_value_coeff = tr_value_coeff
++            if args.schedule_variants is None:
++                train_args.disable_symmetry = variant == "no_trs"
++                train_args.run_name = (
++                    f"ablation_with_trs_seed{seed}_mirror{coeff_label(mirror_loss_coeff)}"
++                    if variant == "with_trs"
++                    else f"ablation_no_trs_seed{seed}"
++                )
++            else:
++                disable_symmetry, warmup_iterations, rampup_iterations, ramp_shape = TR_SCHEDULE_SETTINGS[variant]
++                train_args.disable_symmetry = disable_symmetry
++                train_args.tr_warmup_iterations = warmup_iterations
++                train_args.tr_rampup_iterations = rampup_iterations
++                train_args.tr_ramp_shape = ramp_shape
++                effective_mirror = 0.0 if disable_symmetry else mirror_loss_coeff
++                effective_value = 0.0 if disable_symmetry else tr_value_coeff
++                train_args.run_name = (
++                    f"{args.robot_spec.key}_{variant}_m{coeff_label(effective_mirror)}"
++                    f"_v{coeff_label(effective_value)}_w{warmup_iterations}_r{rampup_iterations}"
++                    f"_{ramp_shape}_seed{seed}"
++                )
+             print(f"{log_prefix(args)}ablation variant={variant} seed={seed}", flush=True)
+             code = run_isaaclab(args, train_lab_args(train_args, extra))
+             if code != 0:
+@@ -635,7 +889,12 @@ def run_tensorboard(args: argparse.Namespace) -> int:
+     print(log_prefix(args) + command_to_string(command), flush=True)
+     if args.dry_run:
+         return 0
+-    return subprocess.run(command, cwd=repo_root(), check=False).returncode
++    return subprocess.run(
++        command,
++        cwd=repo_root(),
++        env=repo_subprocess_environment(),
++        check=False,
++    ).returncode
+ 
+ 
+ def build_parser() -> argparse.ArgumentParser:
+@@ -663,15 +922,39 @@ def build_parser() -> argparse.ArgumentParser:
+     return parser
+ 
+ 
++def split_launcher_and_forwarded_args(argv: list[str] | None) -> tuple[list[str], list[str]]:
++    """Split launcher arguments from explicitly delimited downstream arguments.
++
++    Args:
++        argv: Raw arguments, or :data:`sys.argv` when omitted.
++
++    Returns:
++        The strict launcher prefix and downstream suffix. The first literal
++        ``--`` is removed and is not forwarded.
++    """
++    raw_args = list(sys.argv[1:] if argv is None else argv)
++    try:
++        delimiter_index = raw_args.index("--")
++    except ValueError:
++        return raw_args, []
++    return raw_args[:delimiter_index], raw_args[delimiter_index + 1 :]
++
++
+ def main(argv: list[str] | None = None) -> int:
+     """Run the symmetric quadruped convenience CLI."""
+     parser = build_parser()
+-    args, extra = parser.parse_known_args(argv)
+-    if extra and extra[0] == "--":
+-        extra = extra[1:]
++    raw_args = list(sys.argv[1:] if argv is None else argv)
++    launcher_args, extra = split_launcher_and_forwarded_args(raw_args)
++    if "--" in raw_args:
++        args = parser.parse_args(launcher_args)
++    else:
++        args, extra = parser.parse_known_args(launcher_args)
++        if any(token.startswith("-") for token in extra):
++            parser.error(f"unrecognized arguments: {' '.join(extra)}")
+ 
+     try:
+         args.robot_spec = get_robot(args.robot)
++        validate_expected_branch(args)
+         if args.command == "train":
+             return run_isaaclab(args, train_lab_args(args, extra))
+         if args.command == "play":
+diff --git a/scripts/symm_locomotion/train.ps1 b/scripts/symm_locomotion/train.ps1
+index 55a40a8e8..cedce7fe0 100644
+--- a/scripts/symm_locomotion/train.ps1
++++ b/scripts/symm_locomotion/train.ps1
+@@ -3,10 +3,5 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+ 
+-param(
+-    [Parameter(ValueFromRemainingArguments = $true)]
+-    [string[]]$RemainingArgs
+-)
+-
+-& "$PSScriptRoot\_run.ps1" "train.py" @RemainingArgs
++& "$PSScriptRoot\_run.ps1" "train.py" @args
+ exit $LASTEXITCODE
+diff --git a/source/isaaclab_rl/changelog.d/go2-symm-trs.rst b/source/isaaclab_rl/changelog.d/go2-symm-trs.rst
+index 1e9d0ce99..866ebceea 100644
+--- a/source/isaaclab_rl/changelog.d/go2-symm-trs.rst
++++ b/source/isaaclab_rl/changelog.d/go2-symm-trs.rst
+@@ -3,3 +3,5 @@ Added
+ 
+ * Added time-reversal regularization options to
+   :class:`~isaaclab_rl.rsl_rl.RslRlSymmetryCfg`.
++* Added backward-compatible linear and half-cosine coefficient-ramp settings
++  for time-reversal auxiliary losses.
+diff --git a/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py b/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+index 4768acdbf..90c7222e8 100644
+--- a/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
++++ b/source/isaaclab_rl/isaaclab_rl/rsl_rl/symmetry_cfg.py
+@@ -3,7 +3,10 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+ 
++import math
+ from dataclasses import MISSING
++from numbers import Integral, Real
++from typing import Literal
+ 
+ from isaaclab.utils.configclass import configclass
+ 
+@@ -60,10 +63,46 @@ class RslRlSymmetryCfg:
+     """Minimum absolute command velocity [m/s] for applying time-reversal losses."""
+ 
+     warmup_iterations: int = 0
+-    """Number of PPO iterations before applying time-reversal losses."""
++    """Number of fully unregularized PPO updates before a hard switch or coefficient ramp starts."""
++
++    rampup_iterations: int = 0
++    """Number of PPO updates used to ramp the time-reversal loss coefficients.
++
++    A value of zero preserves the legacy hard-switch behavior after :attr:`warmup_iterations`.
++    """
++
++    ramp_shape: Literal["linear", "half_cosine"] = "linear"
++    """Shape of the time-reversal loss coefficient ramp."""
+ 
+     command_observation_index: int = 3
+     """Index of the forward velocity command in the policy observation."""
+ 
+     command_observation_scale: float = 1.0
+     """Scale applied to the command observation."""
++
++    def __post_init__(self) -> None:
++        """Validate the time-reversal loss schedule configuration."""
++        self.validate_config()
++
++    def validate_config(self) -> None:
++        """Validate coefficient and schedule values.
++
++        Raises:
++            ValueError: If a coefficient or schedule setting is invalid.
++        """
++        for name, value in (
++            ("warmup_iterations", self.warmup_iterations),
++            ("rampup_iterations", self.rampup_iterations),
++        ):
++            if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
++                raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
++
++        for name, value in (
++            ("mirror_loss_coeff", self.mirror_loss_coeff),
++            ("value_loss_coeff", self.value_loss_coeff),
++        ):
++            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)) or value < 0.0:
++                raise ValueError(f"{name} must be finite and nonnegative; received {value!r}.")
++
++        if self.ramp_shape not in {"linear", "half_cosine"}:
++            raise ValueError(f"ramp_shape must be 'linear' or 'half_cosine'; received {self.ramp_shape!r}.")
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+index a2671e262..1fdfb8cd7 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+@@ -237,6 +237,19 @@ class DobotX1SymmFlatEnvCfg_PLAY(DobotX1SymmFlatEnvCfg):
+ 
+         self.scene.num_envs = 1
+         self.scene.env_spacing = 2.5
++        self.commands.base_velocity.gait_library_version = dobot_mdp.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION
++        self.commands.base_velocity.init_foot_thetas = dobot_mdp.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS
++        self.commands.base_velocity.init_foot_theta_weights = None
++        self.commands.base_velocity.resample_once_after_reset = True
++        self.commands.base_velocity.resample_gait_once_after_reset = True
++        self.commands.base_velocity.gait_sequence_enabled = True
++        self.commands.base_velocity.gait_sequence_duration_s = 5.0
++        self.commands.base_velocity.add_noise_period = True
++        self.commands.base_velocity.add_noise_theta = False
++        self.episode_length_s = (
++            len(self.commands.base_velocity.init_foot_thetas) * self.commands.base_velocity.gait_sequence_duration_s
++            + self.decimation * self.sim.dt
++        )
+         self.sim.physics = make_play_physics_cfg()
+         configure_play_ground_reaction_force_sensors(self, _DOBOT_X1_FOOT_SENSOR_NAMES)
+         self.viewer.eye = (0.0, -4.0, 1.5)
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
+index 529ed30c7..59ee6bd88 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py
+@@ -203,6 +203,19 @@ class UnitreeGo2SymmFlatEnvCfg_PLAY(UnitreeGo2SymmFlatEnvCfg):
+ 
+         self.scene.num_envs = 1
+         self.scene.env_spacing = 2.5
++        self.commands.base_velocity.gait_library_version = go2_symm_mdp.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION
++        self.commands.base_velocity.init_foot_thetas = go2_symm_mdp.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS
++        self.commands.base_velocity.init_foot_theta_weights = None
++        self.commands.base_velocity.resample_once_after_reset = True
++        self.commands.base_velocity.resample_gait_once_after_reset = True
++        self.commands.base_velocity.gait_sequence_enabled = True
++        self.commands.base_velocity.gait_sequence_duration_s = 5.0
++        self.commands.base_velocity.add_noise_period = True
++        self.commands.base_velocity.add_noise_theta = False
++        self.episode_length_s = (
++            len(self.commands.base_velocity.init_foot_thetas) * self.commands.base_velocity.gait_sequence_duration_s
++            + self.decimation * self.sim.dt
++        )
+         self.sim.physics = make_play_physics_cfg()
+         configure_play_ground_reaction_force_sensors(self, _GO2_FOOT_SENSOR_NAMES)
+         self.viewer.eye = (0.0, -4.0, 1.4)
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+index ee285ab49..e89bf64c7 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+@@ -20,6 +20,8 @@ def configure_symm_quadruped_ppo(
+     mirror_loss_coeff: float = 0.1,
+     min_abs_command_velocity: float = 0.0,
+     warmup_iterations: int = 500,
++    rampup_iterations: int = 0,
++    ramp_shape: str = "linear",
+ ) -> None:
+     """Apply the shared symmetric quadruped PPO/TRS defaults to a runner config.
+ 
+@@ -31,7 +33,9 @@ def configure_symm_quadruped_ppo(
+         value_loss_coeff: Weight for the value-function TRS consistency loss.
+         mirror_loss_coeff: Weight for the policy mirror loss.
+         min_abs_command_velocity: Minimum forward command velocity [m/s] for TRS losses.
+-        warmup_iterations: Number of PPO iterations before applying TRS losses.
++        warmup_iterations: Number of fully unregularized PPO updates before applying TRS losses.
++        rampup_iterations: Number of PPO updates used to ramp the TRS loss coefficients.
++        ramp_shape: Shape of the TRS loss coefficient ramp.
+     """
+     cfg.max_iterations = 20000
+     cfg.save_interval = 1000
+@@ -54,6 +58,8 @@ def configure_symm_quadruped_ppo(
+         value_loss_coeff=value_loss_coeff,
+         min_abs_command_velocity=min_abs_command_velocity,
+         warmup_iterations=warmup_iterations,
++        rampup_iterations=rampup_iterations,
++        ramp_shape=ramp_shape,
+         command_observation_index=9,
+         command_observation_scale=2.0,
+     )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/env.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/env.py
+index e64aa36cc..5512280b1 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/env.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/env.py
+@@ -103,10 +103,6 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
+         self.episode_length_buf += 1
+         self.common_step_counter += 1
+ 
+-        self.command_manager.compute(dt=self.step_dt)
+-        if "interval" in self.event_manager.available_modes:
+-            self.event_manager.apply(mode="interval", dt=self.step_dt)
+-
+         self.reset_buf = self.termination_manager.compute()
+         self.reset_terminated = self.termination_manager.terminated
+         self.reset_time_outs = self.termination_manager.time_outs
+@@ -122,6 +118,10 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
+             self.obs_buf = self.observation_manager.compute()
+             self.recorder_manager.record_post_step()
+ 
++        # Schedule the next desired signal only after scoring and recording the
++        # completed transition under the command/gait that generated its action.
++        self.command_manager.compute(dt=self.step_dt)
++
+         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
+         if len(reset_env_ids) > 0:
+             self.recorder_manager.record_pre_reset(reset_env_ids)
+@@ -134,6 +134,9 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
+ 
+             self.recorder_manager.record_post_reset(reset_env_ids)
+ 
++        if "interval" in self.event_manager.available_modes:
++            self.event_manager.apply(mode="interval", dt=self.step_dt)
++
+         self.obs_buf = self.observation_manager.compute(update_history=True)
+         self.extras.setdefault("log", {}).update(step_diagnostics)
+ 
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+index db67be56e..4b6d7cd47 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+@@ -50,22 +50,40 @@ def _warn_morphological_symmetry_deprecation() -> None:
+     )
+ 
+ 
++def _warn_foot_periodicity_deprecation() -> None:
++    """Warn when the deprecated foot-phase reward name is used."""
++    warnings.warn(
++        "The 'foot_periodicity' reward is deprecated; use 'foot_phase'.",
++        DeprecationWarning,
++        stacklevel=3,
++    )
++
++
+ @configclass
+ class SymmQuadrupedRewardsCfg(RewardsCfg):
+-    """Reward configuration with a deprecated leg-symmetry name alias."""
++    """Reward configuration with deprecated aliases for renamed terms."""
++
++    foot_phase: RewTerm | None = None
++    """Foot contact and speed consistency with the commanded gait phase."""
+ 
+     leg_permutation_symmetry: RewTerm | None = None
+-    """Phase-weighted joint symmetry under configured leg permutations."""
++    """Joint symmetry for configured leg pairs commanded in synchrony."""
+ 
+     def __getattr__(self, name: str):
+-        """Resolve the deprecated reward name without exposing it as a config field."""
++        """Resolve deprecated reward names without exposing them as config fields."""
++        if name == "foot_periodicity":
++            _warn_foot_periodicity_deprecation()
++            return self.foot_phase
+         if name == "morphological_symmetry":
+             _warn_morphological_symmetry_deprecation()
+             return self.leg_permutation_symmetry
+         raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+ 
+     def __setattr__(self, name: str, value) -> None:
+-        """Redirect assignments through the deprecated reward name."""
++        """Redirect assignments through deprecated reward names."""
++        if name == "foot_periodicity":
++            _warn_foot_periodicity_deprecation()
++            name = "foot_phase"
+         if name == "morphological_symmetry":
+             _warn_morphological_symmetry_deprecation()
+             name = "leg_permutation_symmetry"
+@@ -132,6 +150,7 @@ def make_gait_velocity_command(
+     return mdp_module.GaitVelocityCommandCfg(
+         asset_name="robot",
+         resampling_time_range=(10.0, 10.0),
++        resampling_time_gait=20.0,
+         heading_command=False,
+         heading_control_stiffness=0.5,
+         rel_standing_envs=0.0,
+@@ -144,6 +163,7 @@ def make_gait_velocity_command(
+         vel_yaw_success_threshold=0.05,
+         vel_yaw_success_rel_threshold=0.25,
+         base_height_range=base_height_range,
++        init_foot_theta_weights=mdp_module.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS,
+         ranges=mdp_module.GaitVelocityCommandCfg.Ranges(
+             lin_vel_x=(-2.0, 2.0),
+             lin_vel_y=(0.0, 0.0),
+@@ -237,8 +257,8 @@ def configure_rewards(
+     env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=0.20)
+     env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=-200.0)
+     env_cfg.rewards.cmd = None
+-    env_cfg.rewards.foot_periodicity = RewTerm(
+-        func=mdp_module.foot_periodicity_penalty,
++    env_cfg.rewards.foot_phase = RewTerm(
++        func=mdp_module.foot_phase_penalty,
+         weight=0.30,
+         params={
+             "command_name": "base_velocity",
+@@ -289,7 +309,7 @@ def configure_rewards(
+         weight=foot_clearance_weight,
+         params=foot_clearance_params,
+     )
+-    env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.15)
++    env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.10)
+     env_cfg.rewards.joint_target_limits = RewTerm(
+         func=mdp_module.joint_position_target_limit_penalty,
+         weight=0.05,
+@@ -321,8 +341,8 @@ def configure_rewards(
+     )
+     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
+         func=mdp_module.leg_permutation_symmetry_penalty,
+-        weight=0.30,
+-        params={"command_name": "base_velocity", "joint_cfg": joint_cfg},
++        weight=0.20,
++        params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
+     )
+     env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
+ 
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
+index 3ec2057d3..51682aa0e 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
+@@ -7,14 +7,89 @@
+ 
+ from __future__ import annotations
+ 
++import math
++from numbers import Integral, Real
++
+ import torch
+ import torch.nn as nn
+ from rsl_rl.algorithms import PPO
+ from tensordict import TensorDict
+ 
++_TRS_RAMP_SHAPES = frozenset({"linear", "half_cosine"})
++
++
++def time_reversal_loss_scale(
++    iteration: int,
++    warmup_iterations: int,
++    rampup_iterations: int,
++    ramp_shape: str,
++) -> float:
++    """Return the time-reversal auxiliary-loss scale for one PPO update.
++
++    Args:
++        iteration: Absolute zero-based PPO learning iteration.
++        warmup_iterations: Number of fully unregularized PPO updates before the ramp starts.
++        rampup_iterations: Number of PPO updates in the coefficient ramp. Zero selects a hard switch.
++        ramp_shape: Ramp interpolation shape, either ``"linear"`` or ``"half_cosine"``.
++
++    Returns:
++        The coefficient scale in the closed interval [0, 1].
++
++    Raises:
++        ValueError: If a schedule setting is invalid.
++    """
++    for name, value in (
++        ("warmup_iterations", warmup_iterations),
++        ("rampup_iterations", rampup_iterations),
++    ):
++        if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
++            raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
++    if ramp_shape not in _TRS_RAMP_SHAPES:
++        raise ValueError(f"ramp_shape must be one of {sorted(_TRS_RAMP_SHAPES)!r}; received {ramp_shape!r}.")
++
++    if iteration < warmup_iterations:
++        return 0.0
++    if rampup_iterations == 0:
++        return 1.0
++
++    progress = min(max((iteration - warmup_iterations) / rampup_iterations, 0.0), 1.0)
++    if ramp_shape == "linear":
++        return progress
++    return 0.5 * (1.0 - math.cos(math.pi * progress))
++
++
++def time_reversal_weighted_losses(
++    effective_mirror_coeff: float,
++    effective_value_coeff: float,
++    mean_symmetry_loss: float | None,
++    mean_tr_value_loss: float | None,
++) -> tuple[float, float, float]:
++    """Return weighted time-reversal loss contributions for per-update logging.
++
++    Args:
++        effective_mirror_coeff: Effective policy-equivariance loss coefficient.
++        effective_value_coeff: Effective value-consistency loss coefficient.
++        mean_symmetry_loss: Mean raw policy-equivariance loss for the PPO update.
++        mean_tr_value_loss: Mean raw value-consistency loss for the PPO update.
++
++    Returns:
++        Weighted policy, weighted value, and total auxiliary contributions.
++    """
++    weighted_symmetry = (
++        effective_mirror_coeff * mean_symmetry_loss
++        if effective_mirror_coeff > 0.0 and mean_symmetry_loss is not None
++        else 0.0
++    )
++    weighted_tr_value = (
++        effective_value_coeff * mean_tr_value_loss
++        if effective_value_coeff > 0.0 and mean_tr_value_loss is not None
++        else 0.0
++    )
++    return weighted_symmetry, weighted_tr_value, weighted_symmetry + weighted_tr_value
++
+ 
+ class TimeReversalPPO(PPO):
+-    """PPO with time-reversal warmup, action, and value losses."""
++    """PPO with scheduled auxiliary time-reversal policy and value losses."""
+ 
+     _MIN_ACTOR_STD = 1.0e-6
+     _MAX_ACTOR_STD = 1.0
+@@ -25,6 +100,7 @@ class TimeReversalPPO(PPO):
+ 
+     def __init__(self, *args, **kwargs) -> None:
+         super().__init__(*args, **kwargs)
++        self._validate_time_reversal_configuration()
+         self.current_learning_iteration = 0
+         self._time_reversal_update_count = 0
+         self._actor_mean_abort_count = 0
+@@ -38,7 +114,16 @@ class TimeReversalPPO(PPO):
+     def update(self) -> dict[str, float]:  # noqa: C901
+         """Run PPO updates with optional time-reversal regularization."""
+         time_reversal_enabled = self._time_reversal_enabled()
+-        time_reversal_active = time_reversal_enabled and self.current_learning_iteration >= self._warmup_iterations()
++        trs_scale, effective_mirror_coeff, effective_tr_value_coeff = self._effective_time_reversal_coefficients()
++        time_reversal_active = (
++            time_reversal_enabled
++            and trs_scale > 0.0
++            and (
++                bool(self.symmetry["use_data_augmentation"])
++                or effective_mirror_coeff > 0.0
++                or effective_tr_value_coeff > 0.0
++            )
++        )
+ 
+         mean_value_loss = 0
+         mean_surrogate_loss = 0
+@@ -158,11 +243,10 @@ class TimeReversalPPO(PPO):
+                     time_reversal_mask,
+                 )
+ 
+-                if self.symmetry["use_mirror_loss"]:
+-                    loss += self.symmetry["mirror_loss_coeff"] * symmetry_loss
+-                value_loss_coeff = float(self.symmetry.get("value_loss_coeff", 0.0))
+-                if value_loss_coeff > 0.0:
+-                    loss += value_loss_coeff * tr_value_loss
++                if effective_mirror_coeff > 0.0:
++                    loss += effective_mirror_coeff * symmetry_loss
++                if effective_tr_value_coeff > 0.0:
++                    loss += effective_tr_value_coeff * tr_value_loss
+ 
+             elif self.symmetry:
+                 symmetry_loss = symmetry_loss.detach()
+@@ -214,6 +298,13 @@ class TimeReversalPPO(PPO):
+         if mean_tr_value_loss is not None:
+             mean_tr_value_loss /= num_updates
+ 
++        weighted_symmetry, weighted_tr_value, weighted_trs_total = time_reversal_weighted_losses(
++            effective_mirror_coeff,
++            effective_tr_value_coeff,
++            mean_symmetry_loss,
++            mean_tr_value_loss,
++        )
++
+         action_diagnostics = self._action_diagnostics_from_storage()
+         self._update_actor_mean_safety(action_diagnostics["diagnostics/actor_mean_abs_max"])
+         self.storage.clear()
+@@ -225,6 +316,12 @@ class TimeReversalPPO(PPO):
+             "surrogate": mean_surrogate_loss,
+             "entropy": mean_entropy,
+             "actor_bound": mean_actor_bound_loss,
++            "trs_scale": trs_scale,
++            "effective_mirror_coeff": effective_mirror_coeff,
++            "effective_tr_value_coeff": effective_tr_value_coeff,
++            "weighted_symmetry": weighted_symmetry,
++            "weighted_tr_value": weighted_tr_value,
++            "weighted_trs_total": weighted_trs_total,
+         }
+         if self.rnd:
+             loss_dict["rnd"] = mean_rnd_loss
+@@ -237,13 +334,55 @@ class TimeReversalPPO(PPO):
+         return loss_dict
+ 
+     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
+-        """Load algorithm state and keep the TRS warmup counter aligned when possible."""
++        """Load algorithm state and align the TRS schedule to the next PPO update.
++
++        RSL-RL 5.0.1 saves ``iter`` after completing that indexed update. The
++        loaded mapping is ephemeral, so it is advanced here before the runner
++        restores its counter. This keeps the runner, TensorBoard step, and
++        auxiliary schedule aligned to the next absolute update.
++        """
+         load_iteration = super().load(loaded_dict, load_cfg, strict)
+         if load_iteration and "iter" in loaded_dict:
+-            self.current_learning_iteration = int(loaded_dict["iter"])
++            next_iteration = int(loaded_dict["iter"]) + 1
++            loaded_dict["iter"] = next_iteration
++            self.current_learning_iteration = next_iteration
+             self._time_reversal_update_count = self.current_learning_iteration
+         return load_iteration
+ 
++    def _validate_time_reversal_configuration(self) -> None:
++        """Validate target coefficients and schedule settings without mutating them."""
++        if self.symmetry is None:
++            return
++
++        for name in ("mirror_loss_coeff", "value_loss_coeff"):
++            value = self.symmetry.get(name, 0.0)
++            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)) or value < 0.0:
++                raise ValueError(f"{name} must be finite and nonnegative; received {value!r}.")
++
++        time_reversal_loss_scale(
++            iteration=0,
++            warmup_iterations=self.symmetry.get("warmup_iterations", 0),
++            rampup_iterations=self.symmetry.get("rampup_iterations", 0),
++            ramp_shape=self.symmetry.get("ramp_shape", "linear"),
++        )
++
++    def _effective_time_reversal_coefficients(self) -> tuple[float, float, float]:
++        """Return the shared schedule scale and effective actor/value coefficients."""
++        if not self._time_reversal_enabled():
++            return 0.0, 0.0, 0.0
++
++        scale = time_reversal_loss_scale(
++            iteration=self.current_learning_iteration,
++            warmup_iterations=self.symmetry.get("warmup_iterations", 0),
++            rampup_iterations=self.symmetry.get("rampup_iterations", 0),
++            ramp_shape=self.symmetry.get("ramp_shape", "linear"),
++        )
++        mirror_coeff = (
++            float(self.symmetry.get("mirror_loss_coeff", 0.0)) * scale if self.symmetry["use_mirror_loss"] else 0.0
++        )
++        value_coeff = float(self.symmetry.get("value_loss_coeff", 0.0)) * scale
++        return scale, mirror_coeff, value_coeff
++
+     def _time_reversal_enabled(self) -> bool:
+         if self.symmetry is None:
+             return False
+@@ -272,7 +411,11 @@ class TimeReversalPPO(PPO):
+     def _masked_mse(prediction: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+         mask = mask.expand_as(prediction)
+         denom = mask.sum().clamp_min(1.0)
+-        return ((prediction - target).pow(2) * mask).sum() / denom
++        selected = mask > 0.0
++        safe_prediction = torch.where(selected, prediction, torch.zeros_like(prediction))
++        safe_target = torch.where(selected, target, torch.zeros_like(target))
++        squared_error = (safe_prediction - safe_target).pow(2)
++        return squared_error.sum() / denom
+ 
+     def _clamp_actor_std(self) -> None:
+         """Keep RSL-RL's scalar Gaussian std parameter positive and finite."""
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+index b2d3b07e8..d8ec78d76 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py
+@@ -46,6 +46,7 @@ def leg_permutation_symmetry_penalty(
+     command_name: str,
+     joint_cfg: SceneEntityCfg,
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
++    phase_sync_tolerance: float = 0.02,
+ ) -> torch.Tensor:
+     """Penalize Dobot joint differences under phase-aligned leg permutations.
+ 
+@@ -54,6 +55,7 @@ def leg_permutation_symmetry_penalty(
+         command_name: Name of the gait command term.
+         joint_cfg: Robot joints in FL, FR, RL, RR order.
+         asset_cfg: Robot articulation.
++        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
+ 
+     Returns:
+         The negative leg-permutation symmetry penalty.
+@@ -67,6 +69,7 @@ def leg_permutation_symmetry_penalty(
+         leg_phase_index=DOBOT_X1_SYMM_LEG_PHASE_INDEX,
+         logical_joint_signs=DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
+         joint_ranges=DOBOT_X1_SYMM_JOINT_RANGES,
++        phase_sync_tolerance=phase_sync_tolerance,
+     )
+ 
+ 
+@@ -75,6 +78,7 @@ def morphological_symmetry_penalty(
+     command_name: str,
+     joint_cfg: SceneEntityCfg,
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
++    phase_sync_tolerance: float = 0.02,
+ ) -> torch.Tensor:
+     """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
+ 
+@@ -83,6 +87,7 @@ def morphological_symmetry_penalty(
+         command_name: Name of the gait command term.
+         joint_cfg: Robot joints in FL, FR, RL, RR order.
+         asset_cfg: Robot articulation.
++        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
+ 
+     Returns:
+         The negative leg-permutation symmetry penalty.
+@@ -100,4 +105,5 @@ def morphological_symmetry_penalty(
+         command_name=command_name,
+         joint_cfg=joint_cfg,
+         asset_cfg=asset_cfg,
++        phase_sync_tolerance=phase_sync_tolerance,
+     )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+index 78092b774..5ffdfd36b 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+@@ -7,6 +7,7 @@
+ 
+ from __future__ import annotations
+ 
++import math
+ import warnings
+ from collections.abc import Sequence
+ from dataclasses import MISSING, dataclass
+@@ -40,8 +41,41 @@ SYMM_QUADRUPED_LEG_JOINT_IDS = {
+ SYMM_QUADRUPED_LEG_PHASE_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
+ """Default mapping from logical leg tags to gait phase columns."""
+ 
+-SYMM_QUADRUPED_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_trs_v2"
+-"""Audit identifier for the shared gait and time-reversal phase semantics."""
++SYMM_QUADRUPED_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"
++"""Audit identifier for the continuous gait clock and transition-aligned desired signal."""
++
++SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION = "time_reversal_closed_v2"
++"""Audit identifier for the fore/hind-balanced, time-reversal-closed training gait library."""
++
++SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION = "canonical_six_play_v2"
++"""Audit identifier for the six-row playback library with front- and hind-spread half-bounds."""
++
++SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS = (
++    (0.0, 0.5, 0.5, 0.0),
++    (0.0, 0.0, 0.5, 0.5),
++    (0.13, -0.13, 0.5, 0.5),
++    (0.0, 0.0, 0.63, 0.37),
++    (-0.13, 0.13, 0.63, 0.37),
++    (0.13, -0.13, 0.63, 0.37),
++)
++"""Canonical trot, bound, mixed half-bound, and gallop rows used for playback."""
++
++SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS = (
++    (0.0, 0.5, 0.5, 0.0),
++    (0.0, 0.0, 0.5, 0.5),
++    (0.13, -0.13, 0.5, 0.5),
++    (-0.13, 0.13, 0.5, 0.5),
++    (0.0, 0.0, 0.63, 0.37),
++    (0.0, 0.0, 0.37, 0.63),
++    (-0.13, 0.13, 0.63, 0.37),
++    (0.13, -0.13, 0.63, 0.37),
++    (0.13, -0.13, 0.37, 0.63),
++    (-0.13, 0.13, 0.37, 0.63),
++)
++"""Fore/hind-balanced training rows closed under the shared time-reversal phase mapping."""
++
++SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS = (4.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
++"""Training row weights yielding equal trot, bound, half-bound, and gallop family mass."""
+ 
+ SYMM_QUADRUPED_POLICY_OBS_DIM = 72
+ """Dimension of the shared symmetric quadruped policy observation."""
+@@ -111,6 +145,7 @@ SYMM_QUADRUPED_LEG_PAIRS = (
+ """Default leg pairs compared by the leg-permutation symmetry reward."""
+ 
+ _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = False
++_FOOT_PERIODICITY_DEPRECATION_WARNED = False
+ 
+ 
+ @configclass
+@@ -145,8 +180,14 @@ class GaitVelocityCommandCfg(CommandTermCfg):
+     phase_mapping_version: str = SYMM_QUADRUPED_PHASE_MAPPING_VERSION
+     """Audit metadata identifying the gait and time-reversal phase semantics."""
+ 
++    gait_library_version: str = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
++    """Audit metadata identifying the configured gait-row library."""
++
+     resample_once_after_reset: bool = False
+-    """Whether velocity commands resample only once after the episode reset."""
++    """Whether to perform exactly one timed velocity resample after the reset-time sample.
++
++    When false, velocity resampling continues at every timer expiration.
++    """
+ 
+     @configclass
+     class Ranges:
+@@ -189,7 +230,17 @@ class GaitVelocityCommandCfg(CommandTermCfg):
+     """Time between gait parameter resampling [s]."""
+ 
+     resample_gait_once_after_reset: bool = False
+-    """Whether gait parameters resample only once after the episode reset."""
++    """Whether to perform exactly one timed gait resample after the reset-time sample.
++
++    When false, gait resampling continues at every timer expiration. This option
++    is bypassed when :attr:`gait_sequence_enabled` is true.
++    """
++
++    gait_sequence_enabled: bool = False
++    """Whether to cycle through :attr:`init_foot_thetas` in order using the global rollout clock."""
++
++    gait_sequence_duration_s: float = 5.0
++    """Duration [s] assigned to each gait when :attr:`gait_sequence_enabled` is true."""
+ 
+     calculate_from_sampling_curve: bool = True
+     """Whether to derive period and duty factor from commanded forward speed."""
+@@ -210,18 +261,18 @@ class GaitVelocityCommandCfg(CommandTermCfg):
+     """Smoothness coefficient for stance/swing indicator shaping."""
+ 
+     base_height_range: tuple[float, float] = (0.35, 0.45)
+-    """Nominal base height range [m] used by the old period/duty-factor curve."""
+-
+-    init_foot_thetas: tuple[tuple[float, float, float, float], ...] = (
+-        (0.0, 0.5, 0.5, 0.0),
+-        (0.0, 0.0, 0.5, 0.5),
+-        (0.13, -0.13, 0.5, 0.5),
+-        (-0.13, 0.13, 0.5, 0.5),
+-        (-0.13, 0.13, 0.63, 0.37),
+-        (0.13, -0.13, 0.63, 0.37),
+-    )
++    """Characteristic-length range [m] used by the dimensionless period/duty-factor curve."""
++
++    init_foot_thetas: tuple[tuple[float, float, float, float], ...] = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS
+     """Foot phase offsets for FL, FR, RL, and RR."""
+ 
++    init_foot_theta_weights: tuple[float, ...] | None = None
++    """Optional nonnegative sampling weights corresponding to :attr:`init_foot_thetas`.
++
++    When unset, gait rows are sampled uniformly for compatibility with custom
++    gait libraries.
++    """
++
+ 
+ class GaitVelocityCommand(CommandTerm):
+     """Velocity command generator with sampled symmetric gait clocks."""
+@@ -246,12 +297,54 @@ class GaitVelocityCommand(CommandTerm):
+         self._step_count = torch.zeros(self.num_envs, device=self.device)
+ 
+         self.init_foot_thetas = torch.tensor(cfg.init_foot_thetas, dtype=torch.float32, device=self.device)
++        if (
++            self.init_foot_thetas.ndim != 2
++            or self.init_foot_thetas.shape[0] == 0
++            or self.init_foot_thetas.shape[1] != 4
++        ):
++            raise ValueError(
++                "init_foot_thetas must be a nonempty two-dimensional array with four phase offsets per row; "
++                f"received shape {tuple(self.init_foot_thetas.shape)}."
++            )
++        if not torch.all(torch.isfinite(self.init_foot_thetas)):
++            raise ValueError("init_foot_thetas must contain only finite phase offsets.")
++
++        if cfg.init_foot_theta_weights is None:
++            self.foot_theta_sampling_weights = None
++        else:
++            sampling_weights = torch.tensor(cfg.init_foot_theta_weights, dtype=torch.float32, device=self.device)
++            if sampling_weights.ndim != 1 or sampling_weights.shape[0] != self.init_foot_thetas.shape[0]:
++                received_shape = (
++                    sampling_weights.shape[0] if sampling_weights.ndim == 1 else tuple(sampling_weights.shape)
++                )
++                raise ValueError(
++                    "init_foot_theta_weights must contain one value per gait row; "
++                    f"received {received_shape} weights for {self.init_foot_thetas.shape[0]} rows."
++                )
++            if not torch.all(torch.isfinite(sampling_weights)) or torch.any(sampling_weights < 0.0):
++                raise ValueError("init_foot_theta_weights must contain only finite, nonnegative values.")
++            weight_sum = sampling_weights.sum()
++            if not torch.isfinite(weight_sum) or weight_sum <= 0.0:
++                raise ValueError("init_foot_theta_weights must have a finite, positive sum.")
++            self.foot_theta_sampling_weights = sampling_weights / weight_sum
++
++        if isinstance(cfg.noise_level_theta, bool) or not isinstance(cfg.noise_level_theta, int):
++            raise ValueError("noise_level_theta must be a nonnegative integer.")
++        if cfg.noise_level_theta < 0:
++            raise ValueError("noise_level_theta must be a nonnegative integer.")
++        if not math.isfinite(cfg.noise_scale_theta) or cfg.noise_scale_theta < 0.0:
++            raise ValueError("noise_scale_theta must be finite and nonnegative.")
+         self.foot_thetas = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self.device)
+         self.duty_factors = torch.full((self.num_envs,), cfg.duty_factor, dtype=torch.float32, device=self.device)
+         self.gait_periods = torch.full((self.num_envs,), cfg.gait_period, dtype=torch.float32, device=self.device)
++        self._common_gait_phase_at_anchor = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
++        self._gait_phase_anchor_steps = torch.full(
++            (self.num_envs,), int(env.common_step_counter), dtype=torch.long, device=self.device
++        )
+         self.kappa = torch.full((self.num_envs,), cfg.kappa, dtype=torch.float32, device=self.device)
+         self.gait_time_left = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+         self.gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
++        self.gait_sequence_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+ 
+         self.metrics["gait_period"] = torch.zeros(self.num_envs, device=self.device)
+         self.metrics["duty_factor"] = torch.zeros(self.num_envs, device=self.device)
+@@ -266,43 +359,56 @@ class GaitVelocityCommand(CommandTerm):
+ 
+     def compute(self, dt: float):
+         self._update_metrics()
+-        self.time_left -= dt
+-        resample_env_ids = (self.time_left <= 0.0).nonzero().flatten()
++        active_env_ids = self._active_resampling_env_ids()
++        self.time_left[active_env_ids] -= dt
++        resample_env_ids = active_env_ids[self.time_left[active_env_ids] <= 0.0]
++        empty_env_ids = resample_env_ids[:0]
++        velocity_resampled_env_ids = empty_env_ids
+         if len(resample_env_ids) > 0:
+             if self.cfg.resample_once_after_reset:
+-                allowed_env_ids = resample_env_ids[self.command_counter[resample_env_ids] <= 1]
++                allowed_env_ids = resample_env_ids[self.command_counter[resample_env_ids] == 1]
+                 if len(allowed_env_ids) > 0:
+                     self._resample(allowed_env_ids)
+-                exhausted_env_ids = resample_env_ids[self.command_counter[resample_env_ids] > 1]
+-                if len(exhausted_env_ids) > 0:
+-                    self.time_left[exhausted_env_ids] = torch.inf
++                    velocity_resampled_env_ids = allowed_env_ids
++                self.time_left[resample_env_ids] = torch.inf
+             else:
+                 self._resample(resample_env_ids)
++                velocity_resampled_env_ids = resample_env_ids
+         self._update_command()
+ 
++        if self.cfg.gait_sequence_enabled:
++            gait_resampled_env_ids = self._update_gait_sequence(active_env_ids)
++            self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, gait_resampled_env_ids)
++            return
+         if self.cfg.resampling_time_gait <= 0.0:
++            self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, empty_env_ids)
+             return
+-        self.gait_time_left -= dt
+-        env_ids = (self.gait_time_left <= 0.0).nonzero(as_tuple=False).flatten()
++        gait_resampled_env_ids = empty_env_ids
++        self.gait_time_left[active_env_ids] -= dt
++        env_ids = active_env_ids[self.gait_time_left[active_env_ids] <= 0.0]
+         if len(env_ids) > 0:
+             if self.cfg.resample_gait_once_after_reset:
+-                allowed_env_ids = env_ids[self.gait_counter[env_ids] <= 1]
++                allowed_env_ids = env_ids[self.gait_counter[env_ids] == 1]
+                 if len(allowed_env_ids) > 0:
+                     self._resample_gait(allowed_env_ids)
+-                exhausted_env_ids = env_ids[self.gait_counter[env_ids] > 1]
+-                if len(exhausted_env_ids) > 0:
+-                    self.gait_time_left[exhausted_env_ids] = torch.inf
++                    gait_resampled_env_ids = allowed_env_ids
++                self.gait_time_left[env_ids] = torch.inf
+             else:
+                 self._resample_gait(env_ids)
++                gait_resampled_env_ids = env_ids
++        self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, gait_resampled_env_ids)
+ 
+     def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, float]:
+         if env_ids is None:
+             env_ids = slice(None)
+-
+-        denom = self._step_count[env_ids].clamp_min(1.0)
+-        mean_error_xy = self._error_xy_sum[env_ids] / denom
+-        mean_error_yaw = self._error_yaw_sum[env_ids] / denom
+-        command = self.vel_command_b[env_ids]
++        env_ids_tensor = self._resolve_env_ids(env_ids)
++        self._common_gait_phase_at_anchor[env_ids_tensor] = 0.0
++        self._gait_phase_anchor_steps[env_ids_tensor] = int(self._env.common_step_counter)
++
++        denom = self._step_count[env_ids_tensor].clamp_min(1.0)
++        mean_error_xy = self._error_xy_sum[env_ids_tensor] / denom
++        mean_error_yaw = self._error_yaw_sum[env_ids_tensor] / denom
++        command = self.vel_command_b[env_ids_tensor]
+         xy_success_threshold = (
+             self.cfg.vel_xy_success_threshold
+             + self.cfg.vel_xy_success_rel_threshold * torch.linalg.norm(command[:, :2], dim=-1)
+@@ -310,29 +416,43 @@ class GaitVelocityCommand(CommandTerm):
+         yaw_success_threshold = self.cfg.vel_yaw_success_threshold + self.cfg.vel_yaw_success_rel_threshold * torch.abs(
+             command[:, 2]
+         )
+-        self.metrics["error_vel_xy"][env_ids] = mean_error_xy
+-        self.metrics["error_vel_yaw"][env_ids] = mean_error_yaw
+-        self.metrics["success_threshold_vel_xy"][env_ids] = xy_success_threshold
+-        self.metrics["success_threshold_vel_yaw"][env_ids] = yaw_success_threshold
+-        self.metrics["success_rate"][env_ids] = (
++        self.metrics["error_vel_xy"][env_ids_tensor] = mean_error_xy
++        self.metrics["error_vel_yaw"][env_ids_tensor] = mean_error_yaw
++        self.metrics["success_threshold_vel_xy"][env_ids_tensor] = xy_success_threshold
++        self.metrics["success_threshold_vel_yaw"][env_ids_tensor] = yaw_success_threshold
++        self.metrics["success_rate"][env_ids_tensor] = (
+             (mean_error_xy < xy_success_threshold) & (mean_error_yaw < yaw_success_threshold)
+         ).float()
+ 
+-        extras = super().reset(env_ids)
++        extras = super().reset(env_ids_tensor)
+         self._env.extras.setdefault("log", {})["Metrics/success_rate"] = extras.pop("success_rate")
+-        self._error_xy_sum[env_ids] = 0.0
+-        self._error_yaw_sum[env_ids] = 0.0
+-        self._step_count[env_ids] = 0.0
+-        self.gait_counter[env_ids] = 0
+-        self._resample_gait(env_ids)
++        self._error_xy_sum[env_ids_tensor] = 0.0
++        self._error_yaw_sum[env_ids_tensor] = 0.0
++        self._step_count[env_ids_tensor] = 0.0
++        self.gait_counter[env_ids_tensor] = 0
++        if self.cfg.gait_sequence_enabled:
++            self._update_gait_sequence(env_ids_tensor, force=True)
++        else:
++            self.gait_sequence_indices[env_ids_tensor] = -1
++            self._resample_gait(env_ids_tensor)
+         return extras
+ 
++    def common_gait_phases(self) -> torch.Tensor:
++        """Return the continuous piecewise-integrated gait clock in cycle units.
++
++        The clock advances from each environment's anchor using the period that
++        is active for that interval. Timing changes re-anchor before replacing
++        the period, preserving common phase at the update boundary.
++        """
++        elapsed_steps = self._env.common_step_counter - self._gait_phase_anchor_steps
++        elapsed_time = elapsed_steps.to(dtype=self.gait_periods.dtype) * self._env.step_dt
++        return self._common_gait_phase_at_anchor + elapsed_time / self.gait_periods.clamp_min(
++            torch.finfo(self.gait_periods.dtype).eps
++        )
++
+     def foot_phases(self) -> torch.Tensor:
+         """Foot phases for FL, FR, RL, and RR in cycle units."""
+-        phase_ratio = (
+-            self._env.episode_length_buf.to(dtype=self.gait_periods.dtype) * self._env.step_dt / self.gait_periods
+-        )
+-        return compute_same_gait_foot_phases(phase_ratio.unsqueeze(-1), self.foot_thetas)
++        return compute_same_gait_foot_phases(self.common_gait_phases().unsqueeze(-1), self.foot_thetas)
+ 
+     def phase_ratios(self) -> torch.Tensor:
+         """Swing and stance phase ratios."""
+@@ -351,19 +471,83 @@ class GaitVelocityCommand(CommandTerm):
+         )
+ 
+     def _resample_gait(self, env_ids: Sequence[int]):
++        if self.cfg.gait_sequence_enabled:
++            self._update_gait_sequence(env_ids, force=True)
++            return
++        env_ids_tensor = self._resolve_env_ids(env_ids)
++        if len(env_ids_tensor) == 0:
++            return
++
++        if self.foot_theta_sampling_weights is None:
++            choices = torch.randint(
++                low=0, high=self.init_foot_thetas.shape[0], size=(len(env_ids_tensor),), device=self.device
++            )
++        else:
++            choices = torch.multinomial(
++                self.foot_theta_sampling_weights,
++                num_samples=len(env_ids_tensor),
++                replacement=True,
++            )
++        self._assign_gait(env_ids_tensor, choices, add_theta_noise=self.cfg.add_noise_theta)
++        self.gait_time_left[env_ids_tensor] = self.cfg.resampling_time_gait
++        self.gait_counter[env_ids_tensor] += 1
++
++    def _update_gait_sequence(
++        self,
++        env_ids: Sequence[int] | slice | None = None,
++        *,
++        force: bool = False,
++    ) -> torch.Tensor:
++        """Apply the globally timed gait sequence and return changed environment IDs."""
++        duration_s = self.cfg.gait_sequence_duration_s
++        if not math.isfinite(duration_s) or duration_s <= 0.0:
++            raise ValueError(f"gait_sequence_duration_s must be finite and positive; received {duration_s!r}.")
++        if self.init_foot_thetas.shape[0] == 0:
++            raise ValueError("init_foot_thetas must contain at least one gait for fixed-sequence playback.")
++
++        steps_per_gait = round(duration_s / self._env.step_dt)
++        if steps_per_gait < 1:
++            raise ValueError(
++                "gait_sequence_duration_s must span at least one environment step; "
++                f"received duration {duration_s!r} s with step_dt {self._env.step_dt!r} s."
++            )
++        if env_ids is None:
++            env_ids = slice(None)
+         if isinstance(env_ids, slice):
+-            env_ids_tensor = torch.arange(self.num_envs, device=self.device)
++            env_ids_tensor = torch.arange(self.num_envs, device=self.device)[env_ids]
+         else:
+             env_ids_tensor = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+         if len(env_ids_tensor) == 0:
+-            return
+-
+-        choices = torch.randint(
+-            low=0, high=self.init_foot_thetas.shape[0], size=(len(env_ids_tensor),), device=self.device
++            return env_ids_tensor
++
++        gait_index = (self._env.common_step_counter // steps_per_gait) % self.init_foot_thetas.shape[0]
++        choices = torch.full((len(env_ids_tensor),), gait_index, dtype=torch.long, device=self.device)
++        changed = (
++            torch.ones_like(choices, dtype=torch.bool)
++            if force
++            else self.gait_sequence_indices[env_ids_tensor] != choices
+         )
++        if not torch.any(changed):
++            return env_ids_tensor[:0]
++
++        changed_env_ids = env_ids_tensor[changed]
++        changed_choices = choices[changed]
++        self._assign_gait(changed_env_ids, changed_choices, add_theta_noise=False)
++        self.gait_sequence_indices[changed_env_ids] = changed_choices
++        self.gait_time_left[changed_env_ids] = torch.inf
++        return changed_env_ids
++
++    def _assign_gait(
++        self,
++        env_ids_tensor: torch.Tensor,
++        choices: torch.Tensor,
++        *,
++        add_theta_noise: bool,
++    ) -> None:
++        """Assign gait rows and refresh velocity-derived timing."""
+         self.foot_thetas[env_ids_tensor] = self.init_foot_thetas[choices]
+ 
+-        if self.cfg.add_noise_theta:
++        if add_theta_noise and self.cfg.noise_level_theta > 0:
+             theta_noise = torch.randint(
+                 low=-self.cfg.noise_level_theta,
+                 high=self.cfg.noise_level_theta,
+@@ -372,21 +556,8 @@ class GaitVelocityCommand(CommandTerm):
+             ).to(torch.float32)
+             self.foot_thetas[env_ids_tensor] += theta_noise * self.cfg.noise_scale_theta
+ 
+-        if self.cfg.calculate_from_sampling_curve:
+-            cmd_x = self.command[env_ids_tensor, 0]
+-            self.gait_periods[env_ids_tensor] = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
+-            self.duty_factors[env_ids_tensor] = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(
+-                min=0.1, max=0.9
+-            )
+-        else:
+-            self.gait_periods[env_ids_tensor] = self.cfg.gait_period
+-            self.duty_factors[env_ids_tensor] = self.cfg.duty_factor
+-
+         self.kappa[env_ids_tensor] = self.cfg.kappa
+-        self.gait_time_left[env_ids_tensor] = self.cfg.resampling_time_gait
+-        self.gait_counter[env_ids_tensor] += 1
+-        self.metrics["gait_period"][env_ids_tensor] = self.gait_periods[env_ids_tensor]
+-        self.metrics["duty_factor"][env_ids_tensor] = self.duty_factors[env_ids_tensor]
++        self._update_gait_timing(env_ids_tensor)
+ 
+     def _update_metrics(self):
+         error_xy = torch.linalg.norm(self.vel_command_b[:, :2] - self.robot.data.root_lin_vel_b.torch[:, :2], dim=-1)
+@@ -396,17 +567,20 @@ class GaitVelocityCommand(CommandTerm):
+         self._step_count += 1.0
+ 
+     def _resample_command(self, env_ids: Sequence[int]):
+-        r = torch.empty(len(env_ids), device=self.device)
+-        self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
+-        self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
+-        self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
++        env_ids_tensor = self._resolve_env_ids(env_ids)
++        r = torch.empty(len(env_ids_tensor), device=self.device)
++        self.vel_command_b[env_ids_tensor, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
++        self.vel_command_b[env_ids_tensor, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
++        self.vel_command_b[env_ids_tensor, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
+         if self.cfg.min_xy_command_norm > 0.0:
+-            command_norm = torch.linalg.norm(self.vel_command_b[env_ids, :2], dim=1)
+-            self.vel_command_b[env_ids, :2] *= (command_norm > self.cfg.min_xy_command_norm).unsqueeze(1)
++            command_norm = torch.linalg.norm(self.vel_command_b[env_ids_tensor, :2], dim=1)
++            self.vel_command_b[env_ids_tensor, :2] *= (command_norm > self.cfg.min_xy_command_norm).unsqueeze(1)
+         if self.cfg.heading_command:
+-            self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
+-            self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
+-        self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
++            self.heading_target[env_ids_tensor] = r.uniform_(*self.cfg.ranges.heading)
++            self.is_heading_env[env_ids_tensor] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
++        self.is_standing_env[env_ids_tensor] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
++        standing_env_ids = env_ids_tensor[self.is_standing_env[env_ids_tensor]]
++        self.vel_command_b[standing_env_ids, :] = 0.0
+ 
+     def _update_command(self):
+         if self.cfg.heading_command:
+@@ -422,20 +596,95 @@ class GaitVelocityCommand(CommandTerm):
+         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
+         self.vel_command_b[standing_env_ids, :] = 0.0
+ 
+-    def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
++    def _resolve_env_ids(self, env_ids: Sequence[int] | slice) -> torch.Tensor:
++        """Resolve environment indices to a device-local tensor."""
++        if isinstance(env_ids, slice):
++            return torch.arange(self.num_envs, device=self.device)[env_ids]
++        return torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
++
++    def _active_resampling_env_ids(self) -> torch.Tensor:
++        """Return environments eligible for post-reward command scheduling."""
++        reset_buf = getattr(getattr(self, "_env", None), "reset_buf", None)
++        if reset_buf is None:
++            return torch.arange(len(self.time_left), device=self.time_left.device)
++        return (~reset_buf.to(dtype=torch.bool)).nonzero(as_tuple=False).flatten()
++
++    def _update_velocity_resampled_gait_timing(
++        self,
++        velocity_resampled_env_ids: torch.Tensor,
++        gait_resampled_env_ids: torch.Tensor,
++    ) -> None:
++        """Refresh timing for velocity changes not already refreshed by a gait change."""
++        if len(velocity_resampled_env_ids) == 0:
++            return
++        if len(gait_resampled_env_ids) == 0:
++            self._update_gait_timing(velocity_resampled_env_ids)
++            return
++
++        gait_already_refreshed = torch.zeros(self.num_envs, dtype=torch.bool, device=velocity_resampled_env_ids.device)
++        gait_already_refreshed[gait_resampled_env_ids] = True
++        velocity_only_env_ids = velocity_resampled_env_ids[~gait_already_refreshed[velocity_resampled_env_ids]]
++        if len(velocity_only_env_ids) > 0:
++            self._update_gait_timing(velocity_only_env_ids)
++
++    def _update_gait_timing(self, env_ids: Sequence[int] | slice) -> None:
++        """Update period and duty factor after velocity or gait resampling."""
++        env_ids_tensor = self._resolve_env_ids(env_ids)
++        if len(env_ids_tensor) == 0:
++            return
++
++        self._anchor_common_gait_phase(env_ids_tensor)
++
++        if self.cfg.calculate_from_sampling_curve:
++            cmd_x = self.command[env_ids_tensor, 0]
++            gait_periods = self._compute_period_from_forward_velocity(cmd_x).clamp_min(0.1)
++            duty_factors = self._compute_duty_factor_from_forward_velocity(cmd_x).clamp(min=0.1, max=0.9)
++        else:
++            gait_periods = torch.full_like(self.gait_periods[env_ids_tensor], self.cfg.gait_period)
++            duty_factors = torch.full_like(self.duty_factors[env_ids_tensor], self.cfg.duty_factor)
++        self.gait_periods[env_ids_tensor] = gait_periods
++        self.duty_factors[env_ids_tensor] = duty_factors
++        self.metrics["gait_period"][env_ids_tensor] = gait_periods
++        self.metrics["duty_factor"][env_ids_tensor] = duty_factors
++
++    def _anchor_common_gait_phase(self, env_ids: Sequence[int] | slice) -> None:
++        """Preserve current common phase before a timing change."""
++        env_ids_tensor = self._resolve_env_ids(env_ids)
++        if len(env_ids_tensor) == 0:
++            return
++        current_phase = torch.remainder(self.common_gait_phases()[env_ids_tensor], 1.0)
++        self._common_gait_phase_at_anchor[env_ids_tensor] = current_phase
++        self._gait_phase_anchor_steps[env_ids_tensor] = int(self._env.common_step_counter)
++
++    def _dimensionless_forward_speed(
++        self, cmd_forward_velocity: torch.Tensor
++    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
++        """Return dimensionless speed with its characteristic length and gravity."""
+         lower_bound, upper_bound = self.cfg.base_height_range
+-        length = torch.tensor((lower_bound + upper_bound) * 0.5, device=self.device, dtype=torch.float32)
+-        gravity = torch.tensor(9.81, device=self.device, dtype=torch.float32)
++        if (
++            not math.isfinite(lower_bound)
++            or not math.isfinite(upper_bound)
++            or lower_bound <= 0.0
++            or upper_bound <= 0.0
++            or lower_bound > upper_bound
++        ):
++            raise ValueError(
++                "base_height_range must contain finite, positive, ordered characteristic lengths; "
++                f"received {self.cfg.base_height_range!r}."
++            )
++        length = cmd_forward_velocity.new_tensor((lower_bound + upper_bound) * 0.5)
++        gravity = cmd_forward_velocity.new_tensor(9.81)
+         velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
++        return velocity_star, length, gravity
++
++    def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
++        velocity_star, length, gravity = self._dimensionless_forward_speed(cmd_forward_velocity)
+         random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
+         period_star = 2.55 * torch.exp(-0.975 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
+         return period_star * torch.sqrt(length / gravity)
+ 
+     def _compute_duty_factor_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
+-        lower_bound, upper_bound = self.cfg.base_height_range
+-        length = torch.tensor((lower_bound + upper_bound) * 0.5, device=self.device, dtype=torch.float32)
+-        gravity = torch.tensor(9.81, device=self.device, dtype=torch.float32)
+-        velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
++        velocity_star, _, _ = self._dimensionless_forward_speed(cmd_forward_velocity)
+         random_scale = torch.rand_like(cmd_forward_velocity) * 2.0 - 1.0 if self.cfg.add_noise_period else 0.0
+         return 0.5588 * torch.exp(-0.681 * velocity_star) * (1.0 + random_scale * velocity_star * 0.20)
+ 
+@@ -785,7 +1034,7 @@ def base_height_range_penalty(
+     return -(1.0 - torch.exp(-5.0 * deviation))
+ 
+ 
+-def foot_periodicity_penalty(
++def foot_phase_penalty(
+     env: ManagerBasedRLEnv,
+     command_name: str,
+     feet_cfg: SceneEntityCfg,
+@@ -794,18 +1043,70 @@ def foot_periodicity_penalty(
+     force_scale: float = 0.001,
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+ ) -> torch.Tensor:
+-    """Penalty for foot contact in swing and foot speed in stance."""
++    """Penalize foot contact in swing and foot speed in stance according to gait phase.
++
++    Args:
++        env: The environment instance.
++        command_name: Name of the gait command term.
++        feet_cfg: Foot bodies in FL, FR, RL, and RR order.
++        foot_sensor_names: Single-body foot contact sensor names.
++        foot_sensor_body_names: Expected body name for each contact sensor.
++        force_scale: Contact-force shaping scale [1/N].
++        asset_cfg: Robot articulation configuration.
++
++    Returns:
++        The non-positive gait-phase penalty summed over the configured feet.
++    """
+     asset: Articulation = env.scene[asset_cfg.name]
+     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+-    reward = torch.zeros(env.num_envs, device=env.device)
++    foot_speeds = torch.linalg.norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
++    speed_weights = gait_command.periodic_speed_weights()
++    if foot_speeds.shape[-1] == 0 or speed_weights.shape != foot_speeds.shape:
++        raise ValueError(
++            "Foot speeds and periodic weights must contain the same nonzero set of feet; "
++            f"received shapes {tuple(foot_speeds.shape)} and {tuple(speed_weights.shape)}."
++        )
++    per_foot_penalty = (1.0 - torch.exp(-2.0 * foot_speeds)) * speed_weights
+     if foot_sensor_names is not None:
+         foot_forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
+-        reward += torch.sum(
+-            (1.0 - torch.exp(-force_scale * foot_forces)) * gait_command.periodic_force_weights(), dim=-1
++        force_weights = gait_command.periodic_force_weights()
++        if foot_forces.shape != foot_speeds.shape or force_weights.shape != foot_speeds.shape:
++            raise ValueError(
++                "Foot forces, speeds, and periodic weights must use the same foot layout; "
++                f"received shapes {tuple(foot_forces.shape)}, {tuple(foot_speeds.shape)}, "
++                f"and {tuple(force_weights.shape)}."
++            )
++        per_foot_penalty += (1.0 - torch.exp(-force_scale * foot_forces)) * force_weights
++    return per_foot_penalty.sum(dim=-1)
++
++
++def foot_periodicity_penalty(
++    env: ManagerBasedRLEnv,
++    command_name: str,
++    feet_cfg: SceneEntityCfg,
++    foot_sensor_names: Sequence[str] | None = None,
++    foot_sensor_body_names: Sequence[str] | None = None,
++    force_scale: float = 0.001,
++    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
++) -> torch.Tensor:
++    """Call :func:`foot_phase_penalty` through its deprecated name."""
++    global _FOOT_PERIODICITY_DEPRECATION_WARNED
++    if not _FOOT_PERIODICITY_DEPRECATION_WARNED:
++        warnings.warn(
++            "foot_periodicity_penalty() is deprecated; use foot_phase_penalty().",
++            DeprecationWarning,
++            stacklevel=2,
+         )
+-    foot_speeds = torch.linalg.norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
+-    reward += torch.sum((1.0 - torch.exp(-2.0 * foot_speeds)) * gait_command.periodic_speed_weights(), dim=-1)
+-    return reward
++        _FOOT_PERIODICITY_DEPRECATION_WARNED = True
++    return foot_phase_penalty(
++        env,
++        command_name=command_name,
++        feet_cfg=feet_cfg,
++        foot_sensor_names=foot_sensor_names,
++        foot_sensor_body_names=foot_sensor_body_names,
++        force_scale=force_scale,
++        asset_cfg=asset_cfg,
++    )
+ 
+ 
+ def contact_collision_count(
+@@ -1141,8 +1442,9 @@ def leg_permutation_symmetry_penalty(
+     logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
+     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
+     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
++    phase_sync_tolerance: float = 0.02,
+ ) -> torch.Tensor:
+-    """Penalize phase-aligned joint differences under leg permutations.
++    """Penalize joint differences for leg pairs commanded in synchrony.
+ 
+     Args:
+         env: The environment instance.
+@@ -1154,37 +1456,50 @@ def leg_permutation_symmetry_penalty(
+         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
+         joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
+         leg_pairs: Logical leg pairs to compare.
++        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
+ 
+     Returns:
+-        The negative leg-permutation symmetry penalty.
++        The negative penalty after averaging over the active synchronous leg pairs.
+     """
+     asset: Articulation = env.scene[asset_cfg.name]
+     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+     joint_pos = asset.data.joint_pos.torch[:, joint_cfg.joint_ids]
+     leg_joint_ids = leg_joint_ids or SYMM_QUADRUPED_LEG_JOINT_IDS
+     leg_phase_index = leg_phase_index or SYMM_QUADRUPED_LEG_PHASE_INDEX
+-    logical_signs = torch.tensor(logical_joint_signs, dtype=torch.float32, device=env.device)
++    logical_signs = torch.tensor(logical_joint_signs, dtype=joint_pos.dtype, device=joint_pos.device)
+     joint_pos = joint_pos.reshape(joint_pos.shape[0], len(logical_joint_signs), -1) * logical_signs.unsqueeze(0)
+     joint_pos = joint_pos.reshape(joint_pos.shape[0], -1)
+-    joint_range = torch.tensor(joint_ranges, dtype=torch.float32, device=env.device)
++    joint_range = torch.tensor(joint_ranges, dtype=joint_pos.dtype, device=joint_pos.device)
++
++    if not 0.0 <= phase_sync_tolerance <= 0.5:
++        raise ValueError(f"Expected phase_sync_tolerance to be within [0.0, 0.5] cycles, got {phase_sync_tolerance}.")
+ 
+-    def leg_permutation_error(tag_a: str, tag_b: str) -> torch.Tensor:
+-        sign = torch.tensor([-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0], device=env.device)
++    def leg_permutation_error(tag_a: str, tag_b: str) -> tuple[torch.Tensor, torch.Tensor]:
++        sign = torch.tensor(
++            [-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0],
++            dtype=joint_pos.dtype,
++            device=joint_pos.device,
++        )
+         phase_a = gait_command.foot_thetas[:, leg_phase_index[tag_a]]
+         phase_b = gait_command.foot_thetas[:, leg_phase_index[tag_b]]
+-        phase_delta = torch.atan2(torch.sin(phase_a - phase_b), torch.cos(phase_a - phase_b))
+-        phase_weight = torch.exp(-((phase_delta / 0.25) ** 2)).unsqueeze(-1)
++        phase_delta = phase_a - phase_b
++        phase_distance = torch.minimum(torch.remainder(phase_delta, 1.0), torch.remainder(-phase_delta, 1.0))
++        is_synchronous = phase_distance <= phase_sync_tolerance
+         joint_a = joint_pos[:, leg_joint_ids[tag_a]]
+         joint_b = joint_pos[:, leg_joint_ids[tag_b]]
+         error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b) / (joint_range.unsqueeze(0) + 1.0e-6)
+-        error = error * phase_weight
+         weights = torch.softmax(error / 0.5, dim=-1)
+-        return torch.sum(weights * error, dim=-1)
++        pair_error = torch.sum(weights * error, dim=-1)
++        return torch.where(is_synchronous, pair_error, 0.0), is_synchronous
+ 
+-    error_sum = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
++    error_sum = torch.zeros(env.num_envs, dtype=joint_pos.dtype, device=joint_pos.device)
++    synchronous_pair_count = torch.zeros_like(error_sum)
+     for tag_a, tag_b in leg_pairs:
+-        error_sum += leg_permutation_error(tag_a, tag_b)
+-    return -(1.0 - torch.exp(-5.0 * error_sum / max(len(leg_pairs), 1)))
++        pair_error, is_synchronous = leg_permutation_error(tag_a, tag_b)
++        error_sum += pair_error
++        synchronous_pair_count += is_synchronous
++    mean_error = error_sum / synchronous_pair_count.clamp_min(1.0)
++    return -(1.0 - torch.exp(-5.0 * mean_error))
+ 
+ 
+ def morphological_symmetry_penalty(
+@@ -1197,6 +1512,7 @@ def morphological_symmetry_penalty(
+     logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
+     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
+     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
++    phase_sync_tolerance: float = 0.02,
+ ) -> torch.Tensor:
+     """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
+ 
+@@ -1210,6 +1526,7 @@ def morphological_symmetry_penalty(
+         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
+         joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
+         leg_pairs: Logical leg pairs to compare.
++        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
+ 
+     Returns:
+         The negative leg-permutation symmetry penalty.
+@@ -1232,6 +1549,7 @@ def morphological_symmetry_penalty(
+         logical_joint_signs=logical_joint_signs,
+         joint_ranges=joint_ranges,
+         leg_pairs=leg_pairs,
++        phase_sync_tolerance=phase_sync_tolerance,
+     )
+ 
+ 
+diff --git a/source/isaaclab_tasks/test/test_symm_locomotion_cli.py b/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+index 9e4e8f130..f216ab24c 100644
+--- a/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
++++ b/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+@@ -8,9 +8,13 @@
+ from __future__ import annotations
+ 
+ import importlib.util
++import os
++import subprocess
+ import sys
+ from pathlib import Path
+ 
++import pytest
++
+ 
+ def _load_module(module_name: str, path: Path):
+     spec = importlib.util.spec_from_file_location(module_name, path)
+@@ -48,6 +52,201 @@ def test_train_dry_run_uses_selected_robot_task(capsys):
+     assert " 1" in captured.out
+ 
+ 
++def test_main_rejects_unsupported_launcher_option_before_delimiter(capsys):
++    symm_cli = _load_symm_cli()
++
++    with pytest.raises(SystemExit) as exc_info:
++        symm_cli.main(["train", "--robot", "go2", "--dry-run", "--unsupported-launcher-option"])
++
++    captured = capsys.readouterr()
++    assert exc_info.value.code == 2
++    assert "unrecognized arguments: --unsupported-launcher-option" in captured.err
++
++
++def test_main_removes_delimiter_and_preserves_forwarded_suffix(monkeypatch):
++    symm_cli = _load_symm_cli()
++    captured = {}
++
++    def fake_run_isaaclab(args, isaaclab_args):
++        captured["args"] = args
++        captured["isaaclab_args"] = isaaclab_args
++        return 0
++
++    monkeypatch.setattr(symm_cli, "run_isaaclab", fake_run_isaaclab)
++
++    result = symm_cli.main(
++        [
++            "train",
++            "--robot",
++            "go2",
++            "--no-conda-run",
++            "--",
++            "--headless",
++            "env.commands.base_velocity.ranges.lin_vel_x=(-1.0,2.0)",
++        ]
++    )
++
++    assert result == 0
++    assert captured["isaaclab_args"][-2:] == [
++        "--headless",
++        "env.commands.base_velocity.ranges.lin_vel_x=(-1.0,2.0)",
++    ]
++    assert "--" not in captured["isaaclab_args"]
++
++
++def test_main_preserves_delimiter_free_hydra_overrides(monkeypatch):
++    symm_cli = _load_symm_cli()
++    captured = {}
++
++    def fake_run_isaaclab(args, isaaclab_args):
++        captured["isaaclab_args"] = isaaclab_args
++        return 0
++
++    monkeypatch.setattr(symm_cli, "run_isaaclab", fake_run_isaaclab)
++
++    result = symm_cli.main(
++        [
++            "train",
++            "--robot",
++            "go2",
++            "--no-conda-run",
++            "env.commands.base_velocity.ranges.lin_vel_x=(-1.0,2.0)",
++        ]
++    )
++
++    assert result == 0
++    assert captured["isaaclab_args"][-1] == "env.commands.base_velocity.ranges.lin_vel_x=(-1.0,2.0)"
++
++
++def test_train_ramp_and_expected_branch_options(monkeypatch):
++    symm_cli = _load_symm_cli()
++    captured = {}
++
++    monkeypatch.setattr(symm_cli, "git_branch", lambda: "jding/symm-72d-trs-milestone")
++
++    def fake_run_isaaclab(args, isaaclab_args):
++        captured["args"] = args
++        captured["isaaclab_args"] = isaaclab_args
++        return 0
++
++    monkeypatch.setattr(symm_cli, "run_isaaclab", fake_run_isaaclab)
++
++    result = symm_cli.main(
++        [
++            "train",
++            "--robot",
++            "go2",
++            "--seed",
++            "42",
++            "--expected-branch",
++            "jding/symm-72d-trs-milestone",
++            "--tr-rampup-iterations",
++            "2000",
++            "--tr-ramp-shape",
++            "half_cosine",
++            "--no-conda-run",
++        ]
++    )
++
++    assert result == 0
++    assert captured["args"].expected_branch == "jding/symm-72d-trs-milestone"
++    assert captured["args"].tr_rampup_iterations == 2000
++    assert captured["args"].tr_ramp_shape == "half_cosine"
++    assert "agent.algorithm.symmetry_cfg.rampup_iterations=2000" in captured["isaaclab_args"]
++    assert "agent.algorithm.symmetry_cfg.ramp_shape=half_cosine" in captured["isaaclab_args"]
++
++
++def test_repo_subprocess_environment_prefers_launcher_checkout(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    repo_root = tmp_path / "launcher_checkout"
++    source_root = repo_root / "source"
++    local_projects = [source_root / "isaaclab_rl", source_root / "isaaclab_tasks"]
++    for project in local_projects:
++        package = project / project.name
++        package.mkdir(parents=True)
++        (package / "__init__.py").touch()
++    stale_checkout = tmp_path / "stale_checkout"
++    monkeypatch.setattr(symm_cli, "repo_root", lambda: repo_root)
++    monkeypatch.setenv("PYTHONPATH", str(stale_checkout))
++
++    environment = symm_cli.repo_subprocess_environment()
++
++    python_paths = environment["PYTHONPATH"].split(os.pathsep)
++    assert python_paths[:2] == [str(path.resolve()) for path in local_projects]
++    assert python_paths[2:] == [str(stale_checkout)]
++
++
++def test_run_isaaclab_forwards_checkout_environment(monkeypatch):
++    symm_cli = _load_symm_cli()
++    args = symm_cli.build_parser().parse_args(["train", "--robot", "go2", "--no-conda-run"])
++    args.robot_spec = symm_cli.get_robot(args.robot)
++    expected_environment = {"PYTHONPATH": "launcher-checkout"}
++    captured = {}
++
++    def fake_run(command, **kwargs):
++        captured["command"] = command
++        captured.update(kwargs)
++        return type("Result", (), {"returncode": 0})()
++
++    monkeypatch.setattr(symm_cli, "repo_subprocess_environment", lambda: expected_environment)
++    monkeypatch.setattr(symm_cli.subprocess, "run", fake_run)
++
++    result = symm_cli.run_isaaclab(args, ["train"])
++
++    assert result == 0
++    assert captured["env"] is expected_environment
++    assert captured["cwd"] == symm_cli.repo_root()
++
++
++def test_expected_branch_rejects_wrong_checkout(monkeypatch):
++    symm_cli = _load_symm_cli()
++    parser = symm_cli.build_parser()
++    args = parser.parse_args(["train", "--robot", "go2", "--expected-branch", "expected"])
++    args.robot_spec = symm_cli.get_robot(args.robot)
++    monkeypatch.setattr(symm_cli, "git_branch", lambda: "main")
++
++    with pytest.raises(ValueError, match="Expected branch 'expected'.*current branch is 'main'"):
++        symm_cli.validate_expected_branch(args)
++
++
++@pytest.mark.skipif(os.name != "nt", reason="PowerShell wrapper regression is Windows-specific")
++def test_powershell_train_wrapper_forwards_python_style_options():
++    repo_root = Path(__file__).resolve().parents[3]
++    wrapper = repo_root / "scripts" / "symm_locomotion" / "train.ps1"
++    environment = os.environ.copy()
++    environment["CONDA_PREFIX"] = str(repo_root / "fake_active_base_environment")
++    environment["CONDA_DEFAULT_ENV"] = "base"
++
++    result = subprocess.run(
++        [
++            "powershell.exe",
++            "-NoProfile",
++            "-ExecutionPolicy",
++            "Bypass",
++            "-File",
++            str(wrapper),
++            "--robot",
++            "x1",
++            "--smoke",
++            "--dry-run",
++            "--no-conda-run",
++            "--",
++            "--headless",
++            "env.scene.num_envs=1",
++        ],
++        cwd=repo_root,
++        env=environment,
++        capture_output=True,
++        check=False,
++        text=True,
++    )
++
++    assert result.returncode == 0, result.stderr
++    assert "[symm_locomotion:x1]" in result.stdout
++    assert "Isaac-Velocity-Flat-Dobot-X1-Symm-v0" in result.stdout
++    assert "--headless env.scene.num_envs=1" in result.stdout
++
++
+ def test_train_defaults_apply_shared_scale_and_trs_settings():
+     symm_cli = _load_symm_cli()
+     parser = symm_cli.build_parser()
+@@ -58,18 +257,100 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
+ 
+     assert args.num_envs == 512
+     assert args.iterations == 20000
++    assert args.tr_rampup_iterations == 0
++    assert args.tr_ramp_shape == "linear"
+     assert command[command.index("--num_envs") + 1] == "512"
+     assert command[command.index("--max_iterations") + 1] == "20000"
+     assert args.tr_min_abs_cmd_vel == 0.0
++    assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
++    assert "agent.algorithm.symmetry_cfg.rampup_iterations=0" in command
++    assert "agent.algorithm.symmetry_cfg.ramp_shape=linear" in command
+     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+ 
+ 
++def test_ramped_train_run_name_records_complete_schedule():
++    symm_cli = _load_symm_cli()
++    args = symm_cli.build_parser().parse_args(
++        [
++            "train",
++            "--robot",
++            "go2",
++            "--seed",
++            "42",
++            "--mirror",
++            "0.20",
++            "--tr-value-coef",
++            "0.10",
++            "--tr-warmup-iterations",
++            "0",
++            "--tr-rampup-iterations",
++            "2000",
++            "--tr-ramp-shape",
++            "linear",
++            "--no-conda-run",
++        ]
++    )
++    args.robot_spec = symm_cli.get_robot(args.robot)
++
++    command = symm_cli.train_lab_args(args, [])
++
++    assert command[command.index("--run_name") + 1] == "go2_trs_linear_m0p2_v0p1_w0_r2000_seed42"
++
++
+ def test_ablation_uses_shared_training_scale_defaults():
+     symm_cli = _load_symm_cli()
+     args = symm_cli.build_parser().parse_args(["ablation", "--robot", "go2", "--no-conda-run"])
+ 
+     assert args.num_envs == 512
+     assert args.iterations == 20000
++    assert args.mirror_loss_coeff == 0.2
++    assert args.tr_value_coeff == 0.05
++
++
++def test_schedule_ablation_requires_explicit_coefficients(capsys):
++    symm_cli = _load_symm_cli()
++
++    result = symm_cli.main(
++        ["ablation", "--robot", "go2", "--schedule-variants", "linear", "--dry-run", "--no-conda-run"]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 2
++    assert "require explicit --mirror and --tr-value-coef" in captured.err
++
++
++def test_schedule_ablation_dry_run_resolves_ramp_variants(capsys):
++    symm_cli = _load_symm_cli()
++
++    result = symm_cli.main(
++        [
++            "ablation",
++            "--robot",
++            "go2",
++            "--seeds",
++            "42",
++            "--mirror",
++            "0.20",
++            "--tr-value-coef",
++            "0.10",
++            "--schedule-variants",
++            "no_trs",
++            "hard",
++            "linear",
++            "delayed_linear",
++            "half_cosine",
++            "--dry-run",
++            "--no-conda-run",
++        ]
++    )
++
++    captured = capsys.readouterr()
++    assert result == 0
++    command_lines = [line for line in captured.out.splitlines() if " --run_name " in line]
++    assert len(command_lines) == 5
++    assert any("_w0_r2000_linear_seed42" in line for line in command_lines)
++    assert any("_w500_r1500_linear_seed42" in line for line in command_lines)
++    assert any("_w0_r2000_half_cosine_seed42" in line for line in command_lines)
+ 
+ 
+ def test_no_trs_disables_every_auxiliary_symmetry_training_path():
+@@ -102,6 +383,53 @@ def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):
+         assert resolved_checkpoint == checkpoint
+ 
+ 
++def test_play_and_record_enable_fixed_five_second_gait_sequence_by_default(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    checkpoint = tmp_path / "model_9999.pt"
++    checkpoint.touch()
++    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
++    parser = symm_cli.build_parser()
++
++    for subcommand in ("play", "record"):
++        args = parser.parse_args([subcommand, "--robot", "go2", "--no-conda-run"])
++        args.robot_spec = symm_cli.get_robot(args.robot)
++        command = symm_cli.play_lab_args(args, []) if subcommand == "play" else symm_cli.record_lab_args(args, [])[0]
++
++        assert "env.commands.base_velocity.gait_sequence_enabled=true" in command
++        assert "env.commands.base_velocity.gait_sequence_duration_s=5.0" in command
++        assert "env.episode_length_s=30.02" in command
++
++
++def test_play_and_record_can_disable_or_retime_fixed_gait_sequence(monkeypatch, tmp_path):
++    symm_cli = _load_symm_cli()
++    checkpoint = tmp_path / "model_9999.pt"
++    checkpoint.touch()
++    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
++    parser = symm_cli.build_parser()
++
++    disabled_args = parser.parse_args(["play", "--robot", "go2", "--no-gait-sequence", "--no-conda-run"])
++    disabled_args.robot_spec = symm_cli.get_robot(disabled_args.robot)
++    disabled_command = symm_cli.play_lab_args(disabled_args, [])
++    assert "env.commands.base_velocity.gait_sequence_enabled=false" in disabled_command
++    assert "env.episode_length_s=30.0" in disabled_command
++
++    retimed_args = parser.parse_args(["record", "--robot", "x1", "--gait-sequence-duration", "2.5", "--no-conda-run"])
++    retimed_args.robot_spec = symm_cli.get_robot(retimed_args.robot)
++    retimed_command, _ = symm_cli.record_lab_args(retimed_args, [])
++    assert "env.commands.base_velocity.gait_sequence_enabled=true" in retimed_command
++    assert "env.commands.base_velocity.gait_sequence_duration_s=2.5" in retimed_command
++    assert "env.episode_length_s=15.02" in retimed_command
++    video_length_index = retimed_command.index("--video_length") + 1
++    assert retimed_command[video_length_index] == "750"
++
++    too_short_args = parser.parse_args(
++        ["record", "--robot", "x1", "--gait-sequence-duration", "0.001", "--no-conda-run"]
++    )
++    too_short_args.robot_spec = symm_cli.get_robot(too_short_args.robot)
++    with pytest.raises(ValueError, match="at least one environment step"):
++        symm_cli.record_lab_args(too_short_args, [])
++
++
+ def test_record_video_length_override_is_preserved(monkeypatch, tmp_path):
+     symm_cli = _load_symm_cli()
+     checkpoint = tmp_path / "model_9999.pt"
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_config.py b/source/isaaclab_tasks/test/test_symm_quadruped_config.py
+index a2007d4c1..f9235df0c 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_config.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_config.py
+@@ -8,6 +8,7 @@
+ from __future__ import annotations
+ 
+ import math
++import warnings
+ from types import SimpleNamespace
+ 
+ import pytest
+@@ -103,6 +104,77 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
+     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
+ 
+ 
++def test_environment_rewards_and_records_old_target_before_publishing_new_observation():
++    events = []
++    command_target = {"value": "old"}
++    env = object.__new__(symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv)
++    env._is_closed = True
++    env.sim = SimpleNamespace(device="cpu", is_rendering=False, step=lambda **_: events.append("physics"))
++    env.cfg = SimpleNamespace(decimation=1, sim=SimpleNamespace(dt=0.02, render_interval=1))
++    env._physics_handles_decimation = True
++    env._sim_step_counter = 0
++    env.render_enabled = False
++    env.action_manager = SimpleNamespace(
++        process_action=lambda _: events.append("action"),
++        apply_action=lambda: None,
++    )
++    env._clamp_processed_joint_position_targets = lambda: None
++    env.recorder_manager = SimpleNamespace(
++        active_terms=("transition_trace",),
++        record_pre_step=lambda: None,
++        record_post_physics_decimation_step=lambda: None,
++        record_post_step=lambda: events.append(f"record:{command_target['value']}"),
++    )
++    env.scene = SimpleNamespace(
++        write_data_to_sim=lambda: None,
++        update=lambda **_: None,
++    )
++    env.episode_length_buf = torch.zeros(1, dtype=torch.long)
++    env.common_step_counter = 0
++    env.termination_manager = SimpleNamespace(
++        compute=lambda: torch.zeros(1, dtype=torch.bool),
++        terminated=torch.zeros(1, dtype=torch.bool),
++        time_outs=torch.zeros(1, dtype=torch.bool),
++    )
++
++    def compute_reward(*, dt):
++        events.append(f"reward:{command_target['value']}")
++        return torch.ones(1)
++
++    env.reward_manager = SimpleNamespace(
++        compute=compute_reward,
++        get_term_cfg=lambda _: SimpleNamespace(weight=0.0),
++    )
++
++    def compute_diagnostics(*_):
++        events.append(f"diagnostics:{command_target['value']}")
++        return {}
++
++    env._compute_step_diagnostics = compute_diagnostics
++
++    def resample_command(*, dt):
++        events.append("resample")
++        command_target["value"] = "new"
++
++    env.command_manager = SimpleNamespace(compute=resample_command)
++    env.event_manager = SimpleNamespace(available_modes=())
++
++    def compute_observation(*, update_history=False):
++        events.append(f"observation:{command_target['value']}")
++        return {"policy": torch.zeros((1, 1))}
++
++    env.observation_manager = SimpleNamespace(compute=compute_observation)
++    env.extras = {}
++
++    env.step(torch.zeros((1, 12)))
++
++    assert events.index("physics") < events.index("reward:old")
++    assert events.index("reward:old") < events.index("diagnostics:old")
++    assert events.index("diagnostics:old") < events.index("observation:old")
++    assert events.index("observation:old") < events.index("record:old")
++    assert events.index("record:old") < events.index("resample") < events.index("observation:new")
++
++
+ @pytest.mark.parametrize("env_cfg_type", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
+ def test_symm_quadruped_command_and_phase_mapping_configuration_is_stable(env_cfg_type):
+     command_cfg = env_cfg_type().commands.base_velocity
+@@ -110,7 +182,38 @@ def test_symm_quadruped_command_and_phase_mapping_configuration_is_stable(env_cf
+     assert command_cfg.ranges.lin_vel_x == (-2.0, 2.0)
+     assert command_cfg.min_xy_command_norm == 0.0
+     assert command_cfg.phase_mapping_version == symm_quadruped.SYMM_QUADRUPED_PHASE_MAPPING_VERSION
+-    assert command_cfg.phase_mapping_version == "same_gait_backward_duty_aware_trs_v2"
++    assert command_cfg.phase_mapping_version == "same_gait_backward_duty_aware_integrated_reward_boundary_v4"
++
++
++@pytest.mark.parametrize(
++    ("train_cfg_type", "play_cfg_type"),
++    (
++        (UnitreeGo2SymmFlatEnvCfg, UnitreeGo2SymmFlatEnvCfg_PLAY),
++        (DobotX1SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg_PLAY),
++    ),
++)
++def test_training_uses_one_shot_velocity_gait_and_push_schedule(train_cfg_type, play_cfg_type):
++    train_cfg = train_cfg_type()
++    train_command = train_cfg.commands.base_velocity
++    play_cfg = play_cfg_type()
++    play_command = play_cfg.commands.base_velocity
++
++    assert train_cfg.episode_length_s == pytest.approx(30.0)
++    assert train_command.resampling_time_range == (10.0, 10.0)
++    assert train_command.resample_once_after_reset is True
++    assert train_command.resampling_time_gait == pytest.approx(20.0)
++    assert train_command.resample_gait_once_after_reset is True
++    assert train_cfg.events.push_robot.mode == "interval"
++    assert train_cfg.events.push_robot.interval_range_s == (15.0, 15.0)
++    assert train_cfg.events.push_robot.params["velocity_range"] == {
++        "x": (-0.25, 0.25),
++        "y": (-0.25, 0.25),
++    }
++
++    assert play_command.resampling_time_range == (10.0, 10.0)
++    assert play_command.resample_once_after_reset is True
++    assert play_command.resample_gait_once_after_reset is True
++    assert play_cfg.events.push_robot is None
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -215,6 +318,42 @@ def test_desired_base_twist_expands_planar_command_to_six_velocities():
+     )
+ 
+ 
++def test_deprecated_foot_periodicity_function_forwards_to_foot_phase(monkeypatch):
++    expected = torch.tensor([-0.25])
++    captured = {}
++
++    def fake_foot_phase(env, **kwargs):
++        captured["env"] = env
++        captured.update(kwargs)
++        return expected
++
++    monkeypatch.setattr(symm_quadruped, "foot_phase_penalty", fake_foot_phase)
++    monkeypatch.setattr(symm_quadruped, "_FOOT_PERIODICITY_DEPRECATION_WARNED", False)
++    env = SimpleNamespace()
++    feet_cfg = SimpleNamespace()
++    asset_cfg = SimpleNamespace(name="test_robot")
++
++    with pytest.warns(DeprecationWarning, match="foot_phase_penalty"):
++        result = symm_quadruped.foot_periodicity_penalty(
++            env,
++            command_name="base_velocity",
++            feet_cfg=feet_cfg,
++            foot_sensor_names=("contact_FL",),
++            foot_sensor_body_names=("FL_foot",),
++            force_scale=0.005,
++            asset_cfg=asset_cfg,
++        )
++
++    assert result is expected
++    assert captured["env"] is env
++    assert captured["command_name"] == "base_velocity"
++    assert captured["feet_cfg"] is feet_cfg
++    assert captured["foot_sensor_names"] == ("contact_FL",)
++    assert captured["foot_sensor_body_names"] == ("FL_foot",)
++    assert captured["force_scale"] == 0.005
++    assert captured["asset_cfg"] is asset_cfg
++
++
+ def test_deprecated_morphological_symmetry_function_forwards_to_leg_permutation(monkeypatch):
+     expected = torch.tensor([-0.25])
+     captured = {}
+@@ -234,12 +373,14 @@ def test_deprecated_morphological_symmetry_function_forwards_to_leg_permutation(
+             env,
+             command_name="base_velocity",
+             joint_cfg=joint_cfg,
++            phase_sync_tolerance=0.01,
+         )
+ 
+     assert result is expected
+     assert captured["env"] is env
+     assert captured["command_name"] == "base_velocity"
+     assert captured["joint_cfg"] is joint_cfg
++    assert captured["phase_sync_tolerance"] == 0.01
+ 
+ 
+ def test_x1_leg_permutation_adapter_uses_x1_joint_convention(monkeypatch):
+@@ -259,16 +400,24 @@ def test_x1_leg_permutation_adapter_uses_x1_joint_convention(monkeypatch):
+         env,
+         command_name="base_velocity",
+         joint_cfg=joint_cfg,
++        phase_sync_tolerance=0.01,
+     )
+ 
+     assert result is expected
+     assert captured["logical_joint_signs"] == dobot_x1_symm.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS
+     assert captured["joint_ranges"] == dobot_x1_symm.DOBOT_X1_SYMM_JOINT_RANGES
++    assert captured["phase_sync_tolerance"] == 0.01
+ 
+ 
+ def test_deprecated_x1_morphological_symmetry_function_forwards(monkeypatch):
+     expected = torch.tensor([-0.75])
+-    monkeypatch.setattr(dobot_x1_symm, "leg_permutation_symmetry_penalty", lambda *_, **__: expected)
++    captured = {}
++
++    def fake_leg_permutation(*_, **kwargs):
++        captured.update(kwargs)
++        return expected
++
++    monkeypatch.setattr(dobot_x1_symm, "leg_permutation_symmetry_penalty", fake_leg_permutation)
+     monkeypatch.setattr(dobot_x1_symm, "_MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED", False)
+ 
+     with pytest.warns(DeprecationWarning, match="leg_permutation_symmetry_penalty"):
+@@ -276,9 +425,11 @@ def test_deprecated_x1_morphological_symmetry_function_forwards(monkeypatch):
+             SimpleNamespace(),
+             command_name="base_velocity",
+             joint_cfg=SimpleNamespace(),
++            phase_sync_tolerance=0.01,
+         )
+ 
+     assert result is expected
++    assert captured["phase_sync_tolerance"] == 0.01
+ 
+ 
+ def test_joint_position_targets_are_clamped_to_soft_limits():
+@@ -423,8 +574,11 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
+         base_height_range=(0.35, 0.45),
+     )
+ 
+-    assert env_cfg.rewards.hip_action_penalty.weight == 0.15
++    assert env_cfg.rewards.hip_action_penalty.weight == 0.10
+     assert env_cfg.rewards.alive_bonus.weight == 0.20
++    assert env_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
++    assert env_cfg.rewards.foot_phase.weight == 0.30
++    assert "foot_periodicity" not in env_cfg.rewards.__dict__
+     assert env_cfg.rewards.cmd is None
+     assert env_cfg.rewards.sagittal_plane is None
+     assert env_cfg.rewards.straight_line_motion.func is symm_quadruped.straight_line_motion_reward
+@@ -441,7 +595,8 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
+     assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_target_limit_penalty
+     assert env_cfg.rewards.joint_target_limits.weight == 0.05
+     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
+-    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.30
++    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.20
++    assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
+     assert env_cfg.rewards.foot_clearance.weight == 0.10
+     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
+     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
+@@ -469,10 +624,53 @@ def test_rewards_cfg_preserves_deprecated_morphological_symmetry_alias():
+     assert configured_rewards.leg_permutation_symmetry.weight == 0.42
+ 
+ 
++def test_rewards_cfg_preserves_deprecated_foot_periodicity_alias():
++    cfg = SymmQuadrupedRewardsCfg()
++    reward = object()
++    cfg.foot_phase = reward
++
++    with pytest.warns(DeprecationWarning, match="foot_phase"):
++        assert cfg.foot_periodicity is reward
++
++    replacement = object()
++    with pytest.warns(DeprecationWarning, match="foot_phase"):
++        cfg.foot_periodicity = replacement
++
++    assert cfg.foot_phase is replacement
++    assert "foot_periodicity" not in cfg.__dict__
++    serialized = cfg.to_dict()
++    assert "foot_phase" in serialized
++    assert "foot_periodicity" not in serialized
++
++    configured_rewards = DobotX1SymmFlatEnvCfg().rewards
++    with pytest.warns(DeprecationWarning, match="foot_phase"):
++        configured_rewards.from_dict({"foot_periodicity": {"weight": 0.42}})
++    assert configured_rewards.foot_phase.weight == 0.42
++
++
++def test_robot_configs_use_canonical_foot_phase_name_without_deprecation_warning():
++    with warnings.catch_warnings():
++        warnings.filterwarnings("error", message=".*foot_periodicity.*", category=DeprecationWarning)
++        for cfg in (DobotX1SymmFlatEnvCfg(), UnitreeGo2SymmFlatEnvCfg()):
++            serialized = cfg.rewards.to_dict()
++            assert "foot_phase" in serialized
++            assert "foot_periodicity" not in serialized
++
++
+ def test_robot_configs_use_robot_specific_foot_clearance_shaping():
+     x1_cfg = DobotX1SymmFlatEnvCfg()
+     go2_cfg = UnitreeGo2SymmFlatEnvCfg()
+ 
++    assert x1_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
++    assert go2_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
++    assert x1_cfg.rewards.foot_phase.weight == 0.30
++    assert go2_cfg.rewards.foot_phase.weight == 0.30
++    assert x1_cfg.rewards.hip_action_penalty.weight == 0.10
++    assert go2_cfg.rewards.hip_action_penalty.weight == 0.10
++    assert x1_cfg.rewards.leg_permutation_symmetry.func is dobot_x1_symm.leg_permutation_symmetry_penalty
++    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.20
++    assert go2_cfg.rewards.leg_permutation_symmetry.weight == 0.20
++    assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
+     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
+     assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.04
+     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
+@@ -490,6 +688,39 @@ def test_play_configs_enable_ground_filtered_normal_and_friction_forces():
+             assert sensor_cfg.track_friction_forces
+ 
+ 
++def test_play_configs_enable_fixed_six_gait_sequence_only_for_playback():
++    for train_cfg, play_cfg in (
++        (DobotX1SymmFlatEnvCfg(), DobotX1SymmFlatEnvCfg_PLAY()),
++        (UnitreeGo2SymmFlatEnvCfg(), UnitreeGo2SymmFlatEnvCfg_PLAY()),
++    ):
++        train_command = train_cfg.commands.base_velocity
++        play_command = play_cfg.commands.base_velocity
++
++        assert train_command.gait_library_version == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
++        assert train_command.init_foot_thetas == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS
++        assert train_command.init_foot_theta_weights == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS
++        assert train_cfg.commands.base_velocity.gait_sequence_enabled is False
++        assert play_command.gait_library_version == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION
++        expected_play_gaits = (
++            (0.0, 0.5, 0.5, 0.0),
++            (0.0, 0.0, 0.5, 0.5),
++            (0.13, -0.13, 0.5, 0.5),
++            (0.0, 0.0, 0.63, 0.37),
++            (-0.13, 0.13, 0.63, 0.37),
++            (0.13, -0.13, 0.63, 0.37),
++        )
++        assert play_command.init_foot_thetas == expected_play_gaits
++        assert expected_play_gaits == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS
++        assert play_command.init_foot_theta_weights is None
++        assert play_command.gait_sequence_enabled is True
++        assert play_command.gait_sequence_duration_s == 5.0
++        assert play_command.add_noise_period is True
++        assert play_command.add_noise_theta is False
++        assert len(play_command.init_foot_thetas) == 6
++        assert play_cfg.terminations.time_out is not None
++        assert play_cfg.episode_length_s == pytest.approx(30.02)
++
++
+ def test_robot_configs_use_requested_pitch_and_height_postures():
+     x1_cfg = DobotX1SymmFlatEnvCfg()
+     go2_cfg = UnitreeGo2SymmFlatEnvCfg()
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_phase_mapping.py b/source/isaaclab_tasks/test/test_symm_quadruped_phase_mapping.py
+index e04a3897d..ccfee7af3 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_phase_mapping.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_phase_mapping.py
+@@ -8,6 +8,7 @@
+ from __future__ import annotations
+ 
+ import inspect
++import math
+ from types import SimpleNamespace
+ 
+ import pytest
+@@ -65,6 +66,46 @@ def _configured_gaits() -> torch.Tensor:
+     return torch.tensor(cfg.init_foot_thetas, dtype=torch.float64)
+ 
+ 
++def _initialize_gait_clock(
++    command_term: symm_quadruped.GaitVelocityCommand,
++    *,
++    anchor_phase: float | torch.Tensor = 0.0,
++    anchor_step: int | torch.Tensor = 0,
++) -> None:
++    """Initialize the lazy piecewise-integrated gait clock for a test command term."""
++    phase = torch.as_tensor(
++        anchor_phase,
++        dtype=command_term.gait_periods.dtype,
++        device=command_term.gait_periods.device,
++    )
++    steps = torch.as_tensor(anchor_step, dtype=torch.long, device=command_term.gait_periods.device)
++    command_term._common_gait_phase_at_anchor = torch.broadcast_to(phase, command_term.gait_periods.shape).clone()
++    command_term._gait_phase_anchor_steps = torch.broadcast_to(steps, command_term.gait_periods.shape).clone()
++
++
++def _leg_permutation_penalty(
++    foot_thetas: torch.Tensor,
++    joint_pos: torch.Tensor,
++    *,
++    leg_pairs: tuple[tuple[str, str], ...],
++    phase_sync_tolerance: float = 0.02,
++) -> torch.Tensor:
++    gait_command = SimpleNamespace(foot_thetas=foot_thetas)
++    env = SimpleNamespace(
++        scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_pos=SimpleNamespace(torch=joint_pos)))},
++        command_manager=SimpleNamespace(get_term=lambda _: gait_command),
++        num_envs=joint_pos.shape[0],
++        device=joint_pos.device,
++    )
++    return symm_quadruped.leg_permutation_symmetry_penalty(
++        env,
++        command_name="base_velocity",
++        joint_cfg=SimpleNamespace(joint_ids=list(range(12))),
++        leg_pairs=leg_pairs,
++        phase_sync_tolerance=phase_sync_tolerance,
++    )
++
++
+ def test_policy_observation_layout_remains_72d_and_in_original_order():
+     assert _OBS_DIM == 72
+     assert (
+@@ -251,14 +292,15 @@ def test_same_gait_phase_helper_is_independent_of_command_sign_and_preserves_ten
+     assert torch.allclose(phases_by_command[0], _wrap(common_phase + foot_thetas))
+ 
+ 
+-def test_environment_foot_phases_use_same_episode_clock_for_every_command_sign():
++def test_environment_foot_phases_use_continuous_clock_for_every_command_sign():
+     command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
+     commands = torch.tensor([-2.0, -1.0e-3, 0.0, 1.0e-3, 2.0], dtype=torch.float64)
+     command_term._env = SimpleNamespace(
+-        episode_length_buf=torch.full((len(commands),), 37, dtype=torch.long),
++        common_step_counter=37,
+         step_dt=0.02,
+     )
+     command_term.gait_periods = torch.full((len(commands),), 0.5, dtype=torch.float64)
++    _initialize_gait_clock(command_term)
+     command_term.foot_thetas = torch.tensor(
+         [[0.13, -0.13, 0.5, 0.5]] * len(commands),
+         dtype=torch.float64,
+@@ -276,6 +318,569 @@ def test_environment_foot_phases_use_same_episode_clock_for_every_command_sign()
+     )
+ 
+ 
++def test_environment_foot_phases_add_offsets_before_wrapping_continuous_clock():
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term._env = SimpleNamespace(
++        common_step_counter=16,
++        step_dt=0.02,
++    )
++    command_term.gait_periods = torch.tensor([0.2001], dtype=torch.float32)
++    _initialize_gait_clock(command_term)
++    command_term.foot_thetas = torch.tensor([[0.13, -0.13, 0.5, 0.5]], dtype=torch.float32)
++
++    unwrapped_clock = (
++        torch.tensor([command_term._env.common_step_counter], dtype=torch.float32)
++        * command_term._env.step_dt
++        / command_term.gait_periods
++    )
++    expected = torch.remainder(unwrapped_clock.unsqueeze(-1) + command_term.foot_thetas, 1.0)
++    prewrapped = torch.remainder(
++        torch.remainder(unwrapped_clock, 1.0).unsqueeze(-1) + command_term.foot_thetas,
++        1.0,
++    )
++
++    assert not torch.equal(expected, prewrapped)
++    assert torch.equal(command_term.common_gait_phases(), unwrapped_clock)
++    assert torch.equal(command_term.foot_phases(), expected)
++
++
++def test_velocity_resample_refreshes_gait_timing_from_final_command():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.add_noise_period = False
++    cfg.heading_command = False
++    cfg.rel_standing_envs = 0.0
++    cfg.ranges = cfg.Ranges(
++        lin_vel_x=(1.2, 1.2),
++        lin_vel_y=(0.0, 0.0),
++        ang_vel_z=(0.0, 0.0),
++        heading=(0.0, 0.0),
++    )
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=25,
++        step_dt=0.02,
++    )
++    command_term.vel_command_b = torch.zeros((1, 3))
++    command_term.heading_target = torch.zeros(1)
++    command_term.is_heading_env = torch.zeros(1, dtype=torch.bool)
++    command_term.is_standing_env = torch.zeros(1, dtype=torch.bool)
++    command_term.gait_periods = torch.full((1,), 0.5)
++    command_term.duty_factors = torch.full((1,), 0.45)
++    command_term.foot_thetas = torch.tensor(((0.0, 0.5, 0.5, 0.0),))
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    _initialize_gait_clock(command_term)
++
++    common_phase_before = command_term.common_gait_phases().clone()
++    phase_before = command_term.foot_phases().clone()
++    command_term._resample_command([0])
++    command_term._update_velocity_resampled_gait_timing(torch.tensor([0]), torch.empty(0, dtype=torch.long))
++    phase_after = command_term.foot_phases()
++
++    expected_period = command_term._compute_period_from_forward_velocity(torch.tensor([1.2]))
++    expected_duty_factor = command_term._compute_duty_factor_from_forward_velocity(torch.tensor([1.2]))
++    assert command_term.vel_command_b[0, 0].item() == pytest.approx(1.2)
++    assert torch.allclose(command_term.gait_periods, expected_period)
++    assert torch.allclose(command_term.duty_factors, expected_duty_factor)
++    assert torch.allclose(
++        command_term.phase_ratios(),
++        torch.stack((1.0 - expected_duty_factor, expected_duty_factor), dim=-1),
++    )
++    _assert_phases_close(command_term.common_gait_phases(), common_phase_before)
++    _assert_phases_close(phase_after, phase_before)
++
++    command_term._env.common_step_counter += 10
++    expected_common_phase = torch.remainder(common_phase_before, 1.0) + 10 * command_term._env.step_dt / expected_period
++    expected_phase = symm_quadruped.compute_same_gait_foot_phases(
++        expected_common_phase.unsqueeze(-1), command_term.foot_thetas
++    )
++    _assert_phases_close(command_term.foot_phases(), expected_phase, atol=2.0e-7)
++
++
++def test_standing_velocity_resample_refreshes_timing_from_final_zero_command():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.add_noise_period = False
++    cfg.heading_command = False
++    cfg.rel_standing_envs = 1.0
++    cfg.ranges = cfg.Ranges(
++        lin_vel_x=(1.2, 1.2),
++        lin_vel_y=(0.0, 0.0),
++        ang_vel_z=(0.0, 0.0),
++        heading=(0.0, 0.0),
++    )
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=25,
++        step_dt=0.02,
++    )
++    command_term.vel_command_b = torch.zeros((1, 3))
++    command_term.heading_target = torch.zeros(1)
++    command_term.is_heading_env = torch.zeros(1, dtype=torch.bool)
++    command_term.is_standing_env = torch.zeros(1, dtype=torch.bool)
++    command_term.gait_periods = torch.full((1,), 0.5)
++    command_term.duty_factors = torch.full((1,), 0.45)
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    _initialize_gait_clock(command_term)
++
++    phase_before = command_term.common_gait_phases().clone()
++    command_term._resample_command([0])
++    command_term._update_velocity_resampled_gait_timing(torch.tensor([0]), torch.empty(0, dtype=torch.long))
++
++    expected_period = command_term._compute_period_from_forward_velocity(torch.tensor([0.0]))
++    expected_duty_factor = command_term._compute_duty_factor_from_forward_velocity(torch.tensor([0.0]))
++    assert torch.count_nonzero(command_term.vel_command_b) == 0
++    assert torch.allclose(command_term.gait_periods, expected_period)
++    assert torch.allclose(command_term.duty_factors, expected_duty_factor)
++    _assert_phases_close(command_term.common_gait_phases(), phase_before)
++
++
++def test_dimensionless_velocity_curve_is_sign_symmetric_and_has_correct_zero_speed_scale():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.add_noise_period = False
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(device=torch.device("cpu"))
++    velocities = torch.tensor((-1.2, 0.0, 1.2), dtype=torch.float64)
++
++    periods = command_term._compute_period_from_forward_velocity(velocities)
++    duty_factors = command_term._compute_duty_factor_from_forward_velocity(velocities)
++
++    characteristic_length = sum(cfg.base_height_range) * 0.5
++    assert periods[1].item() == pytest.approx(2.55 * math.sqrt(characteristic_length / 9.81))
++    assert duty_factors[1].item() == pytest.approx(0.5588)
++    assert periods[0].item() == pytest.approx(periods[2].item())
++    assert duty_factors[0].item() == pytest.approx(duty_factors[2].item())
++
++
++@pytest.mark.parametrize(
++    "base_height_range",
++    ((0.0, 0.4), (-0.4, 0.4), (0.5, 0.4), (float("nan"), 0.4), (0.4, float("inf"))),
++)
++def test_dimensionless_velocity_curve_rejects_invalid_characteristic_lengths(base_height_range):
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.add_noise_period = False
++    cfg.base_height_range = base_height_range
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++
++    with pytest.raises(ValueError, match="base_height_range"):
++        command_term._compute_period_from_forward_velocity(torch.tensor([1.0]))
++
++
++def test_gait_assignment_recomputes_timing_without_jumping_common_phase():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.add_noise_theta = False
++    cfg.add_noise_period = False
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=20,
++        step_dt=0.02,
++    )
++    command_term.init_foot_thetas = _configured_gaits().to(dtype=torch.float32)
++    command_term.foot_thetas = command_term.init_foot_thetas[[0]].clone()
++    command_term.gait_periods = torch.full((1,), 0.42)
++    command_term.duty_factors = torch.full((1,), 0.47)
++    command_term.kappa = torch.full((1,), cfg.kappa)
++    command_term.vel_command_b = torch.tensor(((1.8, 0.0, 0.0),))
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    _initialize_gait_clock(command_term, anchor_phase=0.17, anchor_step=3)
++    common_phase_before = command_term.common_gait_phases().clone()
++    command_term._assign_gait(torch.tensor([0]), torch.tensor([2]), add_theta_noise=False)
++    phase_after = command_term.foot_phases()
++
++    expected_period = command_term._compute_period_from_forward_velocity(torch.tensor([1.8]))
++    expected_duty_factor = command_term._compute_duty_factor_from_forward_velocity(torch.tensor([1.8]))
++    assert torch.allclose(command_term.gait_periods, expected_period)
++    assert torch.allclose(command_term.duty_factors, expected_duty_factor)
++    _assert_phases_close(command_term.common_gait_phases(), common_phase_before)
++    expected_phase = symm_quadruped.compute_same_gait_foot_phases(
++        common_phase_before.unsqueeze(-1), command_term.init_foot_thetas[[2]]
++    )
++    _assert_phases_close(phase_after, expected_phase, atol=1.0e-6)
++
++
++def test_selective_gait_timing_update_leaves_other_environment_unchanged():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.add_noise_period = False
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=2,
++        device=torch.device("cpu"),
++        common_step_counter=20,
++        step_dt=0.02,
++    )
++    command_term.vel_command_b = torch.tensor(((1.2, 0.0, 0.0), (1.8, 0.0, 0.0)))
++    command_term.gait_periods = torch.tensor((0.5, 0.6))
++    command_term.duty_factors = torch.tensor((0.45, 0.55))
++    command_term.metrics = {"gait_period": torch.zeros(2), "duty_factor": torch.zeros(2)}
++    _initialize_gait_clock(
++        command_term,
++        anchor_phase=torch.tensor((0.1, 0.7)),
++        anchor_step=torch.tensor((4, 11)),
++    )
++    phase_before = command_term.common_gait_phases().clone()
++
++    command_term._update_gait_timing([0])
++
++    _assert_phases_close(command_term.common_gait_phases(), phase_before)
++    assert command_term.gait_periods[1].item() == pytest.approx(0.6)
++    assert command_term.duty_factors[1].item() == pytest.approx(0.55)
++
++
++def test_velocity_timing_refresh_excludes_environments_already_refreshed_by_gait():
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term._env = SimpleNamespace(num_envs=4)
++    timing_updates = []
++    command_term._update_gait_timing = lambda env_ids: timing_updates.append(env_ids.clone())
++
++    command_term._update_velocity_resampled_gait_timing(
++        torch.tensor([0, 1, 2]),
++        torch.tensor([1, 3]),
++    )
++
++    assert len(timing_updates) == 1
++    assert torch.equal(timing_updates[0], torch.tensor([0, 2]))
++
++
++def test_once_after_reset_command_resamples_at_only_the_first_timer_expiry():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.resample_once_after_reset = True
++    cfg.gait_sequence_enabled = False
++    cfg.resampling_time_gait = 0.0
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term.time_left = torch.zeros(1)
++    command_term.command_counter = torch.ones(1, dtype=torch.long)
++    command_term._update_metrics = lambda: None
++    command_term._update_command = lambda: None
++    resampled_env_ids = []
++    timing_env_ids = []
++
++    def resample(env_ids):
++        resampled_env_ids.append(env_ids.clone())
++        command_term.time_left[env_ids] = 10.0
++        command_term.command_counter[env_ids] += 1
++
++    command_term._resample = resample
++    command_term._update_gait_timing = lambda env_ids: timing_env_ids.append(env_ids.clone())
++
++    command_term.compute(0.02)
++    command_term.compute(0.02)
++
++    assert len(resampled_env_ids) == 1
++    assert torch.equal(resampled_env_ids[0], torch.tensor([0]))
++    assert len(timing_env_ids) == 1
++    assert torch.equal(timing_env_ids[0], torch.tensor([0]))
++    assert command_term.command_counter.item() == 2
++    assert torch.isinf(command_term.time_left).all()
++
++
++def test_post_reward_scheduling_skips_environments_that_are_about_to_reset():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.resample_once_after_reset = True
++    cfg.gait_sequence_enabled = False
++    cfg.resampling_time_gait = 0.0
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(reset_buf=torch.tensor((False, True)))
++    command_term.time_left = torch.zeros(2)
++    command_term.command_counter = torch.ones(2, dtype=torch.long)
++    command_term._update_metrics = lambda: None
++    command_term._update_command = lambda: None
++    resampled_env_ids = []
++
++    def resample(env_ids):
++        resampled_env_ids.append(env_ids.clone())
++        command_term.command_counter[env_ids] += 1
++
++    command_term._resample = resample
++    command_term._update_gait_timing = lambda _: None
++
++    command_term.compute(0.02)
++
++    assert len(resampled_env_ids) == 1
++    assert torch.equal(resampled_env_ids[0], torch.tensor([0]))
++    assert command_term.command_counter.tolist() == [2, 1]
++    assert torch.isinf(command_term.time_left[0])
++    assert command_term.time_left[1].item() == pytest.approx(0.0)
++
++
++def test_partial_reset_restarts_only_the_selected_environment_clock():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=2,
++        device=torch.device("cpu"),
++        common_step_counter=123,
++        extras={},
++    )
++    command_term._common_gait_phase_at_anchor = torch.tensor((0.25, 0.75))
++    command_term._gait_phase_anchor_steps = torch.tensor((50, 80), dtype=torch.long)
++    command_term._error_xy_sum = torch.zeros(2)
++    command_term._error_yaw_sum = torch.zeros(2)
++    command_term._step_count = torch.ones(2)
++    command_term.vel_command_b = torch.zeros((2, 3))
++    command_term.command_counter = torch.ones(2, dtype=torch.long)
++    command_term.gait_counter = torch.ones(2, dtype=torch.long)
++    command_term.gait_sequence_indices = torch.zeros(2, dtype=torch.long)
++    command_term.metrics = {
++        "error_vel_xy": torch.zeros(2),
++        "error_vel_yaw": torch.zeros(2),
++        "success_threshold_vel_xy": torch.zeros(2),
++        "success_threshold_vel_yaw": torch.zeros(2),
++        "success_rate": torch.zeros(2),
++        "gait_period": torch.zeros(2),
++        "duty_factor": torch.zeros(2),
++    }
++    phases_seen_during_reset = []
++
++    def resample_command(env_ids):
++        phases_seen_during_reset.append(command_term._common_gait_phase_at_anchor[env_ids].clone())
++        command_term.command_counter[env_ids] += 1
++
++    def resample_gait(env_ids):
++        phases_seen_during_reset.append(command_term._common_gait_phase_at_anchor[env_ids].clone())
++        command_term.gait_counter[env_ids] += 1
++
++    command_term._resample = resample_command
++    command_term._resample_gait = resample_gait
++
++    command_term.reset(torch.tensor([1]))
++
++    assert command_term._common_gait_phase_at_anchor.tolist() == pytest.approx((0.25, 0.0))
++    assert command_term._gait_phase_anchor_steps.tolist() == [50, 123]
++    assert len(phases_seen_during_reset) == 2
++    assert all(torch.equal(phase, torch.zeros(1)) for phase in phases_seen_during_reset)
++
++
++def test_once_after_reset_gait_resamples_at_only_the_first_timer_expiry():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.gait_sequence_enabled = False
++    cfg.resample_gait_once_after_reset = True
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term.time_left = torch.full((1,), torch.inf)
++    command_term.command_counter = torch.ones(1, dtype=torch.long)
++    command_term.gait_time_left = torch.zeros(1)
++    command_term.gait_counter = torch.ones(1, dtype=torch.long)
++    command_term._update_metrics = lambda: None
++    command_term._update_command = lambda: None
++    resampled_env_ids = []
++
++    def resample_gait(env_ids):
++        resampled_env_ids.append(env_ids.clone())
++        command_term.gait_time_left[env_ids] = 20.0
++        command_term.gait_counter[env_ids] += 1
++
++    command_term._resample_gait = resample_gait
++
++    command_term.compute(0.02)
++    command_term.compute(0.02)
++
++    assert len(resampled_env_ids) == 1
++    assert torch.equal(resampled_env_ids[0], torch.tensor([0]))
++    assert command_term.gait_counter.item() == 2
++    assert torch.isinf(command_term.gait_time_left).all()
++
++
++def test_training_one_shot_resampling_uses_ten_and_twenty_second_schedule():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.resampling_time_range = (10.0, 10.0)
++    cfg.resample_once_after_reset = True
++    cfg.resampling_time_gait = 20.0
++    cfg.resample_gait_once_after_reset = True
++    cfg.gait_sequence_enabled = False
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term.time_left = torch.full((1,), 10.0)
++    command_term.command_counter = torch.ones(1, dtype=torch.long)
++    command_term.gait_time_left = torch.full((1,), 20.0)
++    command_term.gait_counter = torch.ones(1, dtype=torch.long)
++    command_term._update_metrics = lambda: None
++    command_term._update_command = lambda: None
++    events = []
++    current_step = 0
++
++    def resample_velocity(env_ids):
++        events.append((current_step, "velocity"))
++        command_term.time_left[env_ids] = 10.0
++        command_term.command_counter[env_ids] += 1
++
++    def resample_gait(env_ids):
++        events.append((current_step, "gait"))
++        command_term.gait_time_left[env_ids] = 20.0
++        command_term.gait_counter[env_ids] += 1
++        command_term._update_gait_timing(env_ids)
++
++    def update_timing(env_ids):
++        events.append((current_step, "timing"))
++
++    command_term._resample = resample_velocity
++    command_term._resample_gait = resample_gait
++    command_term._update_gait_timing = update_timing
++
++    for current_step in range(1, 1501):
++        command_term.compute(0.02)
++
++    assert events == [(500, "velocity"), (500, "timing"), (1000, "gait"), (1000, "timing")]
++
++
++def test_training_boundaries_refresh_timing_with_velocity_then_gait(monkeypatch):
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.resampling_time_range = (10.0, 10.0)
++    cfg.resample_once_after_reset = True
++    cfg.resampling_time_gait = 20.0
++    cfg.resample_gait_once_after_reset = True
++    cfg.gait_sequence_enabled = False
++    cfg.add_noise_period = False
++    cfg.add_noise_theta = False
++    cfg.heading_command = False
++    cfg.rel_standing_envs = 0.0
++    cfg.ranges = cfg.Ranges(
++        lin_vel_x=(1.2, 1.2),
++        lin_vel_y=(0.0, 0.0),
++        ang_vel_z=(0.0, 0.0),
++        heading=(0.0, 0.0),
++    )
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=0,
++        episode_length_buf=torch.zeros(1, dtype=torch.long),
++        step_dt=0.02,
++    )
++    command_term.time_left = torch.full((1,), 10.0)
++    command_term.command_counter = torch.ones(1, dtype=torch.long)
++    command_term.gait_time_left = torch.full((1,), 20.0)
++    command_term.gait_counter = torch.ones(1, dtype=torch.long)
++    command_term.vel_command_b = torch.tensor(((0.4, 0.0, 0.0),))
++    command_term.heading_target = torch.zeros(1)
++    command_term.is_heading_env = torch.zeros(1, dtype=torch.bool)
++    command_term.is_standing_env = torch.zeros(1, dtype=torch.bool)
++    command_term.gait_periods = torch.full((1,), 0.5)
++    command_term.duty_factors = torch.full((1,), 0.45)
++    command_term.init_foot_thetas = _configured_gaits().to(dtype=torch.float32)
++    command_term.foot_theta_sampling_weights = None
++    command_term.foot_thetas = command_term.init_foot_thetas[[0]].clone()
++    command_term.kappa = torch.full((1,), cfg.kappa)
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    command_term._update_metrics = lambda: None
++    command_term._update_command = lambda: None
++    _initialize_gait_clock(command_term, anchor_phase=0.17)
++
++    def sample_third_gait(*, low, high, size, device):
++        assert (low, high, size) == (0, len(command_term.init_foot_thetas), (1,))
++        return torch.full(size, 2, dtype=torch.long, device=device)
++
++    monkeypatch.setattr(torch, "randint", sample_third_gait)
++
++    command_term._env.common_step_counter = 500
++    command_term._env.episode_length_buf.fill_(500)
++    phase_before_velocity = command_term.foot_phases().clone()
++    theta_before_velocity = command_term.foot_thetas.clone()
++    command_term.compute(10.0)
++
++    assert command_term.vel_command_b[0, 0].item() == pytest.approx(1.2)
++    expected_period = command_term._compute_period_from_forward_velocity(torch.tensor([1.2]))
++    expected_duty_factor = command_term._compute_duty_factor_from_forward_velocity(torch.tensor([1.2]))
++    assert torch.allclose(command_term.gait_periods, expected_period)
++    assert torch.allclose(command_term.duty_factors, expected_duty_factor)
++    assert torch.equal(command_term.foot_thetas, theta_before_velocity)
++    _assert_phases_close(command_term.foot_phases(), phase_before_velocity)
++
++    command_term._env.common_step_counter = 1000
++    command_term._env.episode_length_buf.fill_(1000)
++    common_phase_before_gait = command_term.common_gait_phases().clone()
++    command_term.compute(10.0)
++
++    assert torch.allclose(command_term.gait_periods, expected_period)
++    assert torch.allclose(command_term.duty_factors, expected_duty_factor)
++    assert torch.equal(command_term.foot_thetas, command_term.init_foot_thetas[[2]])
++    _assert_phases_close(command_term.common_gait_phases(), common_phase_before_gait)
++    expected_foot_phases = symm_quadruped.compute_same_gait_foot_phases(
++        torch.remainder(common_phase_before_gait, 1.0).unsqueeze(-1), command_term.init_foot_thetas[[2]]
++    )
++    _assert_phases_close(command_term.foot_phases(), expected_foot_phases)
++    assert command_term.command_counter.item() == 2
++    assert command_term.gait_counter.item() == 2
++    assert torch.isinf(command_term.time_left).all()
++    assert torch.isinf(command_term.gait_time_left).all()
++
++
++def test_play_sequence_uses_one_shot_velocity_before_shared_gait_boundary():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.resampling_time_range = (10.0, 10.0)
++    cfg.resample_once_after_reset = True
++    cfg.gait_sequence_enabled = True
++    cfg.gait_sequence_duration_s = 5.0
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=0,
++        step_dt=0.02,
++    )
++    command_term.time_left = torch.full((1,), 10.0)
++    command_term.command_counter = torch.ones(1, dtype=torch.long)
++    command_term.init_foot_thetas = torch.tensor(
++        symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS, dtype=torch.float32
++    )
++    command_term.foot_thetas = command_term.init_foot_thetas[[0]].clone()
++    command_term.gait_sequence_indices = torch.zeros(1, dtype=torch.long)
++    command_term.gait_time_left = torch.full((1,), torch.inf)
++    command_term._update_metrics = lambda: None
++    command_term._update_command = lambda: None
++    events = []
++    current_step = 0
++
++    def resample_velocity(env_ids):
++        events.append((current_step, "velocity"))
++        command_term.time_left[env_ids] = 10.0
++        command_term.command_counter[env_ids] += 1
++
++    def assign_gait(env_ids, choices, *, add_theta_noise):
++        assert add_theta_noise is False
++        events.append((current_step, "gait"))
++        command_term.foot_thetas[env_ids] = command_term.init_foot_thetas[choices]
++        command_term._update_gait_timing(env_ids)
++
++    def update_timing(env_ids):
++        events.append((current_step, "timing"))
++
++    command_term._resample = resample_velocity
++    command_term._assign_gait = assign_gait
++    command_term._update_gait_timing = update_timing
++
++    for current_step in range(1, 1001):
++        command_term._env.common_step_counter = current_step
++        command_term.compute(0.02)
++
++    assert events == [
++        (250, "gait"),
++        (250, "timing"),
++        (500, "velocity"),
++        (500, "gait"),
++        (500, "timing"),
++        (750, "gait"),
++        (750, "timing"),
++        (1000, "gait"),
++        (1000, "timing"),
++    ]
++
++
+ def test_zero_command_remains_zero_and_observation_transform_remains_involutive():
+     obs, _, _, _ = _make_valid_observations((8,), seed=5)
+     obs[..., _LAYOUT.desired_base_twist] = 0.0
+@@ -349,11 +954,368 @@ def test_half_bound_touchdown_order_reverses_between_partner_rows():
+ 
+ def test_current_gait_library_time_reversal_closure_is_explicit():
+     gaits = _wrap(_configured_gaits())
++    partner_indices = (0, 1, 3, 2, 5, 4, 8, 9, 6, 7)
++    expected_gaits = (
++        (0.0, 0.5, 0.5, 0.0),
++        (0.0, 0.0, 0.5, 0.5),
++        (0.13, -0.13, 0.5, 0.5),
++        (-0.13, 0.13, 0.5, 0.5),
++        (0.0, 0.0, 0.63, 0.37),
++        (0.0, 0.0, 0.37, 0.63),
++        (-0.13, 0.13, 0.63, 0.37),
++        (0.13, -0.13, 0.63, 0.37),
++        (0.13, -0.13, 0.37, 0.63),
++        (-0.13, 0.13, 0.37, 0.63),
++    )
++
++    assert torch.allclose(
++        _configured_gaits(),
++        torch.tensor(expected_gaits, dtype=torch.float64),
++        atol=0.0,
++        rtol=0.0,
++    )
++    for gait_index, partner_index in enumerate(partner_indices):
++        _assert_phases_close(_wrap(-gaits[gait_index]), gaits[partner_index])
++
++
++def test_training_gait_distribution_is_time_reversal_invariant_and_family_balanced():
++    weights = torch.tensor(symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS, dtype=torch.float64)
++    probabilities = weights / weights.sum()
++
++    assert probabilities.tolist() == pytest.approx((0.25, 0.25, *(0.0625,) * 8))
++    assert probabilities.tolist() == pytest.approx(
++        tuple(probabilities[index] for index in (0, 1, 3, 2, 5, 4, 8, 9, 6, 7))
++    )
++    family_probabilities = torch.stack(
++        (probabilities[0], probabilities[1], probabilities[2:6].sum(), probabilities[6:].sum())
++    )
++    assert family_probabilities.tolist() == pytest.approx((0.25, 0.25, 0.25, 0.25))
++
++
++def test_leg_permutation_penalty_ignores_non_synchronous_pairs():
++    joint_ranges = torch.tensor(symm_quadruped.SYMM_QUADRUPED_JOINT_RANGES)
++    joint_pos = torch.zeros((2, 12))
++    joint_pos[:, :3] = 0.1 * joint_ranges
++    foot_thetas = torch.tensor(
++        (
++            (0.0, 0.02, 0.3, 0.4),
++            (0.0, 0.020001, 0.3, 0.4),
++        )
++    )
++
++    penalty = _leg_permutation_penalty(
++        foot_thetas,
++        joint_pos,
++        leg_pairs=(("FL", "FR"),),
++    )
++
++    assert penalty[0] < 0.0
++    assert penalty[1] == 0.0
++
++
++def test_leg_permutation_penalty_returns_zero_without_configured_pairs():
++    penalty = _leg_permutation_penalty(
++        torch.zeros((2, 4)),
++        torch.ones((2, 12)),
++        leg_pairs=(),
++    )
++
++    assert torch.equal(penalty, torch.zeros_like(penalty))
++
++
++def test_leg_permutation_penalty_preserves_joint_tensor_dtype():
++    penalty = _leg_permutation_penalty(
++        torch.zeros((1, 4), dtype=torch.float64),
++        torch.ones((1, 12), dtype=torch.float64),
++        leg_pairs=(("FL", "FR"),),
++    )
++
++    assert penalty.dtype == torch.float64
++
++
++def test_leg_permutation_penalty_wraps_synchronous_offsets_in_cycle_units():
++    joint_ranges = torch.tensor(symm_quadruped.SYMM_QUADRUPED_JOINT_RANGES)
++    joint_pos = torch.zeros((2, 12))
++    joint_pos[:, :3] = 0.1 * joint_ranges
++    foot_thetas = torch.tensor(
++        (
++            (0.999, 0.001, 0.3, 0.4),
++            (-0.001, 0.001, 0.3, 0.4),
++        )
++    )
++
++    penalty = _leg_permutation_penalty(
++        foot_thetas,
++        joint_pos,
++        leg_pairs=(("FL", "FR"),),
++    )
++
++    assert penalty[0] < 0.0
++    assert torch.allclose(penalty[0], penalty[1], atol=1.0e-7, rtol=0.0)
++
+ 
+-    _assert_phases_close(_wrap(-gaits[0]), gaits[0])
+-    _assert_phases_close(_wrap(-gaits[1]), gaits[1])
+-    _assert_phases_close(_wrap(-gaits[2]), gaits[3])
+-    _assert_phases_close(_wrap(-gaits[3]), gaits[2])
+-    for gallop in gaits[4:]:
+-        partner = _wrap(-gallop)
+-        assert not any(torch.allclose(partner, gait, atol=1.0e-12, rtol=0.0) for gait in gaits)
++def test_leg_permutation_penalty_normalizes_by_synchronous_pair_count():
++    normalized_error = 0.1
++    joint_ranges = torch.tensor(symm_quadruped.SYMM_QUADRUPED_JOINT_RANGES)
++    joint_pos = torch.zeros((2, 12))
++    joint_pos[:, :3] = normalized_error * joint_ranges
++    joint_pos[:, 6:9] = normalized_error * joint_ranges
++    foot_thetas = torch.tensor(
++        (
++            (0.13, -0.13, 0.5, 0.5),
++            (0.0, 0.0, 0.5, 0.5),
++        )
++    )
++
++    penalty = _leg_permutation_penalty(
++        foot_thetas,
++        joint_pos,
++        leg_pairs=(("FL", "FR"), ("RL", "RR")),
++    )
++
++    expected = -(1.0 - torch.exp(torch.tensor(-5.0 * normalized_error)))
++    assert torch.allclose(penalty, expected.expand_as(penalty), atol=1.0e-6, rtol=0.0)
++
++
++def test_leg_permutation_penalty_shapes_the_mean_of_different_active_pair_errors():
++    joint_ranges = torch.tensor(symm_quadruped.SYMM_QUADRUPED_JOINT_RANGES)
++    joint_pos = torch.zeros((1, 12))
++    joint_pos[:, :3] = 0.1 * joint_ranges
++    joint_pos[:, 6:9] = 0.3 * joint_ranges
++
++    penalty = _leg_permutation_penalty(
++        torch.zeros((1, 4)),
++        joint_pos,
++        leg_pairs=(("FL", "FR"), ("RL", "RR")),
++    )
++
++    expected = -(1.0 - torch.exp(torch.tensor(-5.0 * 0.2)))
++    assert penalty.item() == pytest.approx(expected.item(), abs=1.0e-6)
++
++
++def test_foot_phase_penalty_sums_over_feet():
++    foot_speeds = torch.ones((1, 4, 3))
++    gait_command = SimpleNamespace(
++        periodic_force_weights=lambda: -torch.ones((1, 4)),
++        periodic_speed_weights=lambda: -torch.ones((1, 4)),
++    )
++    env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        scene={"robot": SimpleNamespace(data=SimpleNamespace(body_lin_vel_w=SimpleNamespace(torch=foot_speeds)))},
++        command_manager=SimpleNamespace(get_term=lambda _: gait_command),
++    )
++
++    penalty = symm_quadruped.foot_phase_penalty(
++        env,
++        command_name="base_velocity",
++        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
++    )
++
++    expected_per_foot_penalty = -(1.0 - math.exp(-2.0 * math.sqrt(3.0)))
++    assert penalty.item() == pytest.approx(4.0 * expected_per_foot_penalty)
++
++
++def test_hip_action_penalty_is_already_normalized_over_hip_actions():
++    actions = torch.zeros((2, 12))
++    actions[1, symm_quadruped.SYMM_QUADRUPED_HIP_ACTION_IDS] = 0.4
++    env = SimpleNamespace(action_manager=SimpleNamespace(action=actions))
++
++    penalty = symm_quadruped.hip_action_penalty(env)
++
++    assert penalty[0].item() == 0.0
++    assert penalty[1].item() == pytest.approx(-(1.0 - math.exp(-0.5 * 0.4)))
++    assert torch.all((penalty >= -1.0) & (penalty <= 0.0))
++
++
++@pytest.mark.parametrize("phase_sync_tolerance", (-0.001, 0.501, float("nan"), float("inf")))
++def test_leg_permutation_penalty_rejects_invalid_phase_tolerance(phase_sync_tolerance):
++    with pytest.raises(ValueError, match="phase_sync_tolerance"):
++        _leg_permutation_penalty(
++            torch.zeros((1, 4)),
++            torch.zeros((1, 12)),
++            leg_pairs=(),
++            phase_sync_tolerance=phase_sync_tolerance,
++        )
++
++
++def test_default_theta_noise_cannot_change_synchronous_pair_classification():
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    noise_support = torch.arange(-cfg.noise_level_theta, cfg.noise_level_theta) * cfg.noise_scale_theta
++    pairs = symm_quadruped.SYMM_QUADRUPED_LEG_PAIRS
++    phase_index = symm_quadruped.SYMM_QUADRUPED_LEG_PHASE_INDEX
++    gaits = _configured_gaits()
++
++    assert cfg.add_noise_theta is True
++    assert noise_support.tolist() == pytest.approx((-0.002, -0.001, 0.0, 0.001))
++
++    nominal_active_counts = []
++    for gait in gaits:
++        active_count = 0
++        for tag_a, tag_b in pairs:
++            phase_a = gait[phase_index[tag_a]]
++            phase_b = gait[phase_index[tag_b]]
++            nominal_distance = torch.abs(torch.remainder(phase_a - phase_b + 0.5, 1.0) - 0.5)
++            nominal_is_active = nominal_distance <= 0.02
++            active_count += int(nominal_is_active)
++            for noise_a in noise_support:
++                for noise_b in noise_support:
++                    distance = torch.abs(torch.remainder(phase_a + noise_a - phase_b - noise_b + 0.5, 1.0) - 0.5)
++                    assert bool(distance <= 0.02) is bool(nominal_is_active)
++        nominal_active_counts.append(active_count)
++
++    assert nominal_active_counts == [2, 2, 1, 1, 1, 1, 0, 0, 0, 0]
++
++
++def test_gait_resampling_adds_configured_phase_noise(monkeypatch):
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.calculate_from_sampling_curve = False
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=0,
++        step_dt=0.02,
++    )
++    command_term.init_foot_thetas = _configured_gaits().to(dtype=torch.float32)
++    command_term.foot_theta_sampling_weights = torch.tensor(
++        symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS, dtype=torch.float32
++    )
++    command_term.foot_theta_sampling_weights /= command_term.foot_theta_sampling_weights.sum()
++    command_term.foot_thetas = torch.zeros((1, 4))
++    command_term.gait_periods = torch.zeros(1)
++    command_term.duty_factors = torch.zeros(1)
++    command_term.kappa = torch.zeros(1)
++    command_term.gait_time_left = torch.zeros(1)
++    command_term.gait_counter = torch.zeros(1, dtype=torch.long)
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    _initialize_gait_clock(command_term)
++    multinomial_calls = []
++    randint_calls = []
++
++    def fake_multinomial(input, num_samples, replacement):
++        multinomial_calls.append((input.clone(), num_samples, replacement))
++        return torch.zeros((num_samples,), dtype=torch.long, device=input.device)
++
++    def fake_randint(*, low, high, size, device):
++        randint_calls.append((low, high, size, device))
++        return torch.tensor(((-2, -1, 0, 1),), dtype=torch.long, device=device)
++
++    monkeypatch.setattr(torch, "multinomial", fake_multinomial)
++    monkeypatch.setattr(torch, "randint", fake_randint)
++    command_term._resample_gait([0])
++
++    assert len(multinomial_calls) == 1
++    sampled_weights, num_samples, replacement = multinomial_calls[0]
++    assert sampled_weights.tolist() == pytest.approx((0.25, 0.25, *(0.0625,) * 8))
++    assert (num_samples, replacement) == (1, True)
++    assert randint_calls == [(-2, 2, (1, 4), torch.device("cpu"))]
++    expected = command_term.init_foot_thetas[0] + torch.tensor((-0.002, -0.001, 0.0, 0.001))
++    assert torch.allclose(command_term.foot_thetas[0], expected)
++
++
++def test_gait_resampling_without_weights_preserves_uniform_sampling(monkeypatch):
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.calculate_from_sampling_curve = False
++    cfg.add_noise_theta = False
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        common_step_counter=0,
++        step_dt=0.02,
++    )
++    command_term.init_foot_thetas = _configured_gaits().to(dtype=torch.float32)
++    command_term.foot_theta_sampling_weights = None
++    command_term.foot_thetas = torch.zeros((1, 4))
++    command_term.gait_periods = torch.zeros(1)
++    command_term.duty_factors = torch.zeros(1)
++    command_term.kappa = torch.zeros(1)
++    command_term.gait_time_left = torch.zeros(1)
++    command_term.gait_counter = torch.zeros(1, dtype=torch.long)
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    _initialize_gait_clock(command_term)
++    randint_calls = []
++
++    def fake_randint(*, low, high, size, device):
++        randint_calls.append((low, high, size, device))
++        return torch.zeros(size, dtype=torch.long, device=device)
++
++    monkeypatch.setattr(torch, "multinomial", lambda *args, **kwargs: pytest.fail("uniform sampling used weights"))
++    monkeypatch.setattr(torch, "randint", fake_randint)
++    command_term._resample_gait([0])
++
++    assert randint_calls == [(0, 10, (1,), torch.device("cpu"))]
++    assert torch.equal(command_term.foot_thetas[0], command_term.init_foot_thetas[0])
++
++
++def test_fixed_gait_sequence_uses_all_rows_in_order_for_five_seconds(monkeypatch):
++    cfg = symm_quadruped.GaitVelocityCommandCfg()
++    cfg.calculate_from_sampling_curve = False
++    cfg.gait_period = 0.42
++    cfg.duty_factor = 0.47
++    cfg.gait_sequence_enabled = True
++    cfg.gait_sequence_duration_s = 5.0
++    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
++    command_term.cfg = cfg
++    command_term._env = SimpleNamespace(
++        num_envs=1,
++        device=torch.device("cpu"),
++        step_dt=0.02,
++        common_step_counter=0,
++    )
++    command_term.init_foot_thetas = torch.tensor(
++        symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS, dtype=torch.float32
++    )
++    command_term.foot_theta_sampling_weights = None
++    command_term.foot_thetas = torch.zeros((1, 4))
++    command_term.gait_periods = torch.full((1,), 0.42)
++    command_term.duty_factors = torch.full((1,), 0.47)
++    command_term.kappa = torch.zeros(1)
++    command_term.gait_time_left = torch.zeros(1)
++    command_term.gait_counter = torch.zeros(1, dtype=torch.long)
++    command_term.gait_sequence_indices = torch.full((1,), -1, dtype=torch.long)
++    command_term.metrics = {"gait_period": torch.zeros(1), "duty_factor": torch.zeros(1)}
++    _initialize_gait_clock(command_term)
++
++    expected_gaits = torch.tensor(symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_ROWS, dtype=torch.float32)
++    assert torch.equal(command_term.init_foot_thetas, expected_gaits)
++
++    monkeypatch.setattr(torch, "randint", lambda *args, **kwargs: pytest.fail("fixed sequence sampled randomly"))
++    monkeypatch.setattr(torch, "multinomial", lambda *args, **kwargs: pytest.fail("fixed sequence sampled randomly"))
++
++    boundaries = (
++        (0, 0),
++        (249, 0),
++        (250, 1),
++        (499, 1),
++        (500, 2),
++        (749, 2),
++        (750, 3),
++        (999, 3),
++        (1000, 4),
++        (1249, 4),
++        (1250, 5),
++        (1499, 5),
++        (1500, 0),
++    )
++    for common_step_counter, expected_gait_index in boundaries:
++        command_term._env.common_step_counter = common_step_counter
++        command_term._update_gait_sequence([0])
++        assert command_term.gait_sequence_indices.item() == expected_gait_index
++        assert torch.equal(command_term.foot_thetas[0], command_term.init_foot_thetas[expected_gait_index])
++        assert command_term.gait_periods.item() == pytest.approx(0.42)
++        assert command_term.duty_factors.item() == pytest.approx(0.47)
++
++    command_term._env.common_step_counter = 2231
++    command_term.foot_thetas.fill_(9.0)
++    command_term._resample_gait([0])
++    assert command_term.gait_sequence_indices.item() == 2
++    assert torch.equal(command_term.foot_thetas[0], command_term.init_foot_thetas[2])
++
++    for invalid_duration_s in (0.0, -1.0, 0.001, float("nan"), float("inf")):
++        cfg.gait_sequence_duration_s = invalid_duration_s
++        with pytest.raises(ValueError, match="gait_sequence_duration_s"):
++            command_term._update_gait_sequence([0], force=True)
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py b/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
+index 9a922a434..c91a8b5e0 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
+@@ -7,12 +7,34 @@
+ 
+ from __future__ import annotations
+ 
++import importlib.util
++import math
++from pathlib import Path
+ from types import SimpleNamespace
+ 
+ import pytest
+ import torch
+-
+-from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_ppo import TimeReversalPPO
++from rsl_rl.algorithms import PPO
++from rsl_rl.runners import OnPolicyRunner
++from tensordict import TensorDict
++
++_PPO_MODULE_PATH = (
++    Path(__file__).parents[1]
++    / "isaaclab_tasks"
++    / "manager_based"
++    / "locomotion"
++    / "velocity"
++    / "config"
++    / "symm_quadruped"
++    / "time_reversal_ppo.py"
++)
++_PPO_MODULE_SPEC = importlib.util.spec_from_file_location("_symm_time_reversal_ppo", _PPO_MODULE_PATH)
++assert _PPO_MODULE_SPEC is not None and _PPO_MODULE_SPEC.loader is not None
++_PPO_MODULE = importlib.util.module_from_spec(_PPO_MODULE_SPEC)
++_PPO_MODULE_SPEC.loader.exec_module(_PPO_MODULE)
++TimeReversalPPO = _PPO_MODULE.TimeReversalPPO
++time_reversal_loss_scale = _PPO_MODULE.time_reversal_loss_scale
++time_reversal_weighted_losses = _PPO_MODULE.time_reversal_weighted_losses
+ 
+ 
+ class _DummyDistribution:
+@@ -25,6 +47,305 @@ class _DummyActor:
+         self.distribution = _DummyDistribution()
+ 
+ 
++class _CountingActor(torch.nn.Module):
++    def __init__(self, events):
++        super().__init__()
++        self.weight = torch.nn.Parameter(torch.tensor(0.0))
++        self.distribution = SimpleNamespace(std_param=None)
++        self.is_recurrent = False
++        self.events = events
++        self.forward_calls = 0
++
++    def forward(self, observations, **_kwargs):
++        self.events.append("actor")
++        self.forward_calls += 1
++        batch_size = observations["policy"].shape[0]
++        mean = self.weight.expand(batch_size, 12)
++        self.output_distribution_params = (mean,)
++        self.output_entropy = self.weight.expand(batch_size)
++        return mean
++
++    def get_output_log_prob(self, actions):
++        return self.weight.expand(actions.shape[0])
++
++
++class _CountingCritic(torch.nn.Module):
++    def __init__(self, events):
++        super().__init__()
++        self.weight = torch.nn.Parameter(torch.tensor(0.0))
++        self.is_recurrent = False
++        self.events = events
++        self.forward_calls = 0
++
++    def forward(self, observations, **_kwargs):
++        self.events.append("critic")
++        self.forward_calls += 1
++        return self.weight.expand(observations["policy"].shape[0], 1)
++
++
++class _TwoBatchStorage:
++    def __init__(self, batch):
++        self.batch = batch
++        self.actions = torch.zeros(2, 12)
++        self.distribution_params = (torch.zeros(2, 12),)
++        self.cleared = False
++
++    def mini_batch_generator(self, _num_mini_batches, _num_learning_epochs):
++        return iter((self.batch, self.batch))
++
++    def clear(self):
++        self.cleared = True
++
++
++def _schedule_algorithm(
++    iteration: int,
++    *,
++    warmup_iterations: int = 0,
++    rampup_iterations: int = 2000,
++    ramp_shape: str = "linear",
++    enabled: bool = True,
++) -> TimeReversalPPO:
++    algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
++    algorithm.current_learning_iteration = iteration
++    algorithm._time_reversal_update_count = iteration
++    algorithm.symmetry = {
++        "use_time_reversal_regularization": enabled,
++        "use_data_augmentation": False,
++        "use_mirror_loss": True,
++        "mirror_loss_coeff": 0.20,
++        "value_loss_coeff": 0.10,
++        "warmup_iterations": warmup_iterations,
++        "rampup_iterations": rampup_iterations,
++        "ramp_shape": ramp_shape,
++    }
++    return algorithm
++
++
++@pytest.mark.parametrize("ramp_shape", ["linear", "half_cosine"])
++@pytest.mark.parametrize(("iteration", "expected"), [(499, 0.0), (500, 1.0), (501, 1.0)])
++def test_legacy_hard_step_schedule(iteration, expected, ramp_shape):
++    assert time_reversal_loss_scale(iteration, 500, 0, ramp_shape) == expected
++
++
++@pytest.mark.parametrize(
++    ("iteration", "expected"),
++    [(0, 0.0), (500, 0.25), (1000, 0.5), (1500, 0.75), (2000, 1.0), (3000, 1.0)],
++)
++def test_immediate_linear_schedule(iteration, expected):
++    assert time_reversal_loss_scale(iteration, 0, 2000, "linear") == expected
++
++
++@pytest.mark.parametrize(
++    ("iteration", "expected"),
++    [(499, 0.0), (500, 0.0), (1250, 0.5), (2000, 1.0)],
++)
++def test_delayed_linear_schedule(iteration, expected):
++    assert time_reversal_loss_scale(iteration, 500, 1500, "linear") == expected
++
++
++@pytest.mark.parametrize(
++    ("iteration", "expected"),
++    [
++        (0, 0.0),
++        (500, 0.1464466094),
++        (1000, 0.5),
++        (1500, 0.8535533906),
++        (2000, 1.0),
++    ],
++)
++def test_half_cosine_schedule(iteration, expected):
++    assert time_reversal_loss_scale(iteration, 0, 2000, "half_cosine") == pytest.approx(expected)
++
++
++@pytest.mark.parametrize(
++    ("warmup_iterations", "rampup_iterations"),
++    [(-1, 0), (0, -1)],
++)
++def test_schedule_rejects_negative_iteration_counts(warmup_iterations, rampup_iterations):
++    with pytest.raises(ValueError, match="must be a nonnegative integer"):
++        time_reversal_loss_scale(0, warmup_iterations, rampup_iterations, "linear")
++
++
++def test_schedule_rejects_unsupported_ramp_shape_even_for_hard_step():
++    with pytest.raises(ValueError, match="ramp_shape"):
++        time_reversal_loss_scale(500, 500, 0, "quadratic")
++
++
++def test_actor_and_value_coefficients_share_scale_without_mutating_targets():
++    algorithm = _schedule_algorithm(500)
++    configured_targets = dict(algorithm.symmetry)
++
++    scale, mirror_coeff, value_coeff = algorithm._effective_time_reversal_coefficients()
++
++    assert scale == 0.25
++    assert mirror_coeff == 0.05
++    assert value_coeff == 0.025
++    assert algorithm.symmetry == configured_targets
++
++
++def test_effective_coefficients_cover_exact_linear_schedule_values():
++    expected = {
++        0: (0.0, 0.0, 0.0),
++        500: (0.25, 0.05, 0.025),
++        1000: (0.5, 0.10, 0.05),
++        1500: (0.75, 0.15, 0.075),
++        2000: (1.0, 0.20, 0.10),
++        3000: (1.0, 0.20, 0.10),
++    }
++
++    for iteration, values in expected.items():
++        assert _schedule_algorithm(iteration)._effective_time_reversal_coefficients() == pytest.approx(values)
++
++
++def test_zero_scale_computes_schedule_once_and_skips_extra_time_reversal_forwards():
++    events = []
++    actor = _CountingActor(events)
++    critic = _CountingCritic(events)
++    transform_calls = 0
++
++    def transform(**_kwargs):
++        nonlocal transform_calls
++        transform_calls += 1
++        raise AssertionError("zero-scale update must not compute transformed observations")
++
++    batch_size = 2
++    batch = SimpleNamespace(
++        observations=TensorDict({"policy": torch.zeros(batch_size, 72)}, batch_size=[batch_size]),
++        actions=torch.zeros(batch_size, 12),
++        old_actions_log_prob=torch.zeros(batch_size),
++        values=torch.zeros(batch_size, 1),
++        advantages=torch.ones(batch_size, 1),
++        returns=torch.zeros(batch_size, 1),
++        masks=None,
++        hidden_states=(None, None),
++        old_distribution_params=(),
++    )
++    algorithm = _schedule_algorithm(0)
++    algorithm.symmetry["data_augmentation_func"] = transform
++    algorithm.symmetry["_env"] = None
++    algorithm.actor = actor
++    algorithm.critic = critic
++    algorithm.storage = _TwoBatchStorage(batch)
++    algorithm.optimizer = torch.optim.SGD((*actor.parameters(), *critic.parameters()), lr=0.01)
++    algorithm.rnd = None
++    algorithm.rnd_optimizer = None
++    algorithm.num_mini_batches = 2
++    algorithm.num_learning_epochs = 1
++    algorithm.normalize_advantage_per_mini_batch = False
++    algorithm.desired_kl = None
++    algorithm.schedule = "fixed"
++    algorithm.use_clipped_value_loss = False
++    algorithm.value_loss_coef = 1.0
++    algorithm.entropy_coef = 0.0
++    algorithm.clip_param = 0.2
++    algorithm.max_grad_norm = 1.0
++    algorithm.device = "cpu"
++    algorithm.is_multi_gpu = False
++    algorithm._actor_mean_abort_count = 0
++    effective_coeff_calls = 0
++    effective_coefficients = algorithm._effective_time_reversal_coefficients
++
++    def counted_effective_coefficients():
++        nonlocal effective_coeff_calls
++        effective_coeff_calls += 1
++        events.append("effective_coefficients")
++        return effective_coefficients()
++
++    algorithm._effective_time_reversal_coefficients = counted_effective_coefficients
++
++    losses = algorithm.update()
++
++    assert effective_coeff_calls == 1
++    assert events[0] == "effective_coefficients"
++    assert actor.forward_calls == 2
++    assert critic.forward_calls == 2
++    assert transform_calls == 0
++    assert algorithm.storage.cleared
++    assert losses["symmetry"] == 0.0
++    assert losses["tr_value"] == 0.0
++    assert losses["trs_scale"] == 0.0
++    assert losses["effective_mirror_coeff"] == 0.0
++    assert losses["effective_tr_value_coeff"] == 0.0
++    assert losses["weighted_symmetry"] == 0.0
++    assert losses["weighted_tr_value"] == 0.0
++    assert losses["weighted_trs_total"] == 0.0
++
++
++def test_zero_scale_has_exactly_zero_weighted_auxiliary_objective():
++    scale, mirror_coeff, value_coeff = _schedule_algorithm(0)._effective_time_reversal_coefficients()
++
++    weighted = time_reversal_weighted_losses(mirror_coeff, value_coeff, 123.0, 456.0)
++
++    assert scale == 0.0
++    assert mirror_coeff == 0.0
++    assert value_coeff == 0.0
++    assert weighted == (0.0, 0.0, 0.0)
++
++
++def test_weighted_auxiliary_logs_use_mean_raw_losses():
++    assert time_reversal_weighted_losses(0.05, 0.025, 2.0, 4.0) == pytest.approx((0.10, 0.10, 0.20))
++
++
++def test_disabled_trs_has_zero_scale_coefficients_and_weighted_losses():
++    scale, mirror_coeff, value_coeff = _schedule_algorithm(2000, enabled=False)._effective_time_reversal_coefficients()
++
++    assert (scale, mirror_coeff, value_coeff) == (0.0, 0.0, 0.0)
++    assert time_reversal_weighted_losses(mirror_coeff, value_coeff, 1.0, 1.0) == (0.0, 0.0, 0.0)
++
++
++def test_resume_uses_update_after_last_completed_checkpoint_iteration(monkeypatch, tmp_path):
++    monkeypatch.setattr(PPO, "save", lambda *_args, **_kwargs: {})
++    monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: True)
++
++    checkpoint_path = tmp_path / "model_499.pt"
++    save_runner = OnPolicyRunner.__new__(OnPolicyRunner)
++    save_runner.alg = _schedule_algorithm(499, warmup_iterations=500, rampup_iterations=0)
++    save_runner.current_learning_iteration = 499
++    save_runner.logger = SimpleNamespace(save_model=lambda *_args, **_kwargs: None)
++    save_runner.save(str(checkpoint_path))
++    assert torch.load(checkpoint_path, weights_only=False)["iter"] == 499
++
++    algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
++    resume_runner = OnPolicyRunner.__new__(OnPolicyRunner)
++    resume_runner.alg = algorithm
++    resume_runner.current_learning_iteration = 0
++
++    resume_runner.load(str(checkpoint_path))
++
++    # RSL-RL saves the last completed index. TimeReversalPPO advances the
++    # ephemeral loaded mapping before OnPolicyRunner restores its counter.
++    assert resume_runner.current_learning_iteration == 500
++    assert algorithm.current_learning_iteration == 500
++    assert algorithm._time_reversal_update_count == 500
++    assert algorithm._effective_time_reversal_coefficients() == (1.0, 0.20, 0.10)
++    assert torch.load(checkpoint_path, weights_only=False)["iter"] == 499
++
++
++def test_partial_checkpoint_load_does_not_advance_schedule_counter(monkeypatch):
++    algorithm = _schedule_algorithm(123)
++    checkpoint = {"iter": 499}
++    monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: False)
++
++    loaded_iteration = algorithm.load(checkpoint, load_cfg={"iteration": False}, strict=True)
++
++    assert not loaded_iteration
++    assert checkpoint["iter"] == 499
++    assert algorithm.current_learning_iteration == 123
++    assert algorithm._time_reversal_update_count == 123
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [("warmup_iterations", -1), ("rampup_iterations", -1), ("mirror_loss_coeff", float("nan"))],
++)
++def test_algorithm_runtime_validation_rejects_invalid_overrides(field, value):
++    algorithm = _schedule_algorithm(0)
++    algorithm.symmetry[field] = value
++
++    with pytest.raises(ValueError, match=field):
++        algorithm._validate_time_reversal_configuration()
++
++
+ def test_zeroed_no_trs_configuration_disables_time_reversal_update_path():
+     algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
+     algorithm.symmetry = {
+@@ -102,3 +423,16 @@ def test_time_reversal_mask_includes_zero_velocity_commands():
+     mask = algorithm._time_reversal_mask(observations)
+ 
+     assert torch.equal(mask, torch.ones(3, 1))
++
++
++def test_masked_mse_with_no_selected_commands_is_finite_zero():
++    prediction = torch.full((2, 3), float("nan"), requires_grad=True)
++    target = torch.zeros_like(prediction)
++    mask = torch.zeros(2, 1)
++
++    loss = TimeReversalPPO._masked_mse(prediction, target, mask)
++    loss.backward()
++
++    assert math.isfinite(loss.item())
++    assert loss.item() == 0.0
++    assert torch.equal(prediction.grad, torch.zeros_like(prediction))

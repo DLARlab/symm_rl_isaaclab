@@ -1,0 +1,12 @@
+{
+  "cell_id": "gait_00_trot__vx_pos_1p5__seed_0042",
+  "ended_at": "2026-08-22T16:25:42.461996+00:00",
+  "expected_steps": 750,
+  "outcome": "completed",
+  "plan_sha256": "5f8f08a2af36c3bf9d70e3091cdb4cbb121ad2156be636729becb8ae247fa68c",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "started_at": "2026-08-22T16:25:18.008172+00:00",
+  "status": "complete",
+  "termination_terms": []
+}

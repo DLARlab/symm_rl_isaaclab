@@ -1,0 +1,91 @@
+run,label,direction,family,metric,metric_label,unit,cells,signed_imbalance_percent,mean_absolute_imbalance_percent,total_per_directed_m
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,trot,torque_squared,Torque²,N² m² s,3,10.57159247557867,10.57159247557867,253.92527264661248
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,bound,torque_squared,Torque²,N² m² s,3,35.24253816761673,35.24253816761673,450.94639584066107
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,half_bound,torque_squared,Torque²,N² m² s,12,28.522175210952323,28.522175210952323,362.24579683476037
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,gallop,torque_squared,Torque²,N² m² s,12,21.07195696595822,21.07195696595822,352.079444475995
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,all_family_balanced,torque_squared,Torque²,N² m² s,30,23.852065705026487,23.852065705026487,354.7992274495072
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,trot,absolute_work,Absolute work,J,3,6.548534478686878,7.211926792904969,65.73204919519218
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,bound,absolute_work,Absolute work,J,3,42.24867922460805,42.24867922460805,265.1802126106456
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,half_bound,absolute_work,Absolute work,J,12,21.51374617421807,21.51374617421807,164.8294524035279
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,gallop,absolute_work,Absolute work,J,12,16.292305593472637,16.38547989845409,146.90885246852702
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,all_family_balanced,absolute_work,Absolute work,J,30,21.65081636774641,21.839958022546295,160.66264166947317
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,trot,vertical_grf_impulse,Vertical GRF impulse,N s,3,3.7378751415148455,5.505186390967452,224.64504816743866
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,bound,vertical_grf_impulse,Vertical GRF impulse,N s,3,7.74554172847526,7.74554172847526,205.1567272585494
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,half_bound,vertical_grf_impulse,Vertical GRF impulse,N s,12,9.213605710288798,9.213605710288798,214.4196927096999
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,gallop,vertical_grf_impulse,Vertical GRF impulse,N s,12,7.086775625343306,7.412621729751859,218.24732875918417
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,backward,all_family_balanced,vertical_grf_impulse,Vertical GRF impulse,N s,30,6.945949551405552,7.469238889870843,215.61719922371805
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,trot,torque_squared,Torque²,N² m² s,3,1.6707140942135592,1.6707140942135592,271.9457191238272
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,bound,torque_squared,Torque²,N² m² s,3,23.012384541894267,23.012384541894267,546.9053439998326
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,half_bound,torque_squared,Torque²,N² m² s,12,5.545860904760175,11.351912822665236,409.7299305166719
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,gallop,torque_squared,Torque²,N² m² s,12,-5.482992944114457,10.052992954943084,346.6397946142417
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,all_family_balanced,torque_squared,Torque²,N² m² s,30,6.186491649188386,11.522001103429037,393.80519706364333
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,trot,absolute_work,Absolute work,J,3,-6.569932666264312,6.569932666264312,70.16882811562726
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,bound,absolute_work,Absolute work,J,3,56.50312565406454,56.50312565406454,423.88217723776944
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,half_bound,absolute_work,Absolute work,J,12,29.28330694590491,29.41397962586902,245.4688091712218
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,gallop,absolute_work,Absolute work,J,12,5.539008717385118,11.487271962904751,159.27451831939746
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,all_family_balanced,absolute_work,Absolute work,J,30,21.188877162772563,25.993577477275654,224.698583211004
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,trot,vertical_grf_impulse,Vertical GRF impulse,N s,3,-5.281415979927751,5.281415979927751,218.38478577015954
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,bound,vertical_grf_impulse,Vertical GRF impulse,N s,3,-6.9532808315092,6.9532808315092,209.41058015715439
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,half_bound,vertical_grf_impulse,Vertical GRF impulse,N s,12,-7.6776154416972515,7.7760137254115085,212.59778963248837
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,gallop,vertical_grf_impulse,Vertical GRF impulse,N s,12,-6.103565372039765,6.103565372039765,216.27338062435635
+2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2,No TRS,forward,all_family_balanced,vertical_grf_impulse,Vertical GRF impulse,N s,30,-6.503969406293492,6.528568977222056,214.16663404603966
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,trot,torque_squared,Torque²,N² m² s,3,0.4092196076941792,3.423183217081221,236.88823320916683
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,bound,torque_squared,Torque²,N² m² s,3,-5.53914160541548,9.505494740710132,469.83825853183106
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,half_bound,torque_squared,Torque²,N² m² s,12,0.25435389514183826,5.595760512687811,338.7262652125623
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,gallop,torque_squared,Torque²,N² m² s,12,-4.020998853563212,6.423519594292962,315.9477013685793
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,all_family_balanced,torque_squared,Torque²,N² m² s,30,-2.2241417390356686,6.236989516193032,340.35011458053486
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,trot,absolute_work,Absolute work,J,3,11.10768573781562,11.10768573781562,57.260361829233865
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,bound,absolute_work,Absolute work,J,3,-20.336162695812437,20.336162695812437,322.71190795240426
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,half_bound,absolute_work,Absolute work,J,12,-3.129938041462813,6.7322094671934885,169.3438321939085
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,gallop,absolute_work,Absolute work,J,12,4.7630998342254385,6.4400209945141995,133.6489754885563
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,all_family_balanced,absolute_work,Absolute work,J,30,-1.8988287913085478,11.154019723833937,170.74126936602573
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,trot,vertical_grf_impulse,Vertical GRF impulse,N s,3,-2.493873426883724,3.2747115593614278,220.72120547070995
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,bound,vertical_grf_impulse,Vertical GRF impulse,N s,3,-0.35860630350411293,2.4589884994457645,209.53620716716281
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,half_bound,vertical_grf_impulse,Vertical GRF impulse,N s,12,2.442670700286581,4.981421069380823,211.6909439624504
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,gallop,vertical_grf_impulse,Vertical GRF impulse,N s,12,-1.4733818608192184,3.5007742484593884,214.34598056147442
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,backward,all_family_balanced,vertical_grf_impulse,Vertical GRF impulse,N s,30,-0.47079772273011866,3.5539738441618507,214.0735842904494
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,trot,torque_squared,Torque²,N² m² s,3,-9.874399569013603,9.874399569013603,226.1316480131295
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,bound,torque_squared,Torque²,N² m² s,3,2.7243192639866565,4.558427280723177,529.5313940599141
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,half_bound,torque_squared,Torque²,N² m² s,12,4.6213417998160695,7.867693179525834,373.7125700835848
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,gallop,torque_squared,Torque²,N² m² s,12,0.8029616455878316,5.889775909972073,309.85560469237333
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,all_family_balanced,torque_squared,Torque²,N² m² s,30,-0.43144421490576135,7.047573984808672,359.8078042122504
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,trot,absolute_work,Absolute work,J,3,-8.002893864544928,8.002893864544928,54.385323619746295
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,bound,absolute_work,Absolute work,J,3,14.56942690243047,14.56942690243047,386.00474127927254
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,half_bound,absolute_work,Absolute work,J,12,22.804247610695256,22.804247610695256,207.64063859094372
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,gallop,absolute_work,Absolute work,J,12,7.938312777935132,12.409116720175083,140.7881563310021
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,all_family_balanced,absolute_work,Absolute work,J,30,9.327273356628982,14.446421274461434,197.20471495524117
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,trot,vertical_grf_impulse,Vertical GRF impulse,N s,3,-4.973203458455983,4.973203458455983,215.1011622278378
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,bound,vertical_grf_impulse,Vertical GRF impulse,N s,3,0.7295517802968986,1.6018695355345987,204.62564902121562
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,half_bound,vertical_grf_impulse,Vertical GRF impulse,N s,12,-3.34134636481356,5.293237262265973,209.5878447317037
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,gallop,vertical_grf_impulse,Vertical GRF impulse,N s,12,-3.0819927121995296,4.364688114163886,209.23410171260244
+2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2,TRS m0.1/v0.05,forward,all_family_balanced,vertical_grf_impulse,Vertical GRF impulse,N s,30,-2.6667476887930435,4.05824959260511,209.6371894233399
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,trot,torque_squared,Torque²,N² m² s,3,7.459918760437103,7.459918760437103,233.49860269527048
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,bound,torque_squared,Torque²,N² m² s,3,-3.164491995343745,4.557135227974896,536.5565424542093
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,half_bound,torque_squared,Torque²,N² m² s,12,-8.575426929543156,8.575426929543156,516.2766076763645
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,gallop,torque_squared,Torque²,N² m² s,12,-11.058441408469504,11.058441408469504,484.3325381251952
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,all_family_balanced,torque_squared,Torque²,N² m² s,30,-3.834610393229825,7.912730581606164,442.66607273775986
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,trot,absolute_work,Absolute work,J,3,15.744563642339955,15.744563642339955,60.0661438552913
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,bound,absolute_work,Absolute work,J,3,-20.1717461628517,20.1717461628517,385.81479823450195
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,half_bound,absolute_work,Absolute work,J,12,-20.323249863054745,20.323249863054745,347.1461568289838
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,gallop,absolute_work,Absolute work,J,12,-18.917602878967617,18.9575374646293,292.0339758853174
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,all_family_balanced,absolute_work,Absolute work,J,30,-10.917008815633526,18.799274283218924,271.2652687010236
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,trot,vertical_grf_impulse,Vertical GRF impulse,N s,3,-0.07735428522706997,0.7156988431566044,222.47972773426713
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,bound,vertical_grf_impulse,Vertical GRF impulse,N s,3,6.968077262499283,6.968077262499283,209.75506103547903
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,half_bound,vertical_grf_impulse,Vertical GRF impulse,N s,12,5.359400121701864,5.8670040126231635,213.24794187899644
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,gallop,vertical_grf_impulse,Vertical GRF impulse,N s,12,3.878922763319485,5.452762025255442,214.7581561478527
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,backward,all_family_balanced,vertical_grf_impulse,Vertical GRF impulse,N s,30,4.032261465573391,4.750885535883623,215.06022169914883
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,trot,torque_squared,Torque²,N² m² s,3,1.3188088310552029,1.7284070765282005,230.17943257442664
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,bound,torque_squared,Torque²,N² m² s,3,14.469615880879273,14.469615880879273,519.3299837075839
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,half_bound,torque_squared,Torque²,N² m² s,12,14.218202024201476,14.218202024201476,465.3965083889172
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,gallop,torque_squared,Torque²,N² m² s,12,14.324465163154835,14.324465163154835,407.92915150131125
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,all_family_balanced,torque_squared,Torque²,N² m² s,30,11.082772974822698,11.185172536190946,405.70876904305976
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,trot,absolute_work,Absolute work,J,3,-10.945494849876736,10.945494849876736,59.394902269844245
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,bound,absolute_work,Absolute work,J,3,24.803059215344863,24.803059215344863,382.002270309059
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,half_bound,absolute_work,Absolute work,J,12,21.938208186362505,22.016617166116422,310.2448226601185
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,gallop,absolute_work,Absolute work,J,12,18.02584412202191,18.653732627243397,224.71723679536737
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,all_family_balanced,absolute_work,Absolute work,J,30,13.455404168463135,19.104725964645354,244.08980800859726
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,trot,vertical_grf_impulse,Vertical GRF impulse,N s,3,0.3536691774205151,2.653358709760473,217.4036801173418
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,bound,vertical_grf_impulse,Vertical GRF impulse,N s,3,3.576398624596587,3.576398624596587,204.90708963742668
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,half_bound,vertical_grf_impulse,Vertical GRF impulse,N s,12,3.5794608927491134,4.464690741725803,208.80501397342218
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,gallop,vertical_grf_impulse,Vertical GRF impulse,N s,12,4.434360715843671,4.4647255446539615,211.8261586757013
+2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2,TRS m0.2/v0.1,forward,all_family_balanced,vertical_grf_impulse,Vertical GRF impulse,N s,30,2.9859723526524715,3.789793405184206,210.735485600973

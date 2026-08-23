@@ -1,0 +1,7 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+& "$PSScriptRoot\_run.ps1" "analyze_leg_usage.py" @args
+exit $LASTEXITCODE

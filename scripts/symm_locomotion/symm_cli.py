@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import math
 import os
 import re
@@ -31,6 +32,22 @@ LEGACY_ABLATION_TR_VALUE_COEFF = 0.05
 DEFAULT_VIDEO_DURATION_S = 30.0
 DEFAULT_GAIT_SEQUENCE_DURATION_S = 5.0
 GAIT_SEQUENCE_COUNT = 6
+DEFAULT_LEG_USAGE_VELOCITIES_MPS = (-1.5, -1.0, -0.5, 0.5, 1.0, 1.5)
+DEFAULT_LEG_USAGE_SETTLE_S = 5.0
+DEFAULT_LEG_USAGE_MEASURE_S = 10.0
+DEFAULT_LEG_USAGE_EVALUATION_SEED = 42
+LEG_USAGE_PROTECTED_RUNTIME_OPTIONS = {
+    "--symm_leg_usage_plan",
+    "--symm-leg-usage-plan",
+    "--task",
+    "--checkpoint",
+    "--video",
+    "--num_envs",
+    "--num-envs",
+    "--seed",
+    "--rl_library",
+    "--rl-library",
+}
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
 
 TR_RAMP_SHAPES = ("linear", "half_cosine")
@@ -707,6 +724,187 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
     return command + gait_args + rollout_plot_lab_args(args) + extra, checkpoint
 
 
+def add_analyze_leg_usage_args(parser: argparse.ArgumentParser) -> None:
+    """Add fixed-grid leg-usage evaluation and analysis options."""
+    add_common_args(parser)
+    add_checkpoint_args(parser)
+    parser.add_argument(
+        "--velocities",
+        "--vx_values",
+        nargs="+",
+        type=float,
+        default=list(DEFAULT_LEG_USAGE_VELOCITIES_MPS),
+        help="Fixed x velocities [m/s] evaluated for every selected gait row.",
+    )
+    parser.add_argument(
+        "--gait_indices",
+        "--gait-indices",
+        nargs="+",
+        type=int,
+        default=list(range(10)),
+        help="Training gait-library row indices to evaluate (default: all ten rows).",
+    )
+    parser.add_argument(
+        "--settle_s",
+        "--settle-s",
+        type=float,
+        default=DEFAULT_LEG_USAGE_SETTLE_S,
+        help="Per-cell settling duration [s], excluded from metrics.",
+    )
+    parser.add_argument(
+        "--measure_s",
+        "--measure-s",
+        type=float,
+        default=DEFAULT_LEG_USAGE_MEASURE_S,
+        help="Per-cell steady-state measurement duration [s].",
+    )
+    parser.add_argument(
+        "--evaluation_seed",
+        "--evaluation-seed",
+        type=int,
+        default=DEFAULT_LEG_USAGE_EVALUATION_SEED,
+        help="Reset seed shared by the fixed grid.",
+    )
+    parser.add_argument(
+        "--render_cell_plots",
+        "--render-cell-plots",
+        action="store_true",
+        help="Also render the plotter's detailed figures inside every cell folder.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume an identical checkpoint/protocol and skip already completed cells.",
+    )
+    parser.add_argument(
+        "--analyze_only",
+        "--analyze-only",
+        action="store_true",
+        help="Regenerate metrics and figures from an existing identical study without simulation.",
+    )
+
+
+def analyze_leg_usage_lab_args(
+    args: argparse.Namespace,
+    checkpoint: Path,
+    study_path: Path,
+    extra: list[str],
+) -> list[str]:
+    """Build Isaac Lab arguments for the data-only fixed-scenario grid."""
+    return [
+        "play",
+        "--rl_library",
+        "rsl_rl",
+        "--task",
+        args.robot_spec.play_task,
+        "--num_envs",
+        "1",
+        "--checkpoint",
+        str(checkpoint),
+        "--seed",
+        str(args.evaluation_seed),
+        "--headless",
+        "--symm_leg_usage_plan",
+        str(study_path),
+        *extra,
+    ]
+
+
+def validate_leg_usage_runtime_overrides(extra: list[str]) -> None:
+    """Reject forwarded options that could escape the immutable grid plan."""
+    for token in extra:
+        option = token.split("=", 1)[0]
+        if option in LEG_USAGE_PROTECTED_RUNTIME_OPTIONS:
+            raise ValueError(f"Leg-usage evaluation controls {option} and does not allow overriding it after '--'.")
+
+
+def _load_leg_usage_module():
+    """Load the adjacent analysis module without relying on ``sys.path`` setup."""
+    module_name = "_symm_leg_usage_analysis"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    module_path = Path(__file__).with_name("analyze_leg_usage.py")
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Unable to load leg-usage analysis module: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_analyze_leg_usage(args: argparse.Namespace, extra: list[str]) -> int:
+    """Record, analyze, and report one checkpoint's fixed leg-usage grid."""
+    validate_leg_usage_runtime_overrides(extra)
+    checkpoint = resolve_checkpoint(args).resolve()
+    analysis = _load_leg_usage_module()
+    if args.analyze_only:
+        study_path = checkpoint.parent / "evaluations" / "leg_usage_grid" / "study.json"
+        study = analysis.validate_existing_study_for_analysis(
+            study_path,
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            supplied_runtime_overrides=extra,
+        )
+    else:
+        study = analysis.build_study(
+            repo_root=repo_root(),
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            step_dt=args.robot_spec.step_dt,
+            settle_s=args.settle_s,
+            measure_s=args.measure_s,
+            evaluation_seed=args.evaluation_seed,
+            velocities_mps=args.velocities,
+            gait_indices=args.gait_indices,
+            render_cell_plots=args.render_cell_plots,
+            runtime_overrides=extra,
+        )
+        study_path = analysis.prepare_study(
+            study,
+            resume=args.resume,
+            analyze_only=False,
+            dry_run=args.dry_run,
+        )
+    print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
+    print(f"{log_prefix(args)}output: {study_path.parent}", flush=True)
+    print(
+        f"{log_prefix(args)}grid: {len(study['gaits'])} gait rows x {len(study['velocities_mps'])} "
+        f"velocities = {len(study['cells'])} cells",
+        flush=True,
+    )
+    child_code = 0
+    if not args.analyze_only:
+        child_code = run_isaaclab(args, analyze_leg_usage_lab_args(args, checkpoint, study_path, extra))
+        if args.dry_run:
+            return child_code
+    elif args.dry_run:
+        print(f"{log_prefix(args)}would regenerate analysis from {study_path}", flush=True)
+        return 0
+    try:
+        overall = analysis.analyze_study(study_path)
+    except Exception as exc:
+        if child_code != 0:
+            print(
+                f"{log_prefix(args)}WARNING: evaluator exited with code {child_code}, "
+                f"and partial analysis failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return child_code
+        raise
+    coverage = overall["coverage"]
+    print(
+        f"{log_prefix(args)}analysis: {coverage['valid_cells']}/{coverage['expected_cells']} valid cells; "
+        f"report: {study_path.parent / 'metrics' / 'REPORT.md'}",
+        flush=True,
+    )
+    return child_code
+
+
 def add_ablation_args(parser: argparse.ArgumentParser) -> None:
     """Add ablation command options."""
     add_common_args(parser)
@@ -911,6 +1109,12 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser = subparsers.add_parser("record", help="Record a checkpoint rollout.")
     add_record_args(record_parser)
 
+    leg_usage_parser = subparsers.add_parser(
+        "analyze_leg_usage",
+        help="Record and analyze the fixed gait-by-velocity leg-usage grid.",
+    )
+    add_analyze_leg_usage_args(leg_usage_parser)
+
     ablation_parser = subparsers.add_parser("ablation", help="Run symmetry ablations.")
     add_ablation_args(ablation_parser)
 
@@ -976,6 +1180,8 @@ def main(argv: list[str] | None = None) -> int:
             if not args.gif:
                 return 0
             return convert_latest_video(args, checkpoint, previous_videos)
+        if args.command == "analyze_leg_usage":
+            return run_analyze_leg_usage(args, extra)
         if args.command == "ablation":
             return run_ablation(args, extra)
         if args.command == "compare":

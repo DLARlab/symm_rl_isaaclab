@@ -56,6 +56,7 @@ def _make_env():
     robot.data.joint_vel = _proxy((0.1 * torch.arange(1, 13, dtype=torch.float32)).unsqueeze(0))
     torque_signs = torch.tensor([-1.0, 1.0] * 6)
     robot.data.applied_torque = _proxy((torque_signs * torch.arange(1, 13, dtype=torch.float32)).unsqueeze(0))
+    robot.data.joint_effort_limits = _proxy(torch.arange(20.0, 32.0, dtype=torch.float32).unsqueeze(0))
     robot.data.soft_joint_pos_limits = _proxy(torch.tensor([[[-1.0, 1.0]] * 12], dtype=torch.float32))
 
     command_term = SimpleNamespace(
@@ -226,12 +227,54 @@ def test_plotter_saves_isaacgym_compatible_outputs(tmp_path):
         assert data["foot_ground_reaction_force_abs_sums_centered_moving_mean"].shape == (2, 4)
         assert data["joint_limit_utilization"].shape == (2, 12)
         assert data["joint_names"].tolist() == [f"joint_{index}" for index in range(12)]
+        assert data["joint_effort_limits"].tolist() == pytest.approx(list(range(20, 32)))
         assert data["leg_names"].tolist() == ["Front Left", "Front Right", "Rear Left", "Rear Right"]
         assert data["motor_role_names"].tolist() == ["Hip/Abad", "Thigh", "Calf"]
         assert data["forward_score"].shape == (2,)
         assert data["foot_heights"].shape == (2, 4)
         assert data["foot_clearance_targets"].shape == (2, 4)
         assert data["foot_clearance_penalty"].shape == (2,)
+
+
+def test_plotter_saves_data_only_with_protocol_metadata(tmp_path):
+    module = _load_plotter_module()
+    env, command_term, _ = _make_env()
+    command_term.foot_thetas = torch.tensor([[0.0, 0.5, 0.5, 0.0]])
+    command_term.gait_periods = torch.tensor([0.42])
+    command_term.duty_factors = torch.tensor([0.57])
+    command_term.common_gait_phases = lambda: torch.tensor([1.25])
+    plotter = module.SymmetricRolloutPlotter(env, tmp_path)
+    plotter.record()
+
+    data_path = plotter.save_data(
+        {
+            "protocol_version": "leg_usage_grid_v1",
+            "gait_index": 3,
+            "velocity_mps": -1.0,
+        }
+    )
+
+    assert data_path == tmp_path / "sim_data.npz"
+    assert list(tmp_path.glob("*.png")) == []
+    assert list(tmp_path.glob(".sim_data.*")) == []
+    with np.load(data_path, allow_pickle=False) as data:
+        assert data["protocol_version"].item() == "leg_usage_grid_v1"
+        assert data["gait_index"].item() == 3
+        assert data["velocity_mps"].item() == pytest.approx(-1.0)
+        assert data["foot_thetas"][0].tolist() == pytest.approx([0.0, 0.5, 0.5, 0.0])
+        assert data["gait_periods"][0] == pytest.approx(0.42)
+        assert data["duty_factors"][0] == pytest.approx(0.57)
+        assert data["common_gait_phases"][0] == pytest.approx(1.25)
+
+
+def test_plotter_data_only_save_rejects_metadata_collision(tmp_path):
+    module = _load_plotter_module()
+    env, _, _ = _make_env()
+    plotter = module.SymmetricRolloutPlotter(env, tmp_path)
+    plotter.record()
+
+    with pytest.raises(ValueError, match="cannot replace recorded fields"):
+        plotter.save_data({"time_steps": [123.0]})
 
 
 def test_plotter_rejects_non_symmetric_command_term(tmp_path):

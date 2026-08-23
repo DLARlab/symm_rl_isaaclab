@@ -1,0 +1,42 @@
+{
+  "cell_id": "gait_05_half_bound__vx_neg_1p0__seed_0042",
+  "cell_index": 31,
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2_family_balanced_halfbound_frontrear_phasev4_contclock_footphase0p30_legperm0p20_hip0p10_sync_tol0p02_seed42\\model_19999.pt",
+    "sha256": "7cd84ae3efbb622129bba44ef0f05698f0f495303a1f663d98e543c96330d9d6"
+  },
+  "configured_gait_index": 5,
+  "ended_at": "2026-08-22T17:58:45.854445+00:00",
+  "evaluation_seed": 42,
+  "expected_steps": 750,
+  "gait_family": "half_bound",
+  "gait_index": 5,
+  "gait_name": "half_bound_hind_b",
+  "gait_phases": [
+    0.0,
+    0.0,
+    0.37,
+    0.63
+  ],
+  "gait_weight": 1.0,
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "measurement_start_step": 250,
+  "measurement_stop_step": 750,
+  "nominal_profile": true,
+  "outcome": "completed",
+  "plan_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2_family_balanced_halfbound_frontrear_phasev4_contclock_footphase0p30_legperm0p20_hip0p10_sync_tol0p02_seed42\\evaluations\\leg_usage_grid\\study.json",
+  "plan_sha256": "c1ae8c8d8f36de8afb99376dfd6e437399a2462b1a1cb7cf58798f52d0ef95fc",
+  "protocol_version": "leg_usage_grid_v1",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "started_at": "2026-08-22T17:58:22.470390+00:00",
+  "step_dt": 0.02,
+  "termination_terms": [],
+  "termination_time_s": null,
+  "velocity_mps": -1.0,
+  "wall_duration_s": 23.384334400005173
+}

@@ -439,6 +439,12 @@ Selected backed-up runs are copied under `logs/rsl_rl/good_runs/`. See the
 original controller comparison and restoration procedure. The
 [Phase Mapping V2 milestone](logs/rsl_rl/good_runs/MILESTONE_PHASE_MAPPING_V2.md)
 documents the corrected gait/TR semantics and matched Go2/X1 studies.
+The
+[leg-permutation fix and gait-family V2 milestone](logs/rsl_rl/good_runs/MILESTONE_LEG_PERMUTATION_FIX_GAIT_FAMILY_V2.md)
+records the fixed 10-gait by 6-velocity leg-usage grid, the latest X1 and Go2
+learning comparisons, and the archived run log. X1 has a clear observed
+`m0.1/v0.05` winner; Go2 TRS reward remains below no TRS and still requires
+coefficient/schedule improvement while preserving leg-usage gains.
 
 Leave routine training outputs in the robot-specific experiment directories
 unless a run is intentionally curated and copied into `good_runs`.

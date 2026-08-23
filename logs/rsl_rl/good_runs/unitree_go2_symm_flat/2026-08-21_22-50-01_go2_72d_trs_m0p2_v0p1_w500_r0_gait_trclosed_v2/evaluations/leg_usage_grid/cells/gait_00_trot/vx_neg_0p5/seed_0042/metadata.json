@@ -1,0 +1,42 @@
+{
+  "cell_id": "gait_00_trot__vx_neg_0p5__seed_0042",
+  "cell_index": 2,
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2_family_balanced_halfbound_frontrear_phasev4_contclock_footphase0p30_legperm0p20_hip0p10_sync_tol0p02_seed42\\model_19999.pt",
+    "sha256": "0472d9a599ce5783948a47b5bbe7f5f4cbc430dd343398852072e8f216e15ad5"
+  },
+  "configured_gait_index": 0,
+  "ended_at": "2026-08-22T16:24:29.484794+00:00",
+  "evaluation_seed": 42,
+  "expected_steps": 750,
+  "gait_family": "trot",
+  "gait_index": 0,
+  "gait_name": "trot",
+  "gait_phases": [
+    0.0,
+    0.5,
+    0.5,
+    0.0
+  ],
+  "gait_weight": 4.0,
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "measurement_start_step": 250,
+  "measurement_stop_step": 750,
+  "nominal_profile": true,
+  "outcome": "completed",
+  "plan_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2_family_balanced_halfbound_frontrear_phasev4_contclock_footphase0p30_legperm0p20_hip0p10_sync_tol0p02_seed42\\evaluations\\leg_usage_grid\\study.json",
+  "plan_sha256": "5f8f08a2af36c3bf9d70e3091cdb4cbb121ad2156be636729becb8ae247fa68c",
+  "protocol_version": "leg_usage_grid_v1",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "started_at": "2026-08-22T16:24:05.316089+00:00",
+  "step_dt": 0.02,
+  "termination_terms": [],
+  "termination_time_s": null,
+  "velocity_mps": -0.5,
+  "wall_duration_s": 24.168822100036778
+}

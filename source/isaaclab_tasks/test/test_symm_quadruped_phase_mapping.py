@@ -83,6 +83,63 @@ def _initialize_gait_clock(
     command_term._gait_phase_anchor_steps = torch.broadcast_to(steps, command_term.gait_periods.shape).clone()
 
 
+def _make_evaluation_command_term(num_envs: int = 1) -> symm_quadruped.GaitVelocityCommand:
+    """Construct a CPU command term without launching a simulator."""
+    cfg = symm_quadruped.GaitVelocityCommandCfg()
+    cfg.resampling_time_range = (10.0, 10.0)
+    cfg.ranges = cfg.Ranges(
+        lin_vel_x=(-2.0, 2.0),
+        lin_vel_y=(-1.0, 1.0),
+        ang_vel_z=(-1.0, 1.0),
+        heading=(-math.pi, math.pi),
+    )
+    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
+    command_term.cfg = cfg
+    command_term._env = SimpleNamespace(
+        num_envs=num_envs,
+        device=torch.device("cpu"),
+        common_step_counter=0,
+        step_dt=0.02,
+        reset_buf=torch.zeros(num_envs, dtype=torch.bool),
+        extras={},
+    )
+    command_term.vel_command_b = torch.zeros((num_envs, 3))
+    command_term.heading_target = torch.zeros(num_envs)
+    command_term.is_heading_env = torch.zeros(num_envs, dtype=torch.bool)
+    command_term.is_standing_env = torch.zeros(num_envs, dtype=torch.bool)
+    command_term.time_left = torch.zeros(num_envs)
+    command_term.command_counter = torch.zeros(num_envs, dtype=torch.long)
+    command_term.init_foot_thetas = torch.tensor(
+        symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS, dtype=torch.float32
+    )
+    command_term.foot_theta_sampling_weights = None
+    command_term.foot_thetas = torch.zeros((num_envs, 4))
+    command_term.duty_factors = torch.full((num_envs,), cfg.duty_factor)
+    command_term.gait_periods = torch.full((num_envs,), cfg.gait_period)
+    command_term.kappa = torch.full((num_envs,), cfg.kappa)
+    command_term.gait_time_left = torch.zeros(num_envs)
+    command_term.gait_counter = torch.zeros(num_envs, dtype=torch.long)
+    command_term.gait_sequence_indices = torch.full((num_envs,), -1, dtype=torch.long)
+    command_term._evaluation_active = torch.zeros(num_envs, dtype=torch.bool)
+    command_term._evaluation_forward_velocity = torch.zeros(num_envs)
+    command_term._evaluation_gait_indices = torch.full((num_envs,), -1, dtype=torch.long)
+    command_term._evaluation_deterministic_timing = torch.zeros(num_envs, dtype=torch.bool)
+    command_term._error_xy_sum = torch.zeros(num_envs)
+    command_term._error_yaw_sum = torch.zeros(num_envs)
+    command_term._step_count = torch.zeros(num_envs)
+    command_term.metrics = {
+        "error_vel_xy": torch.zeros(num_envs),
+        "error_vel_yaw": torch.zeros(num_envs),
+        "success_rate": torch.zeros(num_envs),
+        "success_threshold_vel_xy": torch.zeros(num_envs),
+        "success_threshold_vel_yaw": torch.zeros(num_envs),
+        "gait_period": torch.zeros(num_envs),
+        "duty_factor": torch.zeros(num_envs),
+    }
+    _initialize_gait_clock(command_term)
+    return command_term
+
+
 def _leg_permutation_penalty(
     foot_thetas: torch.Tensor,
     joint_pos: torch.Tensor,
@@ -954,7 +1011,7 @@ def test_half_bound_touchdown_order_reverses_between_partner_rows():
 
 def test_current_gait_library_time_reversal_closure_is_explicit():
     gaits = _wrap(_configured_gaits())
-    partner_indices = (0, 1, 3, 2, 5, 4, 8, 9, 6, 7)
+    partner_indices = symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_TIME_REVERSAL_PARTNERS
     expected_gaits = (
         (0.0, 0.5, 0.5, 0.0),
         (0.0, 0.0, 0.5, 0.5),
@@ -976,6 +1033,101 @@ def test_current_gait_library_time_reversal_closure_is_explicit():
     )
     for gait_index, partner_index in enumerate(partner_indices):
         _assert_phases_close(_wrap(-gaits[gait_index]), gaits[partner_index])
+
+
+def test_training_gait_metadata_has_one_stable_entry_per_row():
+    assert symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES == (
+        "trot",
+        "bound",
+        "half_bound_front_a",
+        "half_bound_front_b",
+        "half_bound_hind_a",
+        "half_bound_hind_b",
+        "gallop_a",
+        "gallop_b",
+        "gallop_c",
+        "gallop_d",
+    )
+    assert symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES == (
+        "trot",
+        "bound",
+        "half_bound",
+        "half_bound",
+        "half_bound",
+        "half_bound",
+        "gallop",
+        "gallop",
+        "gallop",
+        "gallop",
+    )
+    assert len(symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS) == len(
+        symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES
+    )
+
+
+def test_evaluation_scenario_survives_reset_without_sampling_noise(monkeypatch):
+    command_term = _make_evaluation_command_term()
+    command_term.cfg.gait_sequence_enabled = True
+
+    monkeypatch.setattr(torch, "rand_like", lambda *_args, **_kwargs: pytest.fail("timing noise was sampled"))
+    monkeypatch.setattr(torch, "randint", lambda *_args, **_kwargs: pytest.fail("gait was sampled"))
+    monkeypatch.setattr(torch, "multinomial", lambda *_args, **_kwargs: pytest.fail("gait was sampled"))
+
+    command_term.set_evaluation_scenario(vx_mps=-1.5, gait_index=8)
+    expected_period = command_term._compute_period_from_forward_velocity(torch.tensor([-1.5]), add_noise_period=False)
+    expected_duty_factor = command_term._compute_duty_factor_from_forward_velocity(
+        torch.tensor([-1.5]), add_noise_period=False
+    )
+    command_term.vel_command_b.fill_(99.0)
+    command_term.foot_thetas.fill_(99.0)
+    torch.manual_seed(1234)
+    expected_next_random_values = torch.rand(4)
+    torch.manual_seed(1234)
+    command_term.reset()
+    actual_next_random_values = torch.rand(4)
+
+    assert torch.equal(command_term.vel_command_b, torch.tensor(((-1.5, 0.0, 0.0),)))
+    assert torch.equal(command_term.foot_thetas[0], command_term.init_foot_thetas[8])
+    assert command_term.gait_periods.tolist() == pytest.approx(expected_period.tolist())
+    assert command_term.duty_factors.tolist() == pytest.approx(expected_duty_factor.tolist())
+    assert torch.isinf(command_term.time_left).all()
+    assert torch.isinf(command_term.gait_time_left).all()
+    assert command_term.command_counter.tolist() == [1]
+    assert command_term.gait_counter.tolist() == [1]
+    assert command_term.gait_sequence_indices.tolist() == [-1]
+    assert torch.equal(actual_next_random_values, expected_next_random_values)
+
+
+def test_evaluation_scenario_suspends_timers_and_can_be_cleared():
+    command_term = _make_evaluation_command_term(num_envs=3)
+    command_term._env.reset_buf[2] = True
+    command_term.set_evaluation_scenario(vx_mps=0.5, gait_index=2, env_ids=[1])
+
+    assert command_term._active_resampling_env_ids().tolist() == [0]
+    command_term.clear_evaluation_scenario([1])
+
+    assert command_term._active_resampling_env_ids().tolist() == [0, 1]
+    assert command_term.time_left[1].item() == pytest.approx(0.0)
+    assert command_term.gait_time_left[1].item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("vx_mps", "gait_index", "error_type", "match"),
+    (
+        (float("nan"), 0, ValueError, "vx_mps"),
+        (0.5, -1, IndexError, "gait_index"),
+        (0.5, 10, IndexError, "gait_index"),
+        (0.5, True, TypeError, "gait_index"),
+    ),
+)
+def test_evaluation_scenario_validates_inputs(vx_mps, gait_index, error_type, match):
+    command_term = _make_evaluation_command_term()
+
+    with pytest.raises(error_type, match=match):
+        command_term.set_evaluation_scenario(vx_mps=vx_mps, gait_index=gait_index)
+
+    with pytest.raises(IndexError, match="env_ids"):
+        command_term.set_evaluation_scenario(vx_mps=0.5, gait_index=0, env_ids=[1])
 
 
 def test_training_gait_distribution_is_time_reversal_invariant_and_family_balanced():
