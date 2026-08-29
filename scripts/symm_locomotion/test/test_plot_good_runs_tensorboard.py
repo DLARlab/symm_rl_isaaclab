@@ -32,11 +32,11 @@ class TestCuratedTensorBoardPlotter(unittest.TestCase):
     """Validate curated-run discovery and resolved-parameter parsing."""
 
     def test_generation_inventory_rejects_unclassified_runs(self) -> None:
-        """Require every plotted run to have a documented generation."""
-        self.assertEqual(plotter._generation("2026-07-07_00-11-14_no_trs"), "60D")
+        """Require every plotted run to have a documented cohort."""
+        self.assertEqual(plotter._generation("2026-07-31_22-48-10_go2_no_trs_20k_512"), "phase-v2")
         self.assertEqual(
-            plotter._generation("2026-07-20_16-24-19_x1_trs_m0p20_v0p10_w500"),
-            "72D",
+            plotter._generation("2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2"),
+            "gait-v2",
         )
         with self.assertRaisesRegex(ValueError, "not classified"):
             plotter._generation("new_unreviewed_run")
@@ -54,12 +54,12 @@ class TestCuratedTensorBoardPlotter(unittest.TestCase):
             self.assertIs(plotter._parse_yaml_scalar(path, "use_mirror_loss"), True)
             self.assertEqual(plotter._parse_yaml_scalar(path, "schedule"), "adaptive")
 
-    def test_discovery_is_limited_to_five_curated_runs_per_robot(self) -> None:
-        """Find only the ten traces in the fixed legacy comparison inventory."""
+    def test_discovery_is_limited_to_six_matched_runs_per_robot(self) -> None:
+        """Find only the twelve traces in the matched retained inventory."""
         runs = plotter.discover_curated_runs()
-        self.assertEqual(len(runs), 10)
+        self.assertEqual(len(runs), 12)
         for robot in plotter.ROBOT_RUN_DIRS:
-            self.assertEqual(sum(run.robot == robot for run in runs), 5)
+            self.assertEqual(sum(run.robot == robot for run in runs), 6)
         for run in runs:
             self.assertTrue(run.event_path.is_relative_to(plotter.GOOD_RUNS_ROOT))
             self.assertTrue(run.agent_path.is_relative_to(plotter.GOOD_RUNS_ROOT))

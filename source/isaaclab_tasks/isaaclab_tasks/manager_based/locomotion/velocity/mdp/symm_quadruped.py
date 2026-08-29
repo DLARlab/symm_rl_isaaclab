@@ -14,6 +14,7 @@ from dataclasses import MISSING, dataclass
 from typing import TYPE_CHECKING
 
 import torch
+import torch.nn.functional as F
 from tensordict import TensorDict
 
 import isaaclab.utils.math as math_utils
@@ -77,6 +78,25 @@ SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS = (
 SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS = (4.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 """Training row weights yielding equal trot, bound, half-bound, and gallop family mass."""
 
+SYMM_QUADRUPED_GAIT_LIBRARY_V1_EQUIVALENT_WEIGHTS = (4.0, 4.0, 2.0, 2.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0)
+"""V1-equivalent sampling weights expressed on the ten-row V2 gait library."""
+
+SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_EQUAL_FAMILY = "trclosed_v2_equal_family"
+"""Name of the equal-family V2 gait-sampling profile."""
+
+SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_V1_EQUIVALENT = "trclosed_v2_v1_equivalent"
+"""Name of the V1-equivalent V2 gait-sampling profile."""
+
+SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_HALFBOUND_ANNEAL = "trclosed_v2_halfbound_anneal"
+"""Name of the V1-equivalent-to-equal-family annealed profile."""
+
+SYMM_QUADRUPED_GAIT_SAMPLING_PROFILES = (
+    SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_EQUAL_FAMILY,
+    SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_V1_EQUIVALENT,
+    SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_HALFBOUND_ANNEAL,
+)
+"""Supported ten-row V2 gait-sampling profile names."""
+
 SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES = (
     "trot",
     "bound",
@@ -108,6 +128,86 @@ SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES = (
 SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_TIME_REVERSAL_PARTNERS = (0, 1, 3, 2, 5, 4, 8, 9, 6, 7)
 """Training-row index reached by applying the shared time-reversal phase mapping."""
 
+
+def validate_gait_partner_weights(
+    weights: Sequence[float],
+    partner_indices: Sequence[int] = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_TIME_REVERSAL_PARTNERS,
+) -> None:
+    """Validate that gait-row weights are closed under the partner map.
+
+    Args:
+        weights: Nonnegative gait-row weights.
+        partner_indices: Partner row for each gait row.
+
+    Raises:
+        ValueError: If the partner map is invalid or paired weights differ.
+    """
+    if len(weights) != len(partner_indices):
+        raise ValueError(
+            f"weights and partner_indices must have equal length; received {len(weights)} and {len(partner_indices)}."
+        )
+    for row_index, partner_index in enumerate(partner_indices):
+        if partner_index < 0 or partner_index >= len(weights) or partner_indices[partner_index] != row_index:
+            raise ValueError(f"partner_indices must be an involution; row {row_index} maps to {partner_index}.")
+        if not math.isclose(float(weights[row_index]), float(weights[partner_index]), rel_tol=0.0, abs_tol=1.0e-8):
+            raise ValueError(
+                "Time-reversal partner rows must have equal sampling weights; "
+                f"rows {row_index} and {partner_index} have {weights[row_index]} and {weights[partner_index]}."
+            )
+
+
+def resolve_gait_sampling_profile_weights(
+    profile: str,
+    iteration: int = 0,
+    curriculum_iterations: int = 0,
+) -> tuple[float, ...]:
+    """Resolve deterministic ten-row gait weights at an absolute training iteration.
+
+    Args:
+        profile: One of :data:`SYMM_QUADRUPED_GAIT_SAMPLING_PROFILES`.
+        iteration: Absolute zero-based learning iteration. Passing the restored
+            checkpoint iteration makes the curriculum resume without restarting.
+        curriculum_iterations: Number of learning iterations in the anneal.
+
+    Returns:
+        Unnormalized nonnegative weights for all ten V2 gait rows.
+
+    Raises:
+        ValueError: If the profile or integer settings are invalid.
+    """
+    if profile not in SYMM_QUADRUPED_GAIT_SAMPLING_PROFILES:
+        raise ValueError(
+            f"Unsupported gait-sampling profile {profile!r}; expected one of {SYMM_QUADRUPED_GAIT_SAMPLING_PROFILES}."
+        )
+    if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
+        raise ValueError(f"iteration must be a nonnegative integer; received {iteration!r}.")
+    if (
+        isinstance(curriculum_iterations, bool)
+        or not isinstance(curriculum_iterations, int)
+        or curriculum_iterations < 0
+    ):
+        raise ValueError(f"curriculum_iterations must be a nonnegative integer; received {curriculum_iterations!r}.")
+
+    if profile == SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_EQUAL_FAMILY:
+        weights = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS
+    elif profile == SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_V1_EQUIVALENT:
+        weights = SYMM_QUADRUPED_GAIT_LIBRARY_V1_EQUIVALENT_WEIGHTS
+    else:
+        if curriculum_iterations == 0:
+            raise ValueError("trclosed_v2_halfbound_anneal requires gait_curriculum_iterations to be positive.")
+        progress = min(float(iteration) / float(curriculum_iterations), 1.0)
+        weights = tuple(
+            start + progress * (final - start)
+            for start, final in zip(
+                SYMM_QUADRUPED_GAIT_LIBRARY_V1_EQUIVALENT_WEIGHTS,
+                SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS,
+                strict=True,
+            )
+        )
+    validate_gait_partner_weights(weights)
+    return tuple(float(weight) for weight in weights)
+
+
 SYMM_QUADRUPED_POLICY_OBS_DIM = 72
 """Dimension of the shared symmetric quadruped policy observation."""
 
@@ -132,6 +232,24 @@ class _SymmQuadrupedPolicyObservationLayout:
     sagittal_plane_state: slice
 
 
+@dataclass(frozen=True)
+class _SymmQuadrupedPolicyObservationScale:
+    """Per-component scales for the shared symmetric quadruped policy observation."""
+
+    measured_base_twist: tuple[float, ...]
+    projected_gravity: tuple[float, ...]
+    desired_base_twist: tuple[float, ...]
+    joint_position: tuple[float, ...]
+    joint_velocity: tuple[float, ...]
+    previous_action: tuple[float, ...]
+    foot_phase_sin: tuple[float, ...]
+    foot_phase_cos: tuple[float, ...]
+    foot_theta_sin: tuple[float, ...]
+    foot_theta_cos: tuple[float, ...]
+    phase_ratios: tuple[float, ...]
+    sagittal_plane_state: tuple[float, ...]
+
+
 SYMM_QUADRUPED_POLICY_OBS_LAYOUT = _SymmQuadrupedPolicyObservationLayout(
     measured_base_twist=slice(0, 6),
     projected_gravity=slice(6, 9),
@@ -149,6 +267,22 @@ SYMM_QUADRUPED_POLICY_OBS_LAYOUT = _SymmQuadrupedPolicyObservationLayout(
     sagittal_plane_state=slice(69, SYMM_QUADRUPED_POLICY_OBS_DIM),
 )
 """Named layout for the shared symmetric quadruped policy observation."""
+
+SYMM_QUADRUPED_POLICY_OBS_SCALE = _SymmQuadrupedPolicyObservationScale(
+    measured_base_twist=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
+    projected_gravity=(1.0, 1.0, 1.0),
+    desired_base_twist=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
+    joint_position=(1.0,) * 12,
+    joint_velocity=(0.05,) * 12,
+    previous_action=(1.0,) * 12,
+    foot_phase_sin=(1.0,) * 4,
+    foot_phase_cos=(1.0,) * 4,
+    foot_theta_sin=(1.0,) * 4,
+    foot_theta_cos=(1.0,) * 4,
+    phase_ratios=(1.0, 1.0),
+    sagittal_plane_state=(1.0, 1.0, 1.0),
+)
+"""Central scale metadata for the shared symmetric quadruped policy observation."""
 
 SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS = (
     (1.0, 1.0, 1.0),
@@ -304,6 +438,12 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     gait libraries.
     """
 
+    gait_sampling_profile: str | None = None
+    """Named ten-row V2 sampling profile, or ``None`` to use :attr:`init_foot_theta_weights` directly."""
+
+    gait_curriculum_iterations: int = 0
+    """Number of absolute learning iterations used by the annealed sampling profile."""
+
 
 class GaitVelocityCommand(CommandTerm):
     """Velocity command generator with sampled symmetric gait clocks."""
@@ -340,24 +480,31 @@ class GaitVelocityCommand(CommandTerm):
         if not torch.all(torch.isfinite(self.init_foot_thetas)):
             raise ValueError("init_foot_thetas must contain only finite phase offsets.")
 
-        if cfg.init_foot_theta_weights is None:
-            self.foot_theta_sampling_weights = None
-        else:
-            sampling_weights = torch.tensor(cfg.init_foot_theta_weights, dtype=torch.float32, device=self.device)
-            if sampling_weights.ndim != 1 or sampling_weights.shape[0] != self.init_foot_thetas.shape[0]:
-                received_shape = (
-                    sampling_weights.shape[0] if sampling_weights.ndim == 1 else tuple(sampling_weights.shape)
-                )
+        self._training_iteration = 0
+        profile_is_active = (
+            cfg.gait_sampling_profile is not None
+            and cfg.gait_library_version == SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
+        )
+        if profile_is_active:
+            canonical_rows = torch.tensor(
+                SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS,
+                dtype=self.init_foot_thetas.dtype,
+                device=self.device,
+            )
+            if self.init_foot_thetas.shape != canonical_rows.shape or not torch.allclose(
+                self.init_foot_thetas, canonical_rows
+            ):
                 raise ValueError(
-                    "init_foot_theta_weights must contain one value per gait row; "
-                    f"received {received_shape} weights for {self.init_foot_thetas.shape[0]} rows."
+                    "Named gait-sampling profiles require the canonical ten-row time_reversal_closed_v2 library."
                 )
-            if not torch.all(torch.isfinite(sampling_weights)) or torch.any(sampling_weights < 0.0):
-                raise ValueError("init_foot_theta_weights must contain only finite, nonnegative values.")
-            weight_sum = sampling_weights.sum()
-            if not torch.isfinite(weight_sum) or weight_sum <= 0.0:
-                raise ValueError("init_foot_theta_weights must have a finite, positive sum.")
-            self.foot_theta_sampling_weights = sampling_weights / weight_sum
+            configured_sampling_weights = resolve_gait_sampling_profile_weights(
+                cfg.gait_sampling_profile,
+                iteration=self._training_iteration,
+                curriculum_iterations=cfg.gait_curriculum_iterations,
+            )
+        else:
+            configured_sampling_weights = cfg.init_foot_theta_weights
+        self.foot_theta_sampling_weights = self._normalize_sampling_weights(configured_sampling_weights)
 
         if isinstance(cfg.noise_level_theta, bool) or not isinstance(cfg.noise_level_theta, int):
             raise ValueError("noise_level_theta must be a nonnegative integer.")
@@ -375,6 +522,7 @@ class GaitVelocityCommand(CommandTerm):
         self.kappa = torch.full((self.num_envs,), cfg.kappa, dtype=torch.float32, device=self.device)
         self.gait_time_left = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.gait_row_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
         self.gait_sequence_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
         self._evaluation_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._evaluation_forward_velocity = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
@@ -383,6 +531,17 @@ class GaitVelocityCommand(CommandTerm):
 
         self.metrics["gait_period"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["duty_factor"] = torch.zeros(self.num_envs, device=self.device)
+        if self.init_foot_thetas.shape[0] == len(SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES):
+            self._gait_row_metric_names = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES
+            self._gait_row_metric_families = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES
+        else:
+            self._gait_row_metric_names = tuple(f"row_{index}" for index in range(self.init_foot_thetas.shape[0]))
+            self._gait_row_metric_families = ("custom",) * self.init_foot_thetas.shape[0]
+        for row_name in self._gait_row_metric_names:
+            self.metrics[f"gait_row_probability_{row_name}"] = torch.zeros(self.num_envs, device=self.device)
+        for family_name in dict.fromkeys(self._gait_row_metric_families):
+            self.metrics[f"gait_family_probability_{family_name}"] = torch.zeros(self.num_envs, device=self.device)
+        self._update_gait_sampling_probability_metrics()
 
         self.cfg.cmd_kind = self.cfg.cmd_kind or "command/body/velocity"
         self.cfg.element_names = self.cfg.element_names or ["lin_vel_x", "lin_vel_y", "ang_vel_z"]
@@ -391,6 +550,33 @@ class GaitVelocityCommand(CommandTerm):
     def command(self) -> torch.Tensor:
         """Desired base velocity command in the base frame."""
         return self.vel_command_b
+
+    @property
+    def training_iteration(self) -> int:
+        """Absolute zero-based learning iteration used by the gait curriculum."""
+        return self._training_iteration
+
+    def set_training_iteration(self, iteration: int) -> None:
+        """Set the absolute learning iteration and refresh curriculum weights.
+
+        Args:
+            iteration: Absolute zero-based learning iteration, including any
+                iterations restored from a checkpoint.
+        """
+        if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
+            raise ValueError(f"iteration must be a nonnegative integer; received {iteration!r}.")
+        self._training_iteration = iteration
+        if (
+            self.cfg.gait_sampling_profile is not None
+            and self.cfg.gait_library_version == SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
+        ):
+            weights = resolve_gait_sampling_profile_weights(
+                self.cfg.gait_sampling_profile,
+                iteration=iteration,
+                curriculum_iterations=self.cfg.gait_curriculum_iterations,
+            )
+            self.foot_theta_sampling_weights = self._normalize_sampling_weights(weights)
+        self._update_gait_sampling_probability_metrics()
 
     def set_evaluation_scenario(
         self,
@@ -667,6 +853,11 @@ class GaitVelocityCommand(CommandTerm):
     ) -> None:
         """Assign gait rows and refresh velocity-derived timing."""
         self.foot_thetas[env_ids_tensor] = self.init_foot_thetas[choices]
+        # ``gait_row_indices`` is publication-sidecar metadata.  Keep gait
+        # assignment compatible with legacy/minimal command-term instances
+        # that predate the cache (including downstream test doubles).
+        if hasattr(self, "gait_row_indices"):
+            self.gait_row_indices[env_ids_tensor] = choices
 
         if add_theta_noise and self.cfg.noise_level_theta > 0:
             theta_noise = torch.randint(
@@ -680,12 +871,53 @@ class GaitVelocityCommand(CommandTerm):
         self.kappa[env_ids_tensor] = self.cfg.kappa
         self._update_gait_timing(env_ids_tensor)
 
+    def _normalize_sampling_weights(self, weights: Sequence[float] | None) -> torch.Tensor | None:
+        """Validate and normalize configured gait-row weights."""
+        if weights is None:
+            return None
+        sampling_weights = torch.tensor(weights, dtype=torch.float32, device=self.device)
+        if sampling_weights.ndim != 1 or sampling_weights.shape[0] != self.init_foot_thetas.shape[0]:
+            received_shape = sampling_weights.shape[0] if sampling_weights.ndim == 1 else tuple(sampling_weights.shape)
+            raise ValueError(
+                "init_foot_theta_weights must contain one value per gait row; "
+                f"received {received_shape} weights for {self.init_foot_thetas.shape[0]} rows."
+            )
+        if not torch.all(torch.isfinite(sampling_weights)) or torch.any(sampling_weights < 0.0):
+            raise ValueError("Gait-row sampling weights must contain only finite, nonnegative values.")
+        weight_sum = sampling_weights.sum()
+        if not torch.isfinite(weight_sum) or weight_sum <= 0.0:
+            raise ValueError("Gait-row sampling weights must have a finite, positive sum.")
+        return sampling_weights / weight_sum
+
+    def _update_gait_sampling_probability_metrics(self) -> None:
+        """Publish current row and family probabilities into command metrics."""
+        if not hasattr(self, "_gait_row_metric_names"):
+            return
+        if self.foot_theta_sampling_weights is None:
+            probabilities = torch.full(
+                (self.init_foot_thetas.shape[0],),
+                1.0 / self.init_foot_thetas.shape[0],
+                dtype=torch.float32,
+                device=self.device,
+            )
+        else:
+            probabilities = self.foot_theta_sampling_weights
+        for row_index, row_name in enumerate(self._gait_row_metric_names):
+            self.metrics[f"gait_row_probability_{row_name}"].fill_(probabilities[row_index])
+        for family_name in dict.fromkeys(self._gait_row_metric_families):
+            family_indices = [
+                index for index, row_family in enumerate(self._gait_row_metric_families) if row_family == family_name
+            ]
+            family_probability = probabilities[family_indices].sum()
+            self.metrics[f"gait_family_probability_{family_name}"].fill_(family_probability)
+
     def _update_metrics(self):
         error_xy = torch.linalg.norm(self.vel_command_b[:, :2] - self.robot.data.root_lin_vel_b.torch[:, :2], dim=-1)
         error_yaw = torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_ang_vel_b.torch[:, 2])
         self._error_xy_sum += error_xy
         self._error_yaw_sum += error_yaw
         self._step_count += 1.0
+        self._update_gait_sampling_probability_metrics()
 
     def _resample(self, env_ids: Sequence[int]) -> None:
         """Resample normal environments while preserving fixed evaluation scenarios."""
@@ -1244,6 +1476,28 @@ def base_height_range_penalty(
     return -(1.0 - torch.exp(-5.0 * deviation))
 
 
+def reduce_foot_phase_penalties(
+    per_foot_penalties: torch.Tensor,
+    reduction: str = "sum",
+) -> torch.Tensor:
+    """Reduce nonnegative per-foot gait-phase penalties.
+
+    Args:
+        per_foot_penalties: Nonnegative penalties, shape ``(..., num_feet)``.
+        reduction: Either ``"sum"`` or ``"mean"`` over feet.
+
+    Returns:
+        The reduced nonnegative gait-phase penalty.
+    """
+    if per_foot_penalties.shape[-1] == 0:
+        raise ValueError("per_foot_penalties must contain at least one foot.")
+    if reduction == "sum":
+        return per_foot_penalties.sum(dim=-1)
+    if reduction == "mean":
+        return per_foot_penalties.mean(dim=-1)
+    raise ValueError(f"Unsupported foot-phase reduction {reduction!r}; expected 'sum' or 'mean'.")
+
+
 def foot_phase_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -1252,6 +1506,7 @@ def foot_phase_penalty(
     foot_sensor_body_names: Sequence[str] | None = None,
     force_scale: float = 0.001,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    reduction: str = "sum",
 ) -> torch.Tensor:
     """Penalize foot contact in swing and foot speed in stance according to gait phase.
 
@@ -1263,9 +1518,10 @@ def foot_phase_penalty(
         foot_sensor_body_names: Expected body name for each contact sensor.
         force_scale: Contact-force shaping scale [1/N].
         asset_cfg: Robot articulation configuration.
+        reduction: Reduction over the configured feet, either ``"sum"`` or ``"mean"``.
 
     Returns:
-        The non-positive gait-phase penalty summed over the configured feet.
+        The non-positive reduced gait-phase penalty.
     """
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
@@ -1276,7 +1532,7 @@ def foot_phase_penalty(
             "Foot speeds and periodic weights must contain the same nonzero set of feet; "
             f"received shapes {tuple(foot_speeds.shape)} and {tuple(speed_weights.shape)}."
         )
-    per_foot_penalty = (1.0 - torch.exp(-2.0 * foot_speeds)) * speed_weights
+    signed_per_foot_penalty = (1.0 - torch.exp(-2.0 * foot_speeds)) * speed_weights
     if foot_sensor_names is not None:
         foot_forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
         force_weights = gait_command.periodic_force_weights()
@@ -1286,8 +1542,19 @@ def foot_phase_penalty(
                 f"received shapes {tuple(foot_forces.shape)}, {tuple(foot_speeds.shape)}, "
                 f"and {tuple(force_weights.shape)}."
             )
-        per_foot_penalty += (1.0 - torch.exp(-force_scale * foot_forces)) * force_weights
-    return per_foot_penalty.sum(dim=-1)
+        signed_per_foot_penalty += (1.0 - torch.exp(-force_scale * foot_forces)) * force_weights
+    per_foot_penalties = -signed_per_foot_penalty
+    raw_sum = reduce_foot_phase_penalties(per_foot_penalties, reduction="sum")
+    raw_mean = reduce_foot_phase_penalties(per_foot_penalties, reduction="mean")
+    env._foot_phase_diagnostics = {
+        "raw_sum": raw_sum.detach(),
+        "raw_mean": raw_mean.detach(),
+    }
+    if reduction == "sum":
+        return -raw_sum
+    if reduction == "mean":
+        return -raw_mean
+    raise ValueError(f"Unsupported foot-phase reduction {reduction!r}; expected 'sum' or 'mean'.")
 
 
 def foot_periodicity_penalty(
@@ -1298,6 +1565,7 @@ def foot_periodicity_penalty(
     foot_sensor_body_names: Sequence[str] | None = None,
     force_scale: float = 0.001,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    reduction: str = "sum",
 ) -> torch.Tensor:
     """Call :func:`foot_phase_penalty` through its deprecated name."""
     global _FOOT_PERIODICITY_DEPRECATION_WARNED
@@ -1316,6 +1584,7 @@ def foot_periodicity_penalty(
         foot_sensor_body_names=foot_sensor_body_names,
         force_scale=force_scale,
         asset_cfg=asset_cfg,
+        reduction=reduction,
     )
 
 
@@ -1574,24 +1843,110 @@ def hip_action_penalty(
     return -(1.0 - torch.exp(-0.5 * hip_action_magnitude))
 
 
+def requested_joint_position_target_overflow(
+    requested_targets: torch.Tensor,
+    soft_joint_position_limits: torch.Tensor,
+    margin_fraction: float = 0.05,
+) -> torch.Tensor:
+    """Compute uncapped normalized overflow of requested joint targets.
+
+    Args:
+        requested_targets: Requested joint-position targets before safety clamping [rad].
+        soft_joint_position_limits: Lower and upper soft limits [rad], shape
+            ``requested_targets.shape + (2,)``.
+        margin_fraction: Interior margin as a fraction of each joint range.
+
+    Returns:
+        Nonnegative overflow distances normalized by the corresponding joint range.
+    """
+    if not 0.0 <= margin_fraction < 0.5:
+        raise ValueError(f"Joint-limit margin fraction must be in [0, 0.5), received {margin_fraction}.")
+    if soft_joint_position_limits.shape != requested_targets.shape + (2,):
+        raise ValueError(
+            "soft_joint_position_limits must match requested_targets with a final lower/upper dimension; "
+            f"received {tuple(requested_targets.shape)} and {tuple(soft_joint_position_limits.shape)}."
+        )
+    lower_limits = soft_joint_position_limits[..., 0]
+    upper_limits = soft_joint_position_limits[..., 1]
+    limit_range = upper_limits - lower_limits
+    margin = margin_fraction * limit_range
+    lower_overflow = torch.relu(lower_limits + margin - requested_targets)
+    upper_overflow = torch.relu(requested_targets - (upper_limits - margin))
+    return (lower_overflow + upper_overflow) / limit_range.clamp_min(torch.finfo(requested_targets.dtype).eps)
+
+
+def requested_joint_position_target_limit_penalty(
+    requested_targets: torch.Tensor,
+    soft_joint_position_limits: torch.Tensor,
+    margin_fraction: float = 0.05,
+) -> torch.Tensor:
+    """Compute the smooth-L1 requested-target overflow penalty per environment.
+
+    Args:
+        requested_targets: Requested joint-position targets before safety clamping [rad].
+        soft_joint_position_limits: Lower and upper soft limits [rad], shape
+            ``requested_targets.shape + (2,)``.
+        margin_fraction: Interior margin as a fraction of each joint range.
+
+    Returns:
+        Nonnegative dimensionless penalty for each environment.
+    """
+    normalized_overflow = requested_joint_position_target_overflow(
+        requested_targets,
+        soft_joint_position_limits,
+        margin_fraction=margin_fraction,
+    )
+    return F.smooth_l1_loss(
+        normalized_overflow,
+        torch.zeros_like(normalized_overflow),
+        reduction="none",
+    ).mean(dim=-1)
+
+
 def joint_position_target_limit_penalty(
     env: ManagerBasedRLEnv,
     action_term_name: str = "joint_pos",
     margin_fraction: float = 0.05,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    mode: str = "legacy_clamped",
 ) -> torch.Tensor:
-    """Penalize processed joint targets inside a margin near the soft limits.
+    """Penalize joint targets near or beyond the soft limits.
 
-    Targets are already clamped for simulator safety. This term supplies the
-    missing policy-learning signal that makes repeatedly requesting those
-    clamps costly.
+    ``legacy_clamped`` preserves the bounded squared penalty on executed,
+    safety-clamped targets. ``requested_overflow`` uses uncapped smooth-L1
+    overflow from the affine request before the simulator safety clamp.
+
+    Args:
+        env: The environment instance.
+        action_term_name: Name of the joint-position action term.
+        margin_fraction: Interior margin as a fraction of each joint range.
+        asset_cfg: Robot articulation configuration.
+        mode: Either ``"legacy_clamped"`` or ``"requested_overflow"``.
+
+    Returns:
+        The non-positive dimensionless limit penalty for each environment.
     """
     if not 0.0 < margin_fraction < 0.5:
         raise ValueError(f"Joint-limit margin fraction must be in (0, 0.5), received {margin_fraction}.")
+    if mode not in ("legacy_clamped", "requested_overflow"):
+        raise ValueError(
+            f"Unsupported joint-target limit mode {mode!r}; expected 'legacy_clamped' or 'requested_overflow'."
+        )
 
     asset: Articulation = env.scene[asset_cfg.name]
     action_term = env.action_manager.get_term(action_term_name)
     soft_limits = asset.data.soft_joint_pos_limits.torch[:, action_term._joint_ids]
+    if mode == "requested_overflow":
+        requested_targets = getattr(env, "_requested_joint_position_targets", None)
+        if requested_targets is None:
+            requested_targets = action_term.raw_actions * action_term._scale + action_term._offset
+        penalty = requested_joint_position_target_limit_penalty(
+            requested_targets,
+            soft_limits,
+            margin_fraction=margin_fraction,
+        )
+        return -penalty
+
     lower_limits = soft_limits[..., 0]
     upper_limits = soft_limits[..., 1]
     limit_range = (upper_limits - lower_limits).clamp_min(torch.finfo(soft_limits.dtype).eps)

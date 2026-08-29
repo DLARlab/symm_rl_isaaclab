@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import math
+import warnings
+from collections.abc import Mapping
 from numbers import Integral, Real
 
 import torch
@@ -15,7 +17,21 @@ import torch.nn as nn
 from rsl_rl.algorithms import PPO
 from tensordict import TensorDict
 
-_TRS_RAMP_SHAPES = frozenset({"linear", "half_cosine"})
+from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_augmentation import (
+    TimeReversalAugmentation,
+)
+from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_core import (
+    ResolvedTimeReversalSchedule,
+    feasible_actor_mean_diagnostics,
+    feasible_actor_mean_penalty,
+    normalize_requested_joint_targets,
+    resolve_time_reversal_schedule,
+    time_reversal_gradient_diagnostics,
+    time_reversal_mask_diagnostics,
+    time_reversal_schedule_scale,
+    time_reversal_validity_mask,
+    validate_legacy_observation_metadata,
+)
 
 
 def time_reversal_loss_scale(
@@ -38,24 +54,15 @@ def time_reversal_loss_scale(
     Raises:
         ValueError: If a schedule setting is invalid.
     """
-    for name, value in (
-        ("warmup_iterations", warmup_iterations),
-        ("rampup_iterations", rampup_iterations),
-    ):
-        if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
-            raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
-    if ramp_shape not in _TRS_RAMP_SHAPES:
-        raise ValueError(f"ramp_shape must be one of {sorted(_TRS_RAMP_SHAPES)!r}; received {ramp_shape!r}.")
-
-    if iteration < warmup_iterations:
-        return 0.0
-    if rampup_iterations == 0:
-        return 1.0
-
-    progress = min(max((iteration - warmup_iterations) / rampup_iterations, 0.0), 1.0)
-    if ramp_shape == "linear":
-        return progress
-    return 0.5 * (1.0 - math.cos(math.pi * progress))
+    return time_reversal_schedule_scale(
+        iteration=iteration,
+        warmup_iterations=warmup_iterations,
+        rampup_iterations=rampup_iterations,
+        hold_iterations=0,
+        decay_iterations=0,
+        final_scale=1.0,
+        ramp_shape=ramp_shape,
+    )
 
 
 def time_reversal_weighted_losses(
@@ -97,33 +104,77 @@ class TimeReversalPPO(PPO):
     _ACTOR_MEAN_BOUND_LOSS_COEFF = 1.0e-2
     _ACTOR_MEAN_ABORT_BOUND = 50.0
     _ACTOR_MEAN_ABORT_PATIENCE = 25
+    _TIME_REVERSAL_STATE_SCHEMA_VERSION = 2
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._joint_action_metadata_cache: tuple[torch.Tensor, ...] | None = None
         self._validate_time_reversal_configuration()
         self.current_learning_iteration = 0
         self._time_reversal_update_count = 0
         self._actor_mean_abort_count = 0
+        self._tr_augmentation: TimeReversalAugmentation | None = None
+        augmentation_cfg = self.symmetry.get("tr_augmentation", {}) if self.symmetry else {}
+        if augmentation_cfg.get("enabled", False):
+            if self.is_multi_gpu:
+                raise ValueError(
+                    "tr_augmentation is not supported in distributed PPO until side-model synchronization is "
+                    "implemented. Disable augmentation or train on one process."
+                )
+            self._tr_augmentation = TimeReversalAugmentation(self.symmetry["_env"], augmentation_cfg, self.device)
         self._clamp_actor_std()
+        self._sync_environment_training_iteration()
 
     def act(self, obs: TensorDict) -> torch.Tensor:
         """Sample actions after ensuring the scalar action std is valid."""
         self._clamp_actor_std()
-        return super().act(obs)
+        actions = super().act(obs)
+        augmentation = getattr(self, "_tr_augmentation", None)
+        if augmentation is not None:
+            augmentation.capture_before_step(
+                obs,
+                actions,
+                self.actor.output_distribution_params[0],
+                self.actor.output_std,
+            )
+        return actions
+
+    def process_env_step(
+        self,
+        obs: TensorDict,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        extras: dict[str, torch.Tensor],
+    ) -> None:
+        """Record the standard PPO transition and an optional authentic successor sidecar."""
+        augmentation = getattr(self, "_tr_augmentation", None)
+        if augmentation is not None:
+            augmentation.capture_after_step(obs, rewards, dones, extras)
+        super().process_env_step(obs, rewards, dones, extras)
 
     def update(self) -> dict[str, float]:  # noqa: C901
         """Run PPO updates with optional time-reversal regularization."""
-        time_reversal_enabled = self._time_reversal_enabled()
-        trs_scale, effective_mirror_coeff, effective_tr_value_coeff = self._effective_time_reversal_coefficients()
-        time_reversal_active = (
-            time_reversal_enabled
-            and trs_scale > 0.0
-            and (
-                bool(self.symmetry["use_data_augmentation"])
-                or effective_mirror_coeff > 0.0
-                or effective_tr_value_coeff > 0.0
-            )
+        policy_schedule, value_schedule = self._resolved_time_reversal_schedules()
+        trs_scale, effective_tr_policy_coeff, effective_tr_value_coeff = self._effective_time_reversal_coefficients()
+        legacy_data_augmentation_scale = self._legacy_data_augmentation_scale()
+        legacy_data_augmentation_active = legacy_data_augmentation_scale > 0.0
+        trs_scale = max(trs_scale, legacy_data_augmentation_scale)
+        log_disabled_raw = bool(self.symmetry and self.symmetry.get("log_disabled_raw_consistency", False))
+        compute_policy_raw = effective_tr_policy_coeff > 0.0 or log_disabled_raw
+        compute_value_raw = effective_tr_value_coeff > 0.0 or log_disabled_raw
+        gradient_cfg = self.symmetry.get("tr_gradient_diagnostics", {}) if self.symmetry else {}
+        gradient_diagnostics_enabled = bool(gradient_cfg.get("enabled", False))
+        gradient_diagnostics_update = gradient_diagnostics_enabled and (
+            self.current_learning_iteration % int(gradient_cfg.get("interval", 100)) == 0
         )
+        augmentation_schedule = self._resolved_time_reversal_augmentation_schedule()
+        effective_tr_augmentation_coeff = augmentation_schedule.coefficient(self.current_learning_iteration)
+        augmentation = getattr(self, "_tr_augmentation", None)
+        augmentation_cfg = self.symmetry.get("tr_augmentation", {}) if self.symmetry else {}
+        augmentation_gradient_update = augmentation is not None and (
+            self.current_learning_iteration % int(augmentation_cfg.get("gradient_diagnostics_interval", 100)) == 0
+        )
+        augmentation_diagnostics = augmentation.prepare_update() if augmentation is not None else {}
 
         mean_value_loss = 0
         mean_surrogate_loss = 0
@@ -131,33 +182,48 @@ class TimeReversalPPO(PPO):
         mean_actor_bound_loss = 0
         mean_rnd_loss = 0 if self.rnd else None
         mean_symmetry_loss = 0 if self.symmetry else None
-        mean_tr_value_loss = 0 if time_reversal_enabled else None
+        mean_raw_action_consistency = 0.0
+        mean_normalized_target_consistency = 0.0
+        raw_action_consistency_count = 0
+        normalized_target_consistency_count = 0
+        mean_tr_value_loss = 0 if self.symmetry else None
+        mean_tr_augmentation_loss = 0.0
+        mask_diagnostics_sum: dict[str, float] = {}
+        mask_diagnostics_count = 0
+        gradient_diagnostics: dict[str, float] = {}
 
         if self.actor.is_recurrent or self.critic.is_recurrent:
             generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
-        for batch in generator:
+        for batch_index, batch in enumerate(generator):
             original_batch_size = batch.observations.batch_size[0]
+            original_observations = batch.observations
 
             if self.normalize_advantage_per_mini_batch:
                 with torch.no_grad():
                     batch.advantages = (batch.advantages - batch.advantages.mean()) / (batch.advantages.std() + 1e-8)
 
-            use_data_augmentation = time_reversal_active and self.symmetry and self.symmetry["use_data_augmentation"]
-            if use_data_augmentation:
+            if legacy_data_augmentation_active:
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
                 batch.observations, batch.actions = data_augmentation_func(
                     env=self.symmetry["_env"],
-                    obs=batch.observations,
+                    obs=original_observations,
                     actions=batch.actions,
                 )
-                num_aug = int(batch.observations.batch_size[0] / original_batch_size)
-                batch.old_actions_log_prob = batch.old_actions_log_prob.repeat(num_aug, 1)
-                batch.values = batch.values.repeat(num_aug, 1)
-                batch.advantages = batch.advantages.repeat(num_aug, 1)
-                batch.returns = batch.returns.repeat(num_aug, 1)
+                augmented_batch_size = batch.observations.batch_size[0]
+                if augmented_batch_size % original_batch_size != 0 or batch.actions.shape[0] != augmented_batch_size:
+                    raise RuntimeError(
+                        "Legacy time-reversal data augmentation must return equally sized observation and action "
+                        f"batches containing the originals; got {augmented_batch_size} observations and "
+                        f"{batch.actions.shape[0]} actions for {original_batch_size} inputs."
+                    )
+                augmentation_factor = augmented_batch_size // original_batch_size
+                for field_name in ("old_actions_log_prob", "values", "advantages", "returns"):
+                    field = getattr(batch, field_name)
+                    repeats = (augmentation_factor,) + (1,) * (field.ndim - 1)
+                    setattr(batch, field_name, field.repeat(repeats))
 
             self._clamp_actor_std()
             self.actor(
@@ -170,7 +236,7 @@ class TimeReversalPPO(PPO):
             values = self.critic(batch.observations, masks=batch.masks, hidden_state=batch.hidden_states[1])
             distribution_params = tuple(p[:original_batch_size] for p in self.actor.output_distribution_params)
             entropy = self.actor.output_entropy[:original_batch_size]
-            actor_bound_loss = self._actor_mean_bound_loss(distribution_params[0])
+            actor_bound_loss = self._configured_actor_mean_bound_loss(distribution_params[0])
 
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
@@ -214,46 +280,166 @@ class TimeReversalPPO(PPO):
             loss += self._ACTOR_MEAN_BOUND_LOSS_COEFF * actor_bound_loss
 
             symmetry_loss = torch.zeros((), device=self.device)
+            raw_action_consistency_loss = torch.zeros((), device=self.device)
+            normalized_target_consistency_loss: torch.Tensor | None = None
             tr_value_loss = torch.zeros((), device=self.device)
-            if time_reversal_active and self.symmetry:
+            actor_diagnostic_loss = surrogate_loss - self.entropy_coef * entropy.mean()
+            critic_diagnostic_loss = self.value_loss_coef * value_loss
+            diagnostic_minibatch = gradient_diagnostics_update and batch_index == 0
+            augmentation_diagnostic_minibatch = augmentation_gradient_update and batch_index == 0
+            need_policy_raw = compute_policy_raw or (diagnostic_minibatch and policy_schedule.enabled)
+            need_value_raw = compute_value_raw or (diagnostic_minibatch and value_schedule.enabled)
+            if self.symmetry and (need_policy_raw or need_value_raw):
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
-                augmented_observations = batch.observations
-                augmented_values = values
-                if not use_data_augmentation:
+                if legacy_data_augmentation_active:
+                    augmented_observations = batch.observations
+                else:
                     augmented_observations, _ = data_augmentation_func(
-                        obs=batch.observations, actions=None, env=self.symmetry["_env"]
+                        obs=original_observations, actions=None, env=self.symmetry["_env"]
                     )
-                    augmented_values = self.critic(augmented_observations)
+                if augmented_observations.batch_size[0] != 2 * original_batch_size:
+                    raise RuntimeError(
+                        "Time-reversal consistency requires exactly one transformed observation per historical "
+                        f"sample; got {augmented_observations.batch_size[0]} outputs for {original_batch_size} inputs."
+                    )
+                transformed_observations = augmented_observations[original_batch_size:]
+                validity = self._time_reversal_validity(original_observations)
+                time_reversal_mask = validity.combined
+                minibatch_mask_diagnostics = time_reversal_mask_diagnostics(validity)
+                for name, value in minibatch_mask_diagnostics.items():
+                    mask_diagnostics_sum[name] = mask_diagnostics_sum.get(name, 0.0) + value
+                mask_diagnostics_count += 1
 
-                mean_actions = self.actor(augmented_observations.detach().clone())
-                action_mean_orig = mean_actions[:original_batch_size]
-                _, actions_mean_symm = data_augmentation_func(
-                    obs=None, actions=action_mean_orig, env=self.symmetry["_env"]
-                )
+                if need_policy_raw:
+                    transformed_action_mean = self.actor(transformed_observations.detach().clone())
+                    _, augmented_action_targets = data_augmentation_func(
+                        obs=None,
+                        actions=distribution_params[0].detach(),
+                        env=self.symmetry["_env"],
+                    )
+                    if augmented_action_targets.shape[0] != 2 * original_batch_size:
+                        raise RuntimeError(
+                            "Time-reversal consistency requires exactly one transformed action per historical "
+                            f"sample; got {augmented_action_targets.shape[0]} outputs for {original_batch_size} inputs."
+                        )
+                    raw_action_consistency_loss = self._masked_mse(
+                        transformed_action_mean,
+                        augmented_action_targets[original_batch_size:].detach(),
+                        time_reversal_mask,
+                    )
+                    metadata = self._joint_action_metadata(required=False)
+                    if metadata is not None:
+                        action_offset, action_scale, soft_limits, _, _ = metadata
+                        normalized_original = normalize_requested_joint_targets(
+                            distribution_params[0].detach(),
+                            action_offset,
+                            action_scale,
+                            soft_limits,
+                        )
+                        normalized_transformed = normalize_requested_joint_targets(
+                            transformed_action_mean,
+                            action_offset,
+                            action_scale,
+                            soft_limits,
+                        )
+                        _, augmented_normalized_targets = data_augmentation_func(
+                            obs=None,
+                            actions=normalized_original,
+                            env=self.symmetry["_env"],
+                        )
+                        if augmented_normalized_targets.shape[0] != 2 * original_batch_size:
+                            raise RuntimeError(
+                                "Normalized-target time-reversal consistency requires exactly one transformed "
+                                f"target per historical sample; got {augmented_normalized_targets.shape[0]} outputs "
+                                f"for {original_batch_size} inputs."
+                            )
+                        normalized_target_consistency_loss = self._masked_mse(
+                            normalized_transformed,
+                            augmented_normalized_targets[original_batch_size:].detach(),
+                            time_reversal_mask,
+                        )
+                    output_space = self.symmetry.get("tr_policy_output_space", "raw_action_mean")
+                    if output_space == "raw_action_mean":
+                        symmetry_loss = raw_action_consistency_loss
+                    elif output_space == "normalized_requested_joint_target":
+                        if normalized_target_consistency_loss is None:
+                            raise RuntimeError(
+                                "tr_policy_output_space='normalized_requested_joint_target' requires ordered joint "
+                                "action offsets, scales, and soft limits from the symmetric quadruped environment."
+                            )
+                        symmetry_loss = normalized_target_consistency_loss
+                    else:
+                        raise ValueError(f"Unsupported tr_policy_output_space: {output_space!r}.")
+                if need_value_raw:
+                    transformed_values = (
+                        values[original_batch_size:]
+                        if legacy_data_augmentation_active
+                        else self.critic(transformed_observations)
+                    )
+                    tr_value_loss = self._masked_mse(
+                        transformed_values,
+                        values[:original_batch_size].detach(),
+                        time_reversal_mask,
+                    )
 
-                time_reversal_mask = self._time_reversal_mask(augmented_observations[:original_batch_size])
-                symmetry_loss = self._masked_mse(
-                    mean_actions[original_batch_size:],
-                    actions_mean_symm.detach()[original_batch_size:],
-                    time_reversal_mask,
-                )
-                tr_value_loss = self._masked_mse(
-                    augmented_values[original_batch_size:],
-                    augmented_values[:original_batch_size].detach(),
-                    time_reversal_mask,
-                )
-
-                if effective_mirror_coeff > 0.0:
-                    loss += effective_mirror_coeff * symmetry_loss
+                if effective_tr_policy_coeff > 0.0:
+                    loss += effective_tr_policy_coeff * symmetry_loss
                 if effective_tr_value_coeff > 0.0:
                     loss += effective_tr_value_coeff * tr_value_loss
 
-            elif self.symmetry:
-                symmetry_loss = symmetry_loss.detach()
+                if diagnostic_minibatch:
+                    epsilon = float(gradient_cfg.get("epsilon", 1.0e-12))
+                    if policy_schedule.enabled and need_policy_raw:
+                        gradient_diagnostics.update(
+                            time_reversal_gradient_diagnostics(
+                                actor_diagnostic_loss,
+                                symmetry_loss,
+                                tuple(self.actor.parameters()),
+                                effective_coefficient=effective_tr_policy_coeff,
+                                prefix="actor",
+                                epsilon=epsilon,
+                            )
+                        )
+                    if value_schedule.enabled and need_value_raw:
+                        gradient_diagnostics.update(
+                            time_reversal_gradient_diagnostics(
+                                critic_diagnostic_loss,
+                                tr_value_loss,
+                                tuple(self.critic.parameters()),
+                                effective_coefficient=effective_tr_value_coeff,
+                                prefix="critic",
+                                epsilon=epsilon,
+                            )
+                        )
+
+            tr_augmentation_loss = torch.zeros((), device=self.device)
+            if augmentation is not None and effective_tr_augmentation_coeff > 0.0:
+                tr_augmentation_loss = augmentation.actor_nll(self.actor, original_batch_size)
+                loss += effective_tr_augmentation_coeff * tr_augmentation_loss
+                if augmentation_diagnostic_minibatch and tr_augmentation_loss.requires_grad:
+                    augmentation_gradient = time_reversal_gradient_diagnostics(
+                        actor_diagnostic_loss,
+                        tr_augmentation_loss,
+                        tuple(self.actor.parameters()),
+                        effective_coefficient=effective_tr_augmentation_coeff,
+                        prefix="augmentation_actor",
+                        epsilon=float(augmentation_cfg.get("gradient_diagnostics_epsilon", 1.0e-12)),
+                    )
+                    gradient_diagnostics.update(augmentation_gradient)
+                    augmentation_diagnostics["tr_augmentation/gradient_norm"] = augmentation_gradient[
+                        "tr_gradient/augmentation_actor/auxiliary_norm"
+                    ]
+                    augmentation_diagnostics["tr_augmentation/gradient_weighted_norm"] = augmentation_gradient[
+                        "tr_gradient/augmentation_actor/weighted_auxiliary_norm"
+                    ]
+                    augmentation_diagnostics["tr_augmentation/gradient_cosine_ppo_actor"] = augmentation_gradient[
+                        "tr_gradient/augmentation_actor/cosine"
+                    ]
+                    augmentation_diagnostics["tr_augmentation/gradient_diagnostics_ran"] = 1.0
 
             if self.rnd:
                 with torch.no_grad():
-                    rnd_state = self.rnd.get_rnd_state(batch.observations[:original_batch_size])
+                    rnd_state = self.rnd.get_rnd_state(original_observations)
                     rnd_state = self.rnd.state_normalizer(rnd_state)
                 predicted_embedding = self.rnd.predictor(rnd_state)
                 target_embedding = self.rnd.target(rnd_state).detach()
@@ -281,10 +467,16 @@ class TimeReversalPPO(PPO):
             mean_actor_bound_loss += actor_bound_loss.item()
             if mean_rnd_loss is not None:
                 mean_rnd_loss += rnd_loss.item()
-            if mean_symmetry_loss is not None:
+            if mean_symmetry_loss is not None and compute_policy_raw:
                 mean_symmetry_loss += symmetry_loss.item()
-            if mean_tr_value_loss is not None:
+                mean_raw_action_consistency += raw_action_consistency_loss.item()
+                raw_action_consistency_count += 1
+                if normalized_target_consistency_loss is not None:
+                    mean_normalized_target_consistency += normalized_target_consistency_loss.item()
+                    normalized_target_consistency_count += 1
+            if mean_tr_value_loss is not None and compute_value_raw:
                 mean_tr_value_loss += tr_value_loss.item()
+            mean_tr_augmentation_loss += tr_augmentation_loss.item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -295,11 +487,16 @@ class TimeReversalPPO(PPO):
             mean_rnd_loss /= num_updates
         if mean_symmetry_loss is not None:
             mean_symmetry_loss /= num_updates
+        if raw_action_consistency_count:
+            mean_raw_action_consistency /= raw_action_consistency_count
+        if normalized_target_consistency_count:
+            mean_normalized_target_consistency /= normalized_target_consistency_count
         if mean_tr_value_loss is not None:
             mean_tr_value_loss /= num_updates
+        mean_tr_augmentation_loss /= num_updates
 
         weighted_symmetry, weighted_tr_value, weighted_trs_total = time_reversal_weighted_losses(
-            effective_mirror_coeff,
+            effective_tr_policy_coeff,
             effective_tr_value_coeff,
             mean_symmetry_loss,
             mean_tr_value_loss,
@@ -307,9 +504,12 @@ class TimeReversalPPO(PPO):
 
         action_diagnostics = self._action_diagnostics_from_storage()
         self._update_actor_mean_safety(action_diagnostics["diagnostics/actor_mean_abs_max"])
+        if augmentation is not None:
+            augmentation.finish_update()
         self.storage.clear()
         self._time_reversal_update_count += 1
         self.current_learning_iteration = self._time_reversal_update_count
+        self._sync_environment_training_iteration()
 
         loss_dict = {
             "value": mean_value_loss,
@@ -317,10 +517,22 @@ class TimeReversalPPO(PPO):
             "entropy": mean_entropy,
             "actor_bound": mean_actor_bound_loss,
             "trs_scale": trs_scale,
-            "effective_mirror_coeff": effective_mirror_coeff,
+            "tr_policy_consistency": mean_symmetry_loss or 0.0,
+            "tr_policy_consistency_raw_action_mean": mean_raw_action_consistency,
+            "tr_policy_consistency_normalized_requested_joint_target": mean_normalized_target_consistency,
+            "tr_policy_consistency_normalized_target_available": float(normalized_target_consistency_count > 0),
+            "tr_value_consistency": mean_tr_value_loss or 0.0,
+            "effective_tr_policy_coeff": effective_tr_policy_coeff,
             "effective_tr_value_coeff": effective_tr_value_coeff,
-            "weighted_symmetry": weighted_symmetry,
+            "weighted_tr_policy": weighted_symmetry,
             "weighted_tr_value": weighted_tr_value,
+            "weighted_tr_total": weighted_trs_total,
+            "tr_augmentation_nll": mean_tr_augmentation_loss,
+            "effective_tr_augmentation_coeff": effective_tr_augmentation_coeff,
+            "weighted_tr_augmentation": effective_tr_augmentation_coeff * mean_tr_augmentation_loss,
+            # Deprecated TensorBoard aliases retained for archived analyses.
+            "effective_mirror_coeff": effective_tr_policy_coeff,
+            "weighted_symmetry": weighted_symmetry,
             "weighted_trs_total": weighted_trs_total,
         }
         if self.rnd:
@@ -329,9 +541,141 @@ class TimeReversalPPO(PPO):
             loss_dict["symmetry"] = mean_symmetry_loss
         if mean_tr_value_loss is not None:
             loss_dict["tr_value"] = mean_tr_value_loss
+        if mask_diagnostics_count:
+            loss_dict.update({name: value / mask_diagnostics_count for name, value in mask_diagnostics_sum.items()})
+        loss_dict.update(gradient_diagnostics)
+        loss_dict.update(augmentation_diagnostics)
         loss_dict.update(action_diagnostics)
 
         return loss_dict
+
+    def save(self) -> dict:
+        """Save PPO state with backward-compatible absolute schedule metadata."""
+        saved_dict = super().save()
+        policy_schedule, value_schedule = self._resolved_time_reversal_schedules()
+        augmentation_schedule = self._resolved_time_reversal_augmentation_schedule()
+        saved_dict["time_reversal_state"] = {
+            "schema_version": self._TIME_REVERSAL_STATE_SCHEMA_VERSION,
+            "last_completed_update": self.current_learning_iteration - 1,
+            "next_absolute_update": self.current_learning_iteration,
+            "policy_schedule": vars(policy_schedule),
+            "value_schedule": vars(value_schedule),
+            "augmentation_schedule": vars(augmentation_schedule),
+        }
+        augmentation = getattr(self, "_tr_augmentation", None)
+        if augmentation is not None:
+            augmentation_state = augmentation.state_dict()
+            augmentation_state["schedule_iteration"] = self.current_learning_iteration
+            saved_dict["time_reversal_augmentation_state"] = augmentation_state
+        return saved_dict
+
+    def _validate_time_reversal_checkpoint_state(
+        self,
+        loaded_dict: Mapping,
+        *,
+        validate_schedules: bool = True,
+    ) -> int | None:
+        """Validate and return the next update for checkpoints carrying the publication schema."""
+        if "time_reversal_state" not in loaded_dict:
+            # Checkpoints predating the publication schema retain the legacy
+            # iteration-only fallback below.
+            return None
+        state = loaded_dict["time_reversal_state"]
+        if not isinstance(state, Mapping):
+            raise ValueError("Checkpoint time_reversal_state must be a mapping.")
+        required = {
+            "schema_version",
+            "last_completed_update",
+            "next_absolute_update",
+            "policy_schedule",
+            "value_schedule",
+            "augmentation_schedule",
+        }
+        if set(state) != required:
+            missing = sorted(required - set(state))
+            unexpected = sorted(set(state) - required)
+            raise ValueError(
+                "Checkpoint time_reversal_state schema fields do not match: "
+                f"missing={missing}, unexpected={unexpected}."
+            )
+        schema_version = state["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, Integral)
+            or schema_version != self._TIME_REVERSAL_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "Unsupported time_reversal_state schema_version: "
+                f"expected {self._TIME_REVERSAL_STATE_SCHEMA_VERSION}, received {schema_version!r}."
+            )
+        if "iter" not in loaded_dict:
+            raise ValueError("A checkpoint with time_reversal_state must also contain the runner iter field.")
+        runner_iteration = loaded_dict["iter"]
+        if isinstance(runner_iteration, bool) or not isinstance(runner_iteration, Integral) or runner_iteration < 0:
+            raise ValueError(f"Checkpoint runner iter must be a nonnegative integer; received {runner_iteration!r}.")
+        last_completed_update = state["last_completed_update"]
+        next_absolute_update = state["next_absolute_update"]
+        if (
+            isinstance(last_completed_update, bool)
+            or not isinstance(last_completed_update, Integral)
+            or last_completed_update < -1
+            or isinstance(next_absolute_update, bool)
+            or not isinstance(next_absolute_update, Integral)
+            or next_absolute_update != last_completed_update + 1
+        ):
+            raise ValueError(
+                "Checkpoint time_reversal_state must contain consecutive last_completed_update and "
+                "next_absolute_update integers; received "
+                f"{last_completed_update!r} and {next_absolute_update!r}."
+            )
+        if runner_iteration not in (last_completed_update, next_absolute_update):
+            raise ValueError(
+                "Checkpoint runner iter must identify either the last completed update or the same pending next "
+                f"update after an immediate resave; received iter={runner_iteration!r}, "
+                f"last_completed_update={last_completed_update!r}, next_absolute_update={next_absolute_update!r}."
+            )
+        if (
+            isinstance(next_absolute_update, bool)
+            or not isinstance(next_absolute_update, Integral)
+            or next_absolute_update < 0
+        ):
+            raise ValueError(
+                "Checkpoint time_reversal_state.next_absolute_update must be a nonnegative integer; "
+                f"received {next_absolute_update!r}."
+            )
+        if validate_schedules:
+            policy_schedule, value_schedule = self._resolved_time_reversal_schedules()
+            expected_schedules = {
+                "policy_schedule": vars(policy_schedule),
+                "value_schedule": vars(value_schedule),
+                "augmentation_schedule": vars(self._resolved_time_reversal_augmentation_schedule()),
+            }
+            for name, expected in expected_schedules.items():
+                saved = state[name]
+                saved = dict(saved) if isinstance(saved, Mapping) else None
+                exact_match = saved is not None and saved.keys() == expected.keys()
+                exact_match = exact_match and all(
+                    type(saved[key]) is type(expected[key]) and saved[key] == expected[key] for key in expected
+                )
+                if not exact_match:
+                    raise ValueError(
+                        f"Checkpoint {name} does not exactly match the resolved training configuration: "
+                        f"expected {expected!r}, received {saved!r}."
+                    )
+        return int(next_absolute_update)
+
+    def _checkpoint_next_iteration(self, loaded_dict: Mapping, *, validate_schedules: bool) -> int | None:
+        """Return the checkpoint's next update while retaining the legacy iter-only fallback."""
+        next_iteration = self._validate_time_reversal_checkpoint_state(
+            loaded_dict,
+            validate_schedules=validate_schedules,
+        )
+        if next_iteration is not None or "iter" not in loaded_dict:
+            return next_iteration
+        runner_iteration = loaded_dict["iter"]
+        if isinstance(runner_iteration, bool) or not isinstance(runner_iteration, Integral) or runner_iteration < 0:
+            raise ValueError(f"Checkpoint runner iter must be a nonnegative integer; received {runner_iteration!r}.")
+        return int(runner_iteration) + 1
 
     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
         """Load algorithm state and align the TRS schedule to the next PPO update.
@@ -341,12 +685,44 @@ class TimeReversalPPO(PPO):
         restores its counter. This keeps the runner, TensorBoard step, and
         auxiliary schedule aligned to the next absolute update.
         """
+        load_iteration_requested = load_cfg is None or bool(load_cfg.get("iteration", False))
+        restore_environment_iteration = load_cfg is not None and bool(load_cfg.get("environment_iteration", False))
+        load_augmentation = load_cfg is None or bool(load_cfg.get("augmentation", load_cfg.get("iteration", False)))
+        augmentation = getattr(self, "_tr_augmentation", None)
+        require_schedule_match = load_iteration_requested or (augmentation is not None and load_augmentation)
+        checkpoint_next_iteration = None
+        if require_schedule_match or restore_environment_iteration:
+            checkpoint_next_iteration = self._checkpoint_next_iteration(
+                loaded_dict,
+                validate_schedules=require_schedule_match,
+            )
+        if restore_environment_iteration and checkpoint_next_iteration is None:
+            raise ValueError("environment_iteration checkpoint loading requires the runner iter field.")
         load_iteration = super().load(loaded_dict, load_cfg, strict)
+        if augmentation is not None and load_augmentation:
+            if "time_reversal_augmentation_state" not in loaded_dict:
+                raise ValueError(
+                    "The checkpoint has no time_reversal_augmentation_state. Refusing to silently restart enabled "
+                    "augmentation models; disable augmentation for transfer loading or provide a matching checkpoint."
+                )
+            augmentation_state = loaded_dict["time_reversal_augmentation_state"]
+            if load_iteration and "iter" in loaded_dict:
+                expected_iteration = checkpoint_next_iteration
+                saved_iteration = augmentation_state.get("schedule_iteration")
+                if saved_iteration != expected_iteration:
+                    raise ValueError(
+                        "Augmentation schedule checkpoint is inconsistent with the runner iteration: "
+                        f"expected {expected_iteration}, received {saved_iteration!r}."
+                    )
+            augmentation.load_state_dict(augmentation_state)
         if load_iteration and "iter" in loaded_dict:
-            next_iteration = int(loaded_dict["iter"]) + 1
+            next_iteration = checkpoint_next_iteration
+            assert next_iteration is not None
             loaded_dict["iter"] = next_iteration
             self.current_learning_iteration = next_iteration
             self._time_reversal_update_count = self.current_learning_iteration
+        environment_iteration = checkpoint_next_iteration if restore_environment_iteration else None
+        self._sync_environment_training_iteration(environment_iteration)
         return load_iteration
 
     def _validate_time_reversal_configuration(self) -> None:
@@ -354,44 +730,151 @@ class TimeReversalPPO(PPO):
         if self.symmetry is None:
             return
 
+        augmentation_cfg = self.symmetry.get("tr_augmentation") or {}
+        if self.symmetry.get("use_data_augmentation", False):
+            warnings.warn(
+                "use_data_augmentation is deprecated, but its legacy PPO minibatch duplication remains active "
+                "during the compatibility window. Set use_data_augmentation=False and configure the independent "
+                "project-local tr_augmentation path for filtered reverse-action supervision.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         for name in ("mirror_loss_coeff", "value_loss_coeff"):
             value = self.symmetry.get(name, 0.0)
             if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)) or value < 0.0:
                 raise ValueError(f"{name} must be finite and nonnegative; received {value!r}.")
 
-        time_reversal_loss_scale(
-            iteration=0,
-            warmup_iterations=self.symmetry.get("warmup_iterations", 0),
-            rampup_iterations=self.symmetry.get("rampup_iterations", 0),
-            ramp_shape=self.symmetry.get("ramp_shape", "linear"),
+        output_space = self.symmetry.get("tr_policy_output_space", "raw_action_mean")
+        if output_space not in {"raw_action_mean", "normalized_requested_joint_target"}:
+            raise ValueError(
+                "tr_policy_output_space must be 'raw_action_mean' or "
+                f"'normalized_requested_joint_target'; received {output_space!r}."
+            )
+        actor_bound_mode = self.symmetry.get("actor_mean_bound_mode", "legacy_global")
+        if actor_bound_mode not in {"legacy_global", "per_joint_feasible"}:
+            raise ValueError(
+                f"actor_mean_bound_mode must be 'legacy_global' or 'per_joint_feasible'; received {actor_bound_mode!r}."
+            )
+        feasible_margin = self.symmetry.get("actor_mean_feasible_margin_fraction", 0.0)
+        if (
+            isinstance(feasible_margin, bool)
+            or not isinstance(feasible_margin, Real)
+            or not math.isfinite(float(feasible_margin))
+            or not 0.0 <= float(feasible_margin) < 0.5
+        ):
+            raise ValueError(
+                f"actor_mean_feasible_margin_fraction must be finite and in [0, 0.5); received {feasible_margin!r}."
+            )
+
+        validate_legacy_observation_metadata(self.symmetry)
+
+        for term in ("policy", "value", "augmentation"):
+            schedule = resolve_time_reversal_schedule(self.symmetry, term)
+            schedule.scale(0)
+
+        if augmentation_cfg.get("enabled", False):
+            if augmentation_cfg.get("mode") != "dynamics_filtered_reverse_action_supervision":
+                raise ValueError(
+                    "Enabled tr_augmentation requires mode='dynamics_filtered_reverse_action_supervision'."
+                )
+            if self.actor.is_recurrent or self.critic.is_recurrent:
+                raise ValueError(
+                    "tr_augmentation rejects recurrent policies because reversed hidden-state semantics are not "
+                    "implemented."
+                )
+            if not augmentation_cfg.get("filter_enabled", True):
+                raise ValueError(
+                    "Enabled dynamics_filtered_reverse_action_supervision requires filter_enabled=True; "
+                    "unfiltered reversed candidates are not a maintained training mode."
+                )
+            augmentation_gradient_interval = augmentation_cfg.get("gradient_diagnostics_interval", 100)
+            if (
+                isinstance(augmentation_gradient_interval, bool)
+                or not isinstance(augmentation_gradient_interval, int)
+                or augmentation_gradient_interval <= 0
+            ):
+                raise ValueError(
+                    "tr_augmentation.gradient_diagnostics_interval must be a positive integer; "
+                    f"received {augmentation_gradient_interval!r}."
+                )
+            augmentation_gradient_epsilon = augmentation_cfg.get("gradient_diagnostics_epsilon", 1.0e-12)
+            if (
+                isinstance(augmentation_gradient_epsilon, bool)
+                or not isinstance(augmentation_gradient_epsilon, Real)
+                or not math.isfinite(float(augmentation_gradient_epsilon))
+                or augmentation_gradient_epsilon <= 0.0
+            ):
+                raise ValueError(
+                    "tr_augmentation.gradient_diagnostics_epsilon must be finite and positive; "
+                    f"received {augmentation_gradient_epsilon!r}."
+                )
+
+        gradient_cfg = self.symmetry.get("tr_gradient_diagnostics") or {}
+        interval = gradient_cfg.get("interval", 100)
+        if isinstance(interval, bool) or not isinstance(interval, int) or interval <= 0:
+            raise ValueError(f"tr_gradient_diagnostics.interval must be a positive integer; received {interval!r}.")
+        epsilon = gradient_cfg.get("epsilon", 1.0e-12)
+        if isinstance(epsilon, bool) or not isinstance(epsilon, Real) or not math.isfinite(float(epsilon)):
+            raise ValueError(f"tr_gradient_diagnostics.epsilon must be finite and positive; received {epsilon!r}.")
+        if epsilon <= 0.0:
+            raise ValueError(f"tr_gradient_diagnostics.epsilon must be finite and positive; received {epsilon!r}.")
+
+    def _resolved_time_reversal_schedules(
+        self,
+    ) -> tuple[ResolvedTimeReversalSchedule, ResolvedTimeReversalSchedule]:
+        """Resolve independent policy and value schedules from canonical fields and aliases."""
+        if self.symmetry is None:
+            disabled = ResolvedTimeReversalSchedule(False, 0.0, 0, 0, 0, 0, 1.0, "linear")
+            return disabled, disabled
+        return (
+            resolve_time_reversal_schedule(self.symmetry, "policy"),
+            resolve_time_reversal_schedule(self.symmetry, "value"),
         )
+
+    def _resolved_time_reversal_augmentation_schedule(self) -> ResolvedTimeReversalSchedule:
+        """Resolve the independent reverse-action-supervision schedule."""
+        if self.symmetry is None:
+            return ResolvedTimeReversalSchedule(False, 0.0, 0, 0, 0, 0, 1.0, "linear")
+        return resolve_time_reversal_schedule(self.symmetry, "augmentation")
+
+    def _legacy_data_augmentation_scale(self) -> float:
+        """Return whether deprecated PPO batch duplication passed its historical warmup."""
+        if not self.symmetry:
+            return 0.0
+        if not self.symmetry.get("use_time_reversal_regularization", False):
+            return 0.0
+        if not self.symmetry.get("use_data_augmentation", False):
+            return 0.0
+        # The online implementation switched this binary augmentation on at
+        # the warmup boundary.  ``rampup_iterations`` scales auxiliary loss
+        # coefficients, but cannot partially duplicate a PPO minibatch.
+        warmup_iterations = int(self.symmetry.get("warmup_iterations", 0))
+        return float(self.current_learning_iteration >= warmup_iterations)
 
     def _effective_time_reversal_coefficients(self) -> tuple[float, float, float]:
         """Return the shared schedule scale and effective actor/value coefficients."""
-        if not self._time_reversal_enabled():
-            return 0.0, 0.0, 0.0
-
-        scale = time_reversal_loss_scale(
-            iteration=self.current_learning_iteration,
-            warmup_iterations=self.symmetry.get("warmup_iterations", 0),
-            rampup_iterations=self.symmetry.get("rampup_iterations", 0),
-            ramp_shape=self.symmetry.get("ramp_shape", "linear"),
-        )
-        mirror_coeff = (
-            float(self.symmetry.get("mirror_loss_coeff", 0.0)) * scale if self.symmetry["use_mirror_loss"] else 0.0
-        )
-        value_coeff = float(self.symmetry.get("value_loss_coeff", 0.0)) * scale
-        return scale, mirror_coeff, value_coeff
+        policy_schedule, value_schedule = self._resolved_time_reversal_schedules()
+        policy_scale = policy_schedule.scale(self.current_learning_iteration) if policy_schedule.enabled else 0.0
+        value_scale = value_schedule.scale(self.current_learning_iteration) if value_schedule.enabled else 0.0
+        policy_coeff = policy_schedule.target_coeff * policy_scale
+        value_coeff = value_schedule.target_coeff * value_scale
+        alias_scale = policy_scale if policy_schedule.enabled else value_scale
+        return alias_scale, policy_coeff, value_coeff
 
     def _time_reversal_enabled(self) -> bool:
-        if self.symmetry is None:
-            return False
-        if not self.symmetry.get("use_time_reversal_regularization", False):
-            return False
+        policy_schedule, value_schedule = self._resolved_time_reversal_schedules()
+        augmentation_cfg = self.symmetry.get("tr_augmentation", {}) if self.symmetry else {}
         return (
-            self.symmetry["use_data_augmentation"]
-            or self.symmetry["use_mirror_loss"]
-            or float(self.symmetry.get("value_loss_coeff", 0.0)) > 0.0
+            (policy_schedule.enabled and policy_schedule.target_coeff > 0.0)
+            or (value_schedule.enabled and value_schedule.target_coeff > 0.0)
+            or bool(
+                self.symmetry
+                and self.symmetry.get("use_time_reversal_regularization", False)
+                and self.symmetry.get("use_data_augmentation", False)
+            )
+            or bool(augmentation_cfg.get("enabled", False))
+            or bool(self.symmetry and self.symmetry.get("log_disabled_raw_consistency", False))
         )
 
     def _warmup_iterations(self) -> int:
@@ -400,12 +883,13 @@ class TimeReversalPPO(PPO):
         return int(self.symmetry.get("warmup_iterations", 0))
 
     def _time_reversal_mask(self, observations) -> torch.Tensor:
-        policy_obs = observations["policy"]
-        command_index = int(self.symmetry.get("command_observation_index", 9))
-        command_scale = float(self.symmetry.get("command_observation_scale", 1.0))
-        min_abs_command = float(self.symmetry.get("min_abs_command_velocity", 0.0))
-        command = policy_obs[:, command_index] / command_scale
-        return (torch.abs(command) >= min_abs_command).unsqueeze(-1).to(dtype=policy_obs.dtype)
+        return self._time_reversal_validity(observations).combined
+
+    def _time_reversal_validity(self, observations):
+        """Return heuristic stable-phase validity masks from historical observations only."""
+        validity_cfg = self.symmetry.get("tr_validity", {}) if self.symmetry else {}
+        legacy_minimum = float(self.symmetry.get("min_abs_command_velocity", 0.0)) if self.symmetry else 0.0
+        return time_reversal_validity_mask(observations, validity_cfg, legacy_minimum)
 
     @staticmethod
     def _masked_mse(prediction: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -426,6 +910,110 @@ class TimeReversalPPO(PPO):
         with torch.no_grad():
             std_param.nan_to_num_(nan=self._MIN_ACTOR_STD, posinf=self._MAX_ACTOR_STD, neginf=self._MIN_ACTOR_STD)
             std_param.clamp_(min=self._MIN_ACTOR_STD, max=self._MAX_ACTOR_STD)
+
+    def _sync_environment_training_iteration(self, iteration: int | None = None) -> None:
+        """Apply the absolute PPO update to resume-stable environment curricula."""
+        symmetry = getattr(self, "symmetry", None)
+        environment = symmetry.get("_env") if symmetry else None
+        unwrapped = getattr(environment, "unwrapped", environment)
+        setter = getattr(unwrapped, "set_training_iteration", None)
+        if callable(setter):
+            if iteration is None:
+                iteration = int(getattr(self, "current_learning_iteration", 0))
+            setter(int(iteration))
+
+    @staticmethod
+    def _static_joint_metadata(tensor: torch.Tensor, trailing_dimensions: int, name: str) -> torch.Tensor:
+        """Collapse identical per-environment joint metadata to its static action-order value."""
+        if tensor.ndim < trailing_dimensions:
+            raise RuntimeError(
+                f"{name} must have at least {trailing_dimensions} dimensions; received shape {tuple(tensor.shape)}."
+            )
+        if tensor.ndim == trailing_dimensions:
+            return tensor
+        trailing_shape = tensor.shape[-trailing_dimensions:]
+        flattened = tensor.reshape(-1, *trailing_shape)
+        reference = flattened[0]
+        if not torch.allclose(flattened, reference.expand_as(flattened), rtol=0.0, atol=0.0):
+            raise RuntimeError(
+                f"{name} differs across environments, so flattened historical PPO samples cannot be normalized "
+                "without retaining environment indices."
+            )
+        return reference
+
+    def _joint_action_metadata(
+        self,
+        *,
+        required: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | None:
+        """Return static action-order offset, scale, limits, and feasible bounds."""
+        cached = getattr(self, "_joint_action_metadata_cache", None)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+        symmetry = getattr(self, "symmetry", None)
+        environment = symmetry.get("_env") if symmetry else None
+        unwrapped = getattr(environment, "unwrapped", environment)
+        metadata_getter = getattr(unwrapped, "get_joint_position_action_metadata", None)
+        bounds_getter = getattr(unwrapped, "get_joint_position_action_feasible_bounds", None)
+        if not callable(metadata_getter) or not callable(bounds_getter):
+            if required:
+                raise RuntimeError(
+                    "Per-joint policy geometry requires a symmetric quadruped environment exposing ordered "
+                    "joint-position action metadata and feasible bounds."
+                )
+            return None
+        action_offset, action_scale, soft_limits = metadata_getter()
+        lower_bound, upper_bound = bounds_getter(interior_margin_fraction=0.0)
+        device = self.device
+        dtype = next(self.actor.parameters()).dtype
+        action_offset = self._static_joint_metadata(
+            torch.as_tensor(action_offset, device=device, dtype=dtype), 1, "action_offset"
+        )
+        action_scale = self._static_joint_metadata(
+            torch.as_tensor(action_scale, device=device, dtype=dtype), 1, "action_scale"
+        )
+        soft_limits = self._static_joint_metadata(
+            torch.as_tensor(soft_limits, device=device, dtype=dtype), 2, "soft_joint_position_limits"
+        )
+        lower_bound = self._static_joint_metadata(
+            torch.as_tensor(lower_bound, device=device, dtype=dtype), 1, "lower_action_bound"
+        )
+        upper_bound = self._static_joint_metadata(
+            torch.as_tensor(upper_bound, device=device, dtype=dtype), 1, "upper_action_bound"
+        )
+        joint_count = action_offset.shape[-1]
+        expected_shapes = {
+            "action_scale": action_scale.shape[-1],
+            "soft_joint_position_limits": soft_limits.shape[-2],
+            "lower_action_bound": lower_bound.shape[-1],
+            "upper_action_bound": upper_bound.shape[-1],
+        }
+        mismatched = {name: width for name, width in expected_shapes.items() if width != joint_count}
+        if mismatched:
+            raise RuntimeError(
+                "Joint action metadata does not share one ordered action width: "
+                f"offset={joint_count}, mismatched={mismatched}."
+            )
+        resolved = (action_offset, action_scale, soft_limits, lower_bound, upper_bound)
+        self._joint_action_metadata_cache = resolved
+        return resolved
+
+    def _configured_actor_mean_bound_loss(self, actor_mean: torch.Tensor) -> torch.Tensor:
+        """Return the selected legacy-global or per-joint-feasible actor-mean penalty."""
+        mode = self.symmetry.get("actor_mean_bound_mode", "legacy_global") if self.symmetry else "legacy_global"
+        if mode == "legacy_global":
+            return self._actor_mean_bound_loss(actor_mean)
+        if mode != "per_joint_feasible":
+            raise ValueError(f"Unsupported actor_mean_bound_mode: {mode!r}.")
+        metadata = self._joint_action_metadata(required=True)
+        assert metadata is not None
+        _, _, _, lower_bound, upper_bound = metadata
+        return feasible_actor_mean_penalty(
+            actor_mean,
+            lower_bound,
+            upper_bound,
+            interior_margin_fraction=float(self.symmetry.get("actor_mean_feasible_margin_fraction", 0.0)),
+        )
 
     @classmethod
     def _actor_mean_bound_loss(cls, actor_mean: torch.Tensor) -> torch.Tensor:
@@ -451,9 +1039,24 @@ class TimeReversalPPO(PPO):
         """Summarize exact sampled actions and actor means retained by rollout storage."""
         sampled_action_abs = self.storage.actions.abs()
         actor_mean_abs = self.storage.distribution_params[0].abs()
-        return {
+        diagnostics = {
             "diagnostics/action_abs_mean": sampled_action_abs.mean().item(),
             "diagnostics/action_abs_max": sampled_action_abs.max().item(),
             "diagnostics/actor_mean_abs_mean": actor_mean_abs.mean().item(),
             "diagnostics/actor_mean_abs_max": actor_mean_abs.max().item(),
         }
+        metadata = self._joint_action_metadata(required=False)
+        if metadata is not None:
+            _, _, _, lower_bound, upper_bound = metadata
+            symmetry = getattr(self, "symmetry", None)
+            diagnostics.update(
+                feasible_actor_mean_diagnostics(
+                    self.storage.distribution_params[0],
+                    lower_bound,
+                    upper_bound,
+                    interior_margin_fraction=float(
+                        symmetry.get("actor_mean_feasible_margin_fraction", 0.0) if symmetry else 0.0
+                    ),
+                )
+            )
+        return diagnostics

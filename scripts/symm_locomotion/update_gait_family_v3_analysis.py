@@ -23,7 +23,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import analyze_leg_usage as grid_analysis  # noqa: E402
+import evaluation as grid_analysis  # noqa: E402
 
 COMPARISON_METHOD_VERSION = "gait_family_fixed_grid_comparison_v2"
 PHYSX_EFFORT_LIMIT_SENTINEL_THRESHOLD_NM = 1.0e8

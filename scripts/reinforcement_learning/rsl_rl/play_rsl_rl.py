@@ -150,6 +150,57 @@ sys.argv = [sys.argv[0]] + remaining_args
 installed_version = metadata.version("rsl-rl-lib")
 
 
+def _inference_load_cfg(
+    runner_class_name: str,
+    rsl_rl_version: str,
+    *,
+    load_critic: bool = False,
+) -> dict[str, bool] | None:
+    """Return the supported playback checkpoint selection for one runner."""
+    if runner_class_name not in {"OnPolicyRunner", "DistillationRunner"}:
+        return None
+    if runner_class_name == "DistillationRunner" and load_critic:
+        raise ValueError("DistillationRunner checkpoints do not provide the critic required by paired capture.")
+    if version.parse(rsl_rl_version) < version.parse("4.0.0"):
+        return None
+    if runner_class_name == "OnPolicyRunner":
+        return {
+            "actor": True,
+            "critic": load_critic,
+            "optimizer": False,
+            "iteration": False,
+            "environment_iteration": True,
+            "rnd": False,
+            "augmentation": False,
+        }
+    return {
+        "student": True,
+        "teacher": False,
+        "optimizer": False,
+        "iteration": False,
+    }
+
+
+def _load_runner_checkpoint(
+    runner,
+    checkpoint_path: str,
+    runner_class_name: str,
+    rsl_rl_version: str,
+    *,
+    load_critic: bool = False,
+) -> None:
+    """Load a checkpoint without requesting options unsupported by older RSL-RL."""
+    load_cfg = _inference_load_cfg(
+        runner_class_name,
+        rsl_rl_version,
+        load_critic=load_critic,
+    )
+    if load_cfg is None:
+        runner.load(checkpoint_path)
+    else:
+        runner.load(checkpoint_path, load_cfg=load_cfg)
+
+
 _SYMM_GAIT_THETAS = (
     ("trot", (0.0, 0.5, 0.5, 0.0)),
     ("bound", (0.0, 0.0, 0.5, 0.5)),
@@ -217,6 +268,30 @@ def _format_symmetric_gait_info(env, env_index: int = 0) -> str | None:
 
 
 _LEG_USAGE_PROTOCOL_VERSION = "leg_usage_grid_v1"
+_LEG_USAGE_FULL_PROTOCOL_VERSION = "leg_usage_grid_full_v3"
+_LEG_USAGE_LIGHT_PROTOCOL_VERSION = "leg_usage_grid_light_v2"
+_LEG_USAGE_PROTOCOL_VERSIONS = {
+    _LEG_USAGE_PROTOCOL_VERSION,
+    _LEG_USAGE_FULL_PROTOCOL_VERSION,
+    _LEG_USAGE_LIGHT_PROTOCOL_VERSION,
+}
+
+
+def _canonical_leg_usage_method_version(plan: dict[str, Any]) -> str:
+    """Return one canonical leg-usage method and reject conflicting aliases."""
+    method_value = plan.get("method_version")
+    alternate_version = plan.get("protocol_version")
+    if method_value is None and alternate_version is None:
+        return _LEG_USAGE_PROTOCOL_VERSION
+    if method_value is None:
+        return str(alternate_version)
+    method_version = str(method_value)
+    if alternate_version is not None and str(alternate_version) != method_version:
+        raise ValueError(
+            "Leg-usage method_version/protocol_version identity mismatch: "
+            f"method_version={method_version!r}, protocol_version={alternate_version!r}."
+        )
+    return method_version
 
 
 def _utc_timestamp() -> str:
@@ -285,6 +360,51 @@ def _validate_leg_usage_gait_library(plan: dict[str, Any]) -> None:
             )
 
 
+def _validate_immutable_leg_usage_protocol(
+    plan: dict[str, Any],
+    *,
+    method_version: str,
+    full_method: str,
+    light_method: str,
+) -> None:
+    """Require the exact frozen cell inventory for current full/light protocols."""
+    gaits = plan["gaits"]
+    cells = plan["cells"]
+    if method_version == full_method:
+        expected_velocities = (-1.5, -1.0, -0.5, 0.5, 1.0, 1.5)
+        expected_cells = {(gait_index, velocity) for gait_index in range(10) for velocity in expected_velocities}
+        received_cells = {
+            (int(cell["gait_index"]), float(cell.get("velocity_mps", cell.get("vx_mps")))) for cell in cells
+        }
+        valid = (
+            [int(gait["index"]) for gait in gaits] == list(range(10))
+            and tuple(float(value) for value in plan.get("velocities_mps", ())) == expected_velocities
+            and len(cells) == len(expected_cells)
+            and received_cells == expected_cells
+        )
+        if not valid:
+            raise ValueError(
+                "The immutable full protocol must contain all ten canonical gait rows crossed with its exact "
+                "six-velocity grid."
+            )
+    elif method_version == light_method:
+        expected_cells = {
+            ("trot", 1.0),
+            ("trot", -1.0),
+            ("bound", 1.0),
+            ("bound", -1.0),
+            ("half_bound_front_a", 1.0),
+            ("half_bound_front_b", -1.0),
+            ("gallop_a", 1.0),
+            ("gallop_c", -1.0),
+        }
+        received_cells = {
+            (str(cell.get("gait_name")), float(cell.get("velocity_mps", cell.get("vx_mps")))) for cell in cells
+        }
+        if len(cells) != len(expected_cells) or received_cells != expected_cells:
+            raise ValueError("The immutable light protocol must contain its exact eight stable row/direction cells.")
+
+
 def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
     """Load and validate the immutable portions of a leg-usage study plan."""
     plan_path = Path(plan_value).expanduser().resolve()
@@ -297,6 +417,15 @@ def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
         raise ValueError("Leg-usage plan must contain one JSON object.")
     if plan.get("schema_version") != 1:
         raise ValueError(f"Unsupported leg-usage plan schema_version: {plan.get('schema_version')!r}.")
+    method_version = _canonical_leg_usage_method_version(plan)
+    if method_version not in _LEG_USAGE_PROTOCOL_VERSIONS:
+        raise ValueError(f"Unsupported leg-usage method_version: {method_version!r}.")
+    protocol = str(plan.get("protocol", "full"))
+    expected_protocol = "light" if method_version == _LEG_USAGE_LIGHT_PROTOCOL_VERSION else "full"
+    if protocol != expected_protocol:
+        raise ValueError(
+            f"Leg-usage protocol/method identity mismatch: protocol={protocol!r}, method={method_version!r}."
+        )
     gaits = plan.get("gaits")
     cells = plan.get("cells")
     if not isinstance(gaits, list) or not gaits:
@@ -365,6 +494,12 @@ def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
             raise ValueError(f"Leg-usage cells must use unique output directories: {cell['relative_output_dir']!r}.")
         cell_output_dirs.add(cell_output_dir)
     _validate_leg_usage_gait_library(plan)
+    _validate_immutable_leg_usage_protocol(
+        plan,
+        method_version=method_version,
+        full_method=_LEG_USAGE_FULL_PROTOCOL_VERSION,
+        light_method=_LEG_USAGE_LIGHT_PROTOCOL_VERSION,
+    )
     return plan, plan_path, hashlib.sha256(raw_plan).hexdigest()
 
 
@@ -493,6 +628,9 @@ def _configure_leg_usage_env(env_cfg: ManagerBasedRLEnvCfg, plan: dict[str, Any]
     gait_weights = tuple(float(gait.get("weight", 1.0)) for gait in ordered_gaits)
     command_cfg.init_foot_thetas = gait_rows
     command_cfg.init_foot_theta_weights = gait_weights
+    # Evaluation installs an explicit gait subset and then selects each row by
+    # index, so training-only canonical-library sampling must be disabled.
+    command_cfg.gait_sampling_profile = None
     if plan.get("gait_library_version") is not None:
         command_cfg.gait_library_version = str(plan["gait_library_version"])
     command_cfg.gait_sequence_enabled = False
@@ -564,6 +702,108 @@ def _completed_cell_archive_matches(
     }
     if not required_fields.issubset(archive.files):
         return False
+    protocol_version = (
+        str(archive["protocol_version"].item()) if "protocol_version" in archive.files else "leg_usage_grid_v1"
+    )
+    if protocol_version != "leg_usage_grid_v1":
+        publication_fields = {
+            "protocol_version",
+            "gait_name",
+            "gait_family",
+            "evaluation_seed",
+            "joint_names",
+            "configured_joint_effort_limits",
+            "configured_effort_limit_source_by_joint",
+            "configured_effort_limit_fallback",
+            "configured_effort_limits_valid",
+            "effort_limit_provenance_json",
+            "foot_normal_forces_w",
+            "foot_normal_force_is_ground_filtered",
+            "ground_filter_paths",
+            "robot_mass_kg",
+            "contact_threshold_on_n",
+            "contact_threshold_off_n",
+            "base_headings",
+            "desired_headings",
+            "heading_sample_valid",
+            "pre_decision_common_gait_phases",
+            "actor_means",
+            "critic_values",
+            "joint_positions",
+            "joint_velocities",
+            "requested_joint_position_targets",
+            "joint_position_lower_limits",
+            "joint_position_upper_limits",
+            "leg_names",
+            "motor_role_names",
+            "foot_body_names",
+        }
+        if protocol_version not in {
+            "leg_usage_grid_full_v3",
+            "leg_usage_grid_light_v2",
+        } or not publication_fields.issubset(archive.files):
+            return False
+        configured_limits = np.asarray(archive["configured_joint_effort_limits"], dtype=np.float64)
+        joint_names = np.asarray(archive["joint_names"]).reshape(-1)
+        leg_names = np.asarray(archive["leg_names"]).reshape(-1)
+        motor_role_names = np.asarray(archive["motor_role_names"]).reshape(-1)
+        foot_body_names = np.asarray(archive["foot_body_names"]).reshape(-1)
+        effort_sources = np.asarray(archive["configured_effort_limit_source_by_joint"]).reshape(-1)
+        ground_filter_paths = np.asarray(archive["ground_filter_paths"]).reshape(-1)
+        filtered = np.asarray(archive["foot_normal_force_is_ground_filtered"], dtype=bool)
+        try:
+            effort_provenance = json.loads(str(archive["effort_limit_provenance_json"].item()))
+            source_provenance = effort_provenance["source"]
+            source_sha256 = source_provenance.get("sha256")
+            source_files = source_provenance.get("files")
+            int(source_sha256, 16)
+            if not isinstance(source_files, dict):
+                raise TypeError("source files must be a mapping")
+            for source_path, source_hash in source_files.items():
+                if not isinstance(source_path, str) or not source_path.strip():
+                    raise ValueError("source path is empty")
+                if not isinstance(source_hash, str) or len(source_hash) != 64:
+                    raise ValueError("source hash is malformed")
+                int(source_hash, 16)
+            provenance_valid = (
+                isinstance(source_sha256, str)
+                and len(source_sha256) == 64
+                and bool(source_files)
+                and not source_provenance.get("missing_files")
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            provenance_valid = False
+        if (
+            configured_limits.shape != (12,)
+            or joint_names.shape != (12,)
+            or len(set(str(value) for value in joint_names)) != 12
+            or tuple(str(value) for value in leg_names) != ("Front Left", "Front Right", "Rear Left", "Rear Right")
+            or tuple(str(value) for value in motor_role_names) != ("Hip/Abad", "Thigh", "Calf")
+            or foot_body_names.shape != (4,)
+            or len(set(str(value) for value in foot_body_names)) != 4
+            or any(not str(value) for value in foot_body_names)
+            or effort_sources.shape != (12,)
+            or any(not str(value) or "fallback" in str(value).lower() for value in effort_sources)
+            or not np.all(np.isfinite(configured_limits))
+            or np.any(configured_limits <= 0.0)
+            or np.any(configured_limits >= 1.0e8)
+            or bool(archive["configured_effort_limit_fallback"].item())
+            or not bool(archive["configured_effort_limits_valid"].item())
+            or filtered.shape != (recorded_steps,)
+            or not bool(np.all(filtered))
+            or ground_filter_paths.shape != (4,)
+            or any(str(path) != "/World/ground/terrain/mesh" for path in ground_filter_paths)
+            or not provenance_valid
+            or not math.isfinite(float(archive["robot_mass_kg"].item()))
+            or float(archive["robot_mass_kg"].item()) <= 0.0
+            or not float(archive["contact_threshold_on_n"].item())
+            > float(archive["contact_threshold_off_n"].item())
+            >= 0.0
+            or str(archive["gait_name"].item()) != str(cell.get("gait_name"))
+            or str(archive["gait_family"].item()) != str(cell.get("family"))
+            or int(archive["evaluation_seed"].item()) != int(cell.get("seed", 0))
+        ):
+            return False
     scalar_checks = (
         str(archive["cell_id"].item()) == str(cell["id"]),
         str(archive["plan_sha256"].item()) == plan_sha256,
@@ -590,6 +830,33 @@ def _completed_cell_archive_matches(
     duty_factors = np.asarray(archive["duty_factors"], dtype=np.float64)
     common_gait_phases = np.asarray(archive["common_gait_phases"], dtype=np.float64)
     configured_foot_thetas = np.asarray(archive["configured_foot_thetas"], dtype=np.float64)
+    base_headings = (
+        np.asarray(archive["base_headings"], dtype=np.float64) if protocol_version != "leg_usage_grid_v1" else None
+    )
+    desired_headings = (
+        np.asarray(archive["desired_headings"], dtype=np.float64) if protocol_version != "leg_usage_grid_v1" else None
+    )
+    heading_sample_valid = (
+        np.asarray(archive["heading_sample_valid"], dtype=bool) if protocol_version != "leg_usage_grid_v1" else None
+    )
+    if protocol_version != "leg_usage_grid_v1":
+        pre_decision_common_gait_phases = np.asarray(archive["pre_decision_common_gait_phases"], dtype=np.float64)
+        actor_means = np.asarray(archive["actor_means"], dtype=np.float64)
+        critic_values = np.asarray(archive["critic_values"], dtype=np.float64)
+        joint_positions = np.asarray(archive["joint_positions"], dtype=np.float64)
+        joint_velocities = np.asarray(archive["joint_velocities"], dtype=np.float64)
+        requested_joint_position_targets = np.asarray(archive["requested_joint_position_targets"], dtype=np.float64)
+        joint_position_lower_limits = np.asarray(archive["joint_position_lower_limits"], dtype=np.float64)
+        joint_position_upper_limits = np.asarray(archive["joint_position_upper_limits"], dtype=np.float64)
+    else:
+        pre_decision_common_gait_phases = None
+        actor_means = None
+        critic_values = None
+        joint_positions = None
+        joint_velocities = None
+        requested_joint_position_targets = None
+        joint_position_lower_limits = None
+        joint_position_upper_limits = None
     shapes_match = (
         time_steps.shape == (recorded_steps,)
         and commands.shape == (recorded_steps, 3)
@@ -607,6 +874,17 @@ def _completed_cell_archive_matches(
         and duty_factors.shape == (recorded_steps,)
         and common_gait_phases.shape == (recorded_steps,)
         and configured_foot_thetas.shape == (4,)
+        and (base_headings is None or base_headings.shape == (recorded_steps,))
+        and (desired_headings is None or desired_headings.shape == (recorded_steps,))
+        and (heading_sample_valid is None or heading_sample_valid.shape == (recorded_steps,))
+        and (pre_decision_common_gait_phases is None or pre_decision_common_gait_phases.shape == (recorded_steps,))
+        and (actor_means is None or actor_means.shape == (recorded_steps, 12))
+        and (critic_values is None or critic_values.shape == (recorded_steps,))
+        and (joint_positions is None or joint_positions.shape == (recorded_steps, 12))
+        and (joint_velocities is None or joint_velocities.shape == (recorded_steps, 12))
+        and (requested_joint_position_targets is None or requested_joint_position_targets.shape == (recorded_steps, 12))
+        and (joint_position_lower_limits is None or joint_position_lower_limits.shape == (recorded_steps, 12))
+        and (joint_position_upper_limits is None or joint_position_upper_limits.shape == (recorded_steps, 12))
     )
     if not shapes_match:
         return False
@@ -624,10 +902,27 @@ def _completed_cell_archive_matches(
         duty_factors,
         common_gait_phases,
         configured_foot_thetas,
+        *(() if base_headings is None else (base_headings, desired_headings)),
+        *(
+            ()
+            if actor_means is None
+            else (
+                pre_decision_common_gait_phases,
+                actor_means,
+                critic_values,
+                joint_positions,
+                joint_velocities,
+                requested_joint_position_targets,
+                joint_position_lower_limits,
+                joint_position_upper_limits,
+            )
+        ),
     )
     if any(not np.all(np.isfinite(values)) for values in numeric_arrays):
         return False
     if np.any(joint_effort_limits <= 0.0):
+        return False
+    if joint_position_lower_limits is not None and np.any(joint_position_upper_limits <= joint_position_lower_limits):
         return False
     if not np.allclose(commands[:, 0], expected_velocity, rtol=0.0, atol=1e-5):
         return False
@@ -647,9 +942,10 @@ def _completed_cell_archive_matches(
         )
         if not timing_is_fixed:
             return False
+    phase_monotonic = not bool(np.any(np.diff(common_gait_phases) < 0.0))
     if outcome == "completed":
-        return not bool(np.any(episode_done)) and not bool(np.any(np.diff(common_gait_phases) < 0.0))
-    return bool(episode_done[-1]) and not bool(np.any(episode_done[:-1]))
+        return not bool(np.any(episode_done)) and phase_monotonic
+    return bool(episode_done[-1]) and not bool(np.any(episode_done[:-1])) and phase_monotonic
 
 
 def _validated_completed_cell(cell_dir: Path, cell: dict[str, Any], plan_sha256: str) -> bool:
@@ -696,6 +992,56 @@ def _validated_completed_cell(cell_dir: Path, cell: dict[str, Any], plan_sha256:
         if outcome not in {"completed", "terminated"}:
             return False
         with np.load(data_path, allow_pickle=False) as archive:
+            protocol_version = (
+                str(archive["protocol_version"].item()) if "protocol_version" in archive.files else "leg_usage_grid_v1"
+            )
+            if protocol_version != "leg_usage_grid_v1":
+                recording_manifest_path = cell_dir / "recording_manifest.json"
+                if not recording_manifest_path.is_file():
+                    return False
+                recording_manifest = json.loads(recording_manifest_path.read_text(encoding="utf-8"))
+                declared_record_sha256 = recording_manifest.pop("record_sha256", None)
+                computed_record_sha256 = hashlib.sha256(
+                    json.dumps(
+                        recording_manifest,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                ).hexdigest()
+                archived_ground_paths = [str(value) for value in np.asarray(archive["ground_filter_paths"]).tolist()]
+                manifest_checks = (
+                    declared_record_sha256 == computed_record_sha256,
+                    recording_manifest.get("schema_version") == 1,
+                    recording_manifest.get("method_version") == protocol_version,
+                    recording_manifest.get("plan_sha256") == plan_sha256,
+                    recording_manifest.get("cell_id") == cell["id"],
+                    int(recording_manifest.get("gait_index", -1)) == int(cell["gait_index"]),
+                    int(recording_manifest.get("evaluation_seed", -1)) == int(cell.get("seed", 0)),
+                    int(recording_manifest.get("recorded_steps", -1)) == recorded_steps,
+                    recording_manifest.get("archive_sha256") == _sha256_file(data_path),
+                    math.isclose(
+                        float(recording_manifest.get("robot_mass_kg", float("nan"))),
+                        float(archive["robot_mass_kg"].item()),
+                        rel_tol=0.0,
+                        abs_tol=1.0e-9,
+                    ),
+                    math.isclose(
+                        float(recording_manifest.get("contact_threshold_on_n", float("nan"))),
+                        float(archive["contact_threshold_on_n"].item()),
+                        rel_tol=0.0,
+                        abs_tol=1.0e-9,
+                    ),
+                    math.isclose(
+                        float(recording_manifest.get("contact_threshold_off_n", float("nan"))),
+                        float(archive["contact_threshold_off_n"].item()),
+                        rel_tol=0.0,
+                        abs_tol=1.0e-9,
+                    ),
+                    recording_manifest.get("ground_filter_paths") == archived_ground_paths,
+                )
+                if not all(manifest_checks):
+                    return False
             return _completed_cell_archive_matches(
                 archive,
                 cell,
@@ -750,6 +1096,48 @@ def _reset_inference_policy(policy, policy_nn, num_envs: int, device: str | torc
         policy.reset(reset_mask)
     elif policy_nn is not None:
         policy_nn.reset(reset_mask)
+
+
+def _evaluate_critic_values(runner, observations) -> torch.Tensor | None:
+    """Return checkpoint critic predictions when the runner exposes them.
+
+    Current RSL-RL runners expose a standalone ``alg.critic`` model accepting
+    the complete observation TensorDict. Older actor-critic runners instead
+    expose ``evaluate`` and expect the critic observation group directly.
+    Evaluation archives treat neither interface being available as an
+    explicitly unavailable optional metric.
+    """
+    critic = getattr(getattr(runner, "alg", None), "critic", None)
+    if callable(critic):
+        try:
+            return critic(observations)
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            return None
+
+    actor_critic = getattr(getattr(runner, "alg", None), "actor_critic", None)
+    evaluate = getattr(actor_critic, "evaluate", None)
+    if not callable(evaluate):
+        return None
+    critic_observations = observations
+    try:
+        if "critic" in observations:
+            critic_observations = observations["critic"]
+        return evaluate(critic_observations)
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _pre_decision_common_gait_phases(env) -> torch.Tensor:
+    """Sample common gait phase immediately before a policy decision."""
+    command_term = env.unwrapped.command_manager.get_term("base_velocity")
+    return command_term.common_gait_phases().detach().clone()
+
+
+def _optional_pre_decision_common_gait_phases(env, rollout_plotter) -> torch.Tensor | None:
+    """Sample pre-decision phase only when rollout data are being recorded."""
+    if rollout_plotter is None:
+        return None
+    return _pre_decision_common_gait_phases(env)
 
 
 def _write_grid_progress(
@@ -820,6 +1208,7 @@ def _leg_usage_recording_lock(output_root: Path, plan_sha256: str):
 
 def _run_leg_usage_grid(
     env,
+    runner,
     policy,
     policy_nn,
     plan: dict[str, Any],
@@ -836,7 +1225,11 @@ def _run_leg_usage_grid(
     cells = plan["cells"]
     gait_by_index = {int(gait["index"]): gait for gait in plan["gaits"]}
     configured_gait_index_by_id = _configured_gait_index_by_id(plan)
-    protocol_version = str(plan.get("protocol_version", plan.get("method_version", _LEG_USAGE_PROTOCOL_VERSION)))
+    protocol_version = _canonical_leg_usage_method_version(plan)
+    capture_critic_values = protocol_version in {
+        _LEG_USAGE_FULL_PROTOCOL_VERSION,
+        _LEG_USAGE_LIGHT_PROTOCOL_VERSION,
+    }
     render_cell_plots = bool(plan.get("render_cell_plots", False))
     resume_enabled = bool(plan.get("resume", True))
 
@@ -979,12 +1372,23 @@ def _run_leg_usage_grid(
                     output_dir=cell_output_dir,
                     env_index=0,
                     max_samples=total_steps,
+                    require_configured_effort_limits=protocol_version != _LEG_USAGE_PROTOCOL_VERSION,
+                    require_ground_filtered_forces=protocol_version != _LEG_USAGE_PROTOCOL_VERSION,
                 )
                 for step_index in range(total_steps):
                     with torch.inference_mode():
+                        pre_decision_common_gait_phases = _pre_decision_common_gait_phases(env)
                         actions = policy(obs)
+                        critic_values = _evaluate_critic_values(runner, obs) if capture_critic_values else None
                         obs, rewards, dones, _ = env.step(actions)
-                    rollout_plotter.record(actions=actions, actor_means=actions, dones=dones, rewards=rewards)
+                    rollout_plotter.record(
+                        actions=actions,
+                        actor_means=actions,
+                        critic_values=critic_values,
+                        pre_decision_common_gait_phases=pre_decision_common_gait_phases,
+                        dones=dones,
+                        rewards=rewards,
+                    )
                     recorded_steps = step_index + 1
 
                     if bool(dones[0].detach().cpu()):
@@ -1073,9 +1477,43 @@ def _run_leg_usage_grid(
                     "termination_terms_json": json.dumps(termination_terms, sort_keys=True),
                     "checkpoint_json": json.dumps(plan.get("checkpoint", {}), sort_keys=True),
                     "cell_metadata_json": json.dumps(metadata_value, sort_keys=True),
+                    "evaluation_config_json": json.dumps(plan.get("evaluation_config", {}), sort_keys=True),
+                    "effort_limit_provenance_json": json.dumps(plan.get("effort_limit_provenance", {}), sort_keys=True),
                 }
                 try:
-                    rollout_plotter.save(extra_data=extra_data, render_plots=render_cell_plots)
+                    saved_paths = rollout_plotter.save(extra_data=extra_data, render_plots=render_cell_plots)
+                    if protocol_version != _LEG_USAGE_PROTOCOL_VERSION:
+                        data_path = next(path for path in saved_paths if path.name == "sim_data.npz")
+                        with np.load(data_path, allow_pickle=False) as archive:
+                            recording_manifest = {
+                                "schema_version": 1,
+                                "method_version": protocol_version,
+                                "plan_sha256": plan_sha256,
+                                "cell_id": cell_id,
+                                "gait_index": gait_index,
+                                "evaluation_seed": evaluation_seed,
+                                "recorded_steps": recorded_steps,
+                                "archive_sha256": _sha256_file(data_path),
+                                "robot_mass_kg": float(archive["robot_mass_kg"].item()),
+                                "contact_threshold_mode": str(plan["evaluation_config"]["contact"]["mode"]),
+                                "contact_threshold_on_n": float(archive["contact_threshold_on_n"].item()),
+                                "contact_threshold_off_n": float(archive["contact_threshold_off_n"].item()),
+                                "ground_filter_paths": [
+                                    str(value) for value in np.asarray(archive["ground_filter_paths"]).tolist()
+                                ],
+                                "ground_filtered_samples": int(
+                                    np.count_nonzero(archive["foot_normal_force_is_ground_filtered"])
+                                ),
+                            }
+                        recording_manifest["record_sha256"] = hashlib.sha256(
+                            json.dumps(
+                                recording_manifest,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                allow_nan=False,
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        _atomic_write_json(cell_output_dir / "recording_manifest.json", recording_manifest)
                 except BaseException as exc:
                     save_exception = exc
                     outcome = "interrupted" if isinstance(exc, KeyboardInterrupt) else "error"
@@ -1280,7 +1718,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         else:
             raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
-        runner.load(resume_path)
+        leg_usage_method = None if leg_usage_plan is None else _canonical_leg_usage_method_version(leg_usage_plan)
+        load_paired_critic = leg_usage_method in {
+            _LEG_USAGE_FULL_PROTOCOL_VERSION,
+            _LEG_USAGE_LIGHT_PROTOCOL_VERSION,
+        }
+        _load_runner_checkpoint(
+            runner,
+            resume_path,
+            agent_cfg.class_name,
+            installed_version,
+            load_critic=load_paired_critic,
+        )
 
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
@@ -1320,6 +1769,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 with _leg_usage_recording_lock(leg_usage_plan_path.parent, leg_usage_plan_sha256):
                     _run_leg_usage_grid(
                         env,
+                        runner,
                         policy,
                         policy_nn,
                         leg_usage_plan,
@@ -1350,6 +1800,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         try:
             while True:
                 start_time = time.time()
+                pre_decision_common_gait_phases = _optional_pre_decision_common_gait_phases(env, rollout_plotter)
                 # run everything in inference mode
                 with torch.inference_mode():
                     # agent stepping
@@ -1364,7 +1815,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
                 if rollout_plotter is not None:
                     # In RSL-RL inference, the policy output is the deterministic actor mean.
-                    rollout_plotter.record(actions=actions, actor_means=actions, dones=dones, rewards=rewards)
+                    rollout_plotter.record(
+                        actions=actions,
+                        actor_means=actions,
+                        pre_decision_common_gait_phases=pre_decision_common_gait_phases,
+                        dones=dones,
+                        rewards=rewards,
+                    )
 
                 timestep += 1
                 if args_cli.print_gait_info and timestep % gait_info_interval == 0:

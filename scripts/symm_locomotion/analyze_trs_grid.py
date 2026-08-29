@@ -3,10 +3,12 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Analyze leg allocation, durability exposure, and training efficiency for the TRS grid.
+"""Reproduce the historical TRS-grid allocation, durability, and efficiency analysis.
 
-The analysis intentionally uses only the Python standard library so it can run
-with the lightweight Python selected by ``isaaclab.bat -p``. It reads the raw
+The required July baselines and 18 grid runs were retired from the active
+``good_runs`` tree. Run this reproducer from dataset commit ``eb523deb0``; it
+intentionally does not substitute newer, protocol-incompatible runs. The
+analysis otherwise uses only the Python standard library and reads the raw
 ``sim_data.npz`` rollout archives and TensorBoard event files directly.
 """
 
@@ -40,6 +42,7 @@ BLOCK_DURATION_S = 1.0
 BOOTSTRAP_REPLICATES = 20_000
 BOOTSTRAP_SEED = 20260727
 EQUIVALENCE_MARGIN_PP = 5.0
+ARCHIVE_COMMIT = "eb523deb0"
 
 COEFFICIENT_PAIRS = ((0.10, 0.05), (0.20, 0.10), (0.30, 0.15))
 WARMUP_ITERATIONS = (10, 100, 500)
@@ -188,6 +191,12 @@ def discover_runs() -> list[RunSpec]:
         evaluation_path = CURATED_BASELINE_EVALUATIONS[robot]
         if not evaluation_path.is_file():
             evaluation_path = baseline_path / "plots/play/sim_data.npz"
+        if not baseline_path.is_dir() or not evaluation_path.is_file():
+            raise FileNotFoundError(
+                "The historical TRS-grid baseline dataset is not present in this branch. "
+                f"Check out dataset commit {ARCHIVE_COMMIT} to reproduce this analysis; "
+                "newer retained runs use a different protocol and are not interchangeable."
+            )
         runs.append(
             RunSpec(
                 robot=robot,

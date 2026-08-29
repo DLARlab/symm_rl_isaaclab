@@ -208,6 +208,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_clearance_height_scale=0.025,
             foot_clearance_mode="phase_penalty",
             pitch_scale=0.35,
+            joint_target_limit_weight=0.05,
         )
 
     def _configure_dobot_x1_symm_terminations(self) -> None:

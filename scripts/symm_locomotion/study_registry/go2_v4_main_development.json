@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "cohort_id": "go2_v4_main_development",
+  "robot": "go2",
+  "cohort_kind": "single_seed_development",
+  "statistical_claim_status": "not_confirmatory_seed_42_only",
+  "selection_basis": "protocol_facts_only",
+  "selection_policy": "Register every seed-42 main-design treatment, including terminated evaluation cells and unfavorable outcomes.",
+  "protocol": {
+    "required": {
+      "reward_profile": "go2_confirmatory_v4_feasibility_controlled",
+      "gait_library": "time_reversal_closed_v2",
+      "gait_sampling_profile": "trclosed_v2_equal_family",
+      "observation_dim": 72,
+      "action_dim": 12,
+      "training_budget.max_iterations": 20000,
+      "training_budget.num_envs": 512,
+      "training_budget.num_steps_per_env": 24,
+      "initialization": "fresh_seed_42_matched_within_robot",
+      "evaluation_protocol": "leg_usage_grid_full_v3_with_paired_tr_phase_v1",
+      "evaluation_seed": 4242,
+      "joint_target_limit_mode": "requested_overflow",
+      "actor_mean_bound_mode": "per_joint_feasible",
+      "tr_policy_output_space": "normalized_requested_joint_target",
+      "foot_phase_profile": "weight_0p4_mean",
+      "checkpoint_status.state": "complete",
+      "checkpoint_status.final_iteration": 19999
+    },
+    "allowed": {
+      "code_hashes.archived_git_commit": [
+        "eb523deb0da5793209352cc88a3b51058c4af99f"
+      ],
+      "code_hashes.source_snapshot_sha256": [
+        "813e4d388c95ab64df508498d67f5e3fe9dd8518ae2295d7dc4c9477680bf8dd",
+        "e167bbcc93c02e18b6a7813576278817f6080c0eb31e15da9c8b60c4fbf78f1e"
+      ]
+    },
+    "required_present": [
+      "code_hashes.agent_config_sha256",
+      "code_hashes.env_config_sha256",
+      "initialization_record_sha256",
+      "checkpoint_status.sha256"
+    ]
+  },
+  "common_facts": {
+    "reward_profile": "go2_confirmatory_v4_feasibility_controlled",
+    "gait_library": "time_reversal_closed_v2",
+    "gait_sampling_profile": "trclosed_v2_equal_family",
+    "observation_dim": 72,
+    "action_dim": 12,
+    "training_budget": {
+      "max_iterations": 20000,
+      "num_envs": 512,
+      "num_steps_per_env": 24,
+      "transitions": 245760000
+    },
+    "initialization": "fresh_seed_42_matched_within_robot",
+    "evaluation_protocol": "leg_usage_grid_full_v3_with_paired_tr_phase_v1",
+    "evaluation_seed": 4242,
+    "joint_target_limit_mode": "requested_overflow",
+    "actor_mean_bound_mode": "per_joint_feasible",
+    "tr_policy_output_space": "normalized_requested_joint_target",
+    "foot_phase_profile": "weight_0p4_mean",
+    "training_seed": 42
+  },
+  "runs": [
+    {
+      "run_id": "go2_v4_no_trs",
+      "label": "No TRS",
+      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-25_06-07-30_d1_go2_dev_main_notrs_g2fc1_s42",
+      "artifact_availability": "local_only",
+      "design_role": "main",
+      "classification": "eligible_main",
+      "facts": {
+        "trs_variant": "disabled",
+        "code_hashes": {
+          "archived_git_commit": "eb523deb0da5793209352cc88a3b51058c4af99f",
+          "source_snapshot_sha256": "813e4d388c95ab64df508498d67f5e3fe9dd8518ae2295d7dc4c9477680bf8dd",
+          "agent_config_sha256": "b7b07705248a5915186d172d7628c7f613171d62cfb358fb5fe8bafe4837c7a1",
+          "env_config_sha256": "d2a10cb8c860925881dc28d95da9ad5e640618def59136844a1730cdf6f26e8c"
+        },
+        "initialization_record_sha256": "9fc746a6db4b9fc0ad8873478ea05d75d374e7b343eafe2724ce588c685fe0da",
+        "checkpoint_status": {
+          "state": "complete",
+          "final_iteration": 19999,
+          "sha256": "25145d76ae37162677619e474ad14ad45510980dbbe916cb08128444800a10f8"
+        }
+      },
+      "artifacts": {
+        "git/symm_rl_isaaclab.diff": "9d386e694d81371e52e80871f9033adbe5ffb241185b500631c8dadf28301f18",
+        "provenance/initialization.json": "9fc746a6db4b9fc0ad8873478ea05d75d374e7b343eafe2724ce588c685fe0da",
+        "provenance/resolved_command.json": "09dc0235c7b3db8350d929393eb3170352c2cbe17d144cad3a95ac73f6b06d13",
+        "model_19999.pt": "25145d76ae37162677619e474ad14ad45510980dbbe916cb08128444800a10f8",
+        "evaluations/leg_usage_grid/study.json": "5876fba73d7ce2e5f69c7542670cddacbbb115c75c3fc4d54cd992d721686793",
+        "evaluations/leg_usage_grid/metrics/overall_metrics.json": "c0534624f6ebf161a2715fbf416cd8cf4aed79dea4897e75a882cedcd9f23f81",
+        "evaluations/leg_usage_grid/metrics/analysis_provenance.json": "11e1b80a6a0b51bd92623ad6fd519957e53a9671aa8236ee0470a0f2911e8b06"
+      }
+    },
+    {
+      "run_id": "go2_v4_trs_m0p1_v0p05_hard",
+      "label": "TRS m0.1/v0.05, w500/r0",
+      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-25_16-56-59_d1_go2_dev_main_m0p1_v0p05_w500_r0_g2fc1_s42",
+      "artifact_availability": "local_only",
+      "design_role": "main",
+      "classification": "eligible_main",
+      "facts": {
+        "trs_variant": "m0.1_v0.05_w500_r0_hard",
+        "code_hashes": {
+          "archived_git_commit": "eb523deb0da5793209352cc88a3b51058c4af99f",
+          "source_snapshot_sha256": "813e4d388c95ab64df508498d67f5e3fe9dd8518ae2295d7dc4c9477680bf8dd",
+          "agent_config_sha256": "d07c70496b2ca3609804adcbd5f123c698f95a3c1c985e7de4a5b80b537291d0",
+          "env_config_sha256": "9277adda1910b5d64132a91ff2b6c831678bad2c90fd816bae02018f0341bc99"
+        },
+        "initialization_record_sha256": "64f41fc3ffe26fa4a8dd58221648b46ac171a26e825279fa69321469fe93d0a8",
+        "checkpoint_status": {
+          "state": "complete",
+          "final_iteration": 19999,
+          "sha256": "5a4ecad0d9a2726737e0cb6ea4d2b7d85460805178bb66ea40fdc33ec9d179bf"
+        }
+      },
+      "artifacts": {
+        "git/symm_rl_isaaclab.diff": "9d386e694d81371e52e80871f9033adbe5ffb241185b500631c8dadf28301f18",
+        "provenance/initialization.json": "64f41fc3ffe26fa4a8dd58221648b46ac171a26e825279fa69321469fe93d0a8",
+        "provenance/resolved_command.json": "ebe301da0db247dfcb538decc7bbffb05c56101f8bccc69c3f9f3ccb0bd0212c",
+        "model_19999.pt": "5a4ecad0d9a2726737e0cb6ea4d2b7d85460805178bb66ea40fdc33ec9d179bf",
+        "evaluations/leg_usage_grid/study.json": "3d8a27293aea5c163c0fc735968c2037543d3db446aa9a65b26cce545e5fc220",
+        "evaluations/leg_usage_grid/metrics/overall_metrics.json": "a6bf179c5581ee2ec7d5eaa19ef4b64e75e63a50757bdfd5825378f0d54162c3",
+        "evaluations/leg_usage_grid/metrics/analysis_provenance.json": "3fb3171e6f79a3368fa44d41129ee9e1ca51bd9e134a5f6677aa22a0da446d9a"
+      }
+    },
+    {
+      "run_id": "go2_v4_trs_m0p1_v0p05_ramp",
+      "label": "TRS m0.1/v0.05, w500/r1000",
+      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-26_05-11-28_d2_go2_dev_main_m0p1_v0p05_w500_r1000_g2fc1_s42",
+      "artifact_availability": "local_only",
+      "design_role": "main",
+      "classification": "eligible_main",
+      "facts": {
+        "trs_variant": "m0.1_v0.05_w500_r1000_linear",
+        "code_hashes": {
+          "archived_git_commit": "eb523deb0da5793209352cc88a3b51058c4af99f",
+          "source_snapshot_sha256": "813e4d388c95ab64df508498d67f5e3fe9dd8518ae2295d7dc4c9477680bf8dd",
+          "agent_config_sha256": "21af867f253283d2f71938cf8810300df571e83c874d389a7bac4f7137ad76ee",
+          "env_config_sha256": "50adfe2b4811d4ee9316d1828568fcd5440d2fa01dd2c9f5e08862a37fe9c2d8"
+        },
+        "initialization_record_sha256": "b3c580e1400e1090f4f7d31ecf24272555e5c84a5c8a8fbe4eacdf4651b36cc8",
+        "checkpoint_status": {
+          "state": "complete",
+          "final_iteration": 19999,
+          "sha256": "8b55fd2bef69bd364fb86d7a8914b99faf250e91baabc9ed3f384f4353af8349"
+        }
+      },
+      "artifacts": {
+        "git/symm_rl_isaaclab.diff": "9d386e694d81371e52e80871f9033adbe5ffb241185b500631c8dadf28301f18",
+        "provenance/initialization.json": "b3c580e1400e1090f4f7d31ecf24272555e5c84a5c8a8fbe4eacdf4651b36cc8",
+        "provenance/resolved_command.json": "7c79b4afcc60a20ca41d4868c98106b0d527e12bc7de41db2652d78a04d15f01",
+        "model_19999.pt": "8b55fd2bef69bd364fb86d7a8914b99faf250e91baabc9ed3f384f4353af8349",
+        "evaluations/leg_usage_grid/study.json": "cbbbd2ac9abbfbffe57b912779066c81a5e0d88101d8bb3ab1ce71227df0abca",
+        "evaluations/leg_usage_grid/metrics/overall_metrics.json": "53059f616dcb82dc78d6718380da5baa6b1b4999ce1384fd153d97eacdd38a28",
+        "evaluations/leg_usage_grid/metrics/analysis_provenance.json": "f241538028a101e86cf10e191d8f5598716a8766fdd46a868afe7599f3a4085f"
+      }
+    },
+    {
+      "run_id": "go2_v4_trs_m0p2_v0p1_hard",
+      "label": "TRS m0.2/v0.1, w500/r0",
+      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-27_00-44-04_d2_go2_dev_main_m0p2_v0p1_w500_r0_g2fc1_s42",
+      "artifact_availability": "local_only",
+      "design_role": "main",
+      "classification": "eligible_main",
+      "facts": {
+        "trs_variant": "m0.2_v0.1_w500_r0_hard",
+        "code_hashes": {
+          "archived_git_commit": "eb523deb0da5793209352cc88a3b51058c4af99f",
+          "source_snapshot_sha256": "813e4d388c95ab64df508498d67f5e3fe9dd8518ae2295d7dc4c9477680bf8dd",
+          "agent_config_sha256": "283d23a6b6119885a2fd7b0ea8051c9c24fc1907273118f89cd792cd986200e9",
+          "env_config_sha256": "e9b0dbddf22e96f8e608b77862f1cc116c8526bf3a82087561bee91ff683b974"
+        },
+        "initialization_record_sha256": "4241e91507ff396511741d1faebaaf8e7ca19b04af46e1f15f78582f7607046b",
+        "checkpoint_status": {
+          "state": "complete",
+          "final_iteration": 19999,
+          "sha256": "e0a4f32a90e3af0d210fa1bd271c73e482afd3fb650620294f36417d242cfed2"
+        }
+      },
+      "artifacts": {
+        "git/symm_rl_isaaclab.diff": "9d386e694d81371e52e80871f9033adbe5ffb241185b500631c8dadf28301f18",
+        "provenance/initialization.json": "4241e91507ff396511741d1faebaaf8e7ca19b04af46e1f15f78582f7607046b",
+        "provenance/resolved_command.json": "21add36e28c15278c14f89e83c717e23f0cede45c049be77419409ea31c9139e",
+        "model_19999.pt": "e0a4f32a90e3af0d210fa1bd271c73e482afd3fb650620294f36417d242cfed2",
+        "evaluations/leg_usage_grid/study.json": "a050837ecc750265fe8a8fd2f41d5060e7c26f5e14c5fc0d19cb65fcf2da29f3",
+        "evaluations/leg_usage_grid/metrics/overall_metrics.json": "052fc47ce11075d7205efc350c45e9ff47d8ec80050c86d64e28655fbd9138db",
+        "evaluations/leg_usage_grid/metrics/analysis_provenance.json": "64f20cb3ae6349b0bcf49d844a4da2d11cfeab49e84cf05d0eb18a590a3570d3"
+      }
+    },
+    {
+      "run_id": "go2_v4_trs_m0p2_v0p1_ramp",
+      "label": "TRS m0.2/v0.1, w500/r1000",
+      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-27_23-34-32_d3_go2_dev_main_m0p2_v0p1_w500_r1000_g2fc1_s42",
+      "artifact_availability": "local_only",
+      "design_role": "main",
+      "classification": "eligible_main",
+      "facts": {
+        "trs_variant": "m0.2_v0.1_w500_r1000_linear",
+        "code_hashes": {
+          "archived_git_commit": "eb523deb0da5793209352cc88a3b51058c4af99f",
+          "source_snapshot_sha256": "e167bbcc93c02e18b6a7813576278817f6080c0eb31e15da9c8b60c4fbf78f1e",
+          "agent_config_sha256": "ef861295ce708408b5fd6cfcb4da1b69bb0d4ca0f9be2dca41ce5c7282daef35",
+          "env_config_sha256": "e9e99bc1b273399085a0654b4a24b16098ca1fe4aa9ec6bdd0aedf74eaed3748"
+        },
+        "initialization_record_sha256": "77dc99362d1546396932a64f8e9776ce3b6f905cd552d7eeb7c8e4abb639dd45",
+        "checkpoint_status": {
+          "state": "complete",
+          "final_iteration": 19999,
+          "sha256": "b0e7a991ed4beaf41953bed40270fa80914485fca350cfd1dbd6174a50d28d56"
+        }
+      },
+      "artifacts": {
+        "git/symm_rl_isaaclab.diff": "aaecac1c54b2c2d96b352a80ff411fe5cd98e3f6c0c58b430cc866da95be1420",
+        "provenance/initialization.json": "77dc99362d1546396932a64f8e9776ce3b6f905cd552d7eeb7c8e4abb639dd45",
+        "provenance/resolved_command.json": "a323e309254cdef160060a38bb18ca9b6fca92df04586312d284d9ab1fdee21b",
+        "model_19999.pt": "b0e7a991ed4beaf41953bed40270fa80914485fca350cfd1dbd6174a50d28d56",
+        "evaluations/leg_usage_grid/study.json": "66f72de63ba8cf445e67907f8c2b2950883c9adbf008fb958bd7e9efdd77ecea",
+        "evaluations/leg_usage_grid/metrics/overall_metrics.json": "34123592c844c7037d73185d81c4439eabea9c8484802e69739a69163e39ce20",
+        "evaluations/leg_usage_grid/metrics/analysis_provenance.json": "cd9a9f5d97ede0f8f8db1441d91ec2be8b460283ab2c031fdedf9e4dd7ef4270"
+      }
+    }
+  ]
+}

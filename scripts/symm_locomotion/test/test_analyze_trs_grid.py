@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import math
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -33,6 +34,24 @@ def _range_counts(values: list[float]) -> list[tuple[float, float]]:
 
 class TestDurabilityAnalysis(unittest.TestCase):
     """Validate cycle counting and pair-allocation helpers."""
+
+    def test_missing_historical_dataset_names_the_reproduction_commit(self) -> None:
+        """Fail clearly instead of substituting protocol-incompatible retained runs."""
+        original_roots = analysis.ROBOT_RUN_DIRS
+        original_names = analysis.BASELINE_RUN_NAMES
+        original_evaluations = analysis.CURATED_BASELINE_EVALUATIONS
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            missing_root = Path(temporary_directory) / "missing"
+            analysis.ROBOT_RUN_DIRS = {"go2": missing_root}
+            analysis.BASELINE_RUN_NAMES = {"go2": "retired_baseline"}
+            analysis.CURATED_BASELINE_EVALUATIONS = {"go2": missing_root / "sim_data.npz"}
+            try:
+                with self.assertRaisesRegex(FileNotFoundError, analysis.ARCHIVE_COMMIT):
+                    analysis.discover_runs()
+            finally:
+                analysis.ROBOT_RUN_DIRS = original_roots
+                analysis.BASELINE_RUN_NAMES = original_names
+                analysis.CURATED_BASELINE_EVALUATIONS = original_evaluations
 
     def assert_pairs_almost_equal(
         self,

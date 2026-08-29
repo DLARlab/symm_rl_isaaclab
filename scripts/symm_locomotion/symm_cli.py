@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import math
 import os
 import re
@@ -27,6 +28,13 @@ DEFAULT_TR_WARMUP_ITERATIONS = 500
 DEFAULT_TR_RAMPUP_ITERATIONS = 0
 DEFAULT_TR_RAMP_SHAPE = "linear"
 DEFAULT_TR_MIN_ABS_CMD_VEL = 0.0
+DEFAULT_FOOT_PHASE_WEIGHT = 0.30
+DEFAULT_FOOT_PHASE_REDUCTION = "sum"
+DEFAULT_JOINT_TARGET_LIMIT_MODE = "legacy_clamped"
+DEFAULT_ACTOR_MEAN_BOUND_MODE = "legacy_global"
+DEFAULT_TR_POLICY_OUTPUT_SPACE = "raw_action_mean"
+DEFAULT_GAIT_SAMPLING_PROFILE = "trclosed_v2_equal_family"
+DEFAULT_GAIT_CURRICULUM_ITERATIONS = 0
 LEGACY_ABLATION_MIRROR_LOSS_COEFF = 0.2
 LEGACY_ABLATION_TR_VALUE_COEFF = 0.05
 DEFAULT_VIDEO_DURATION_S = 30.0
@@ -51,6 +59,15 @@ LEG_USAGE_PROTECTED_RUNTIME_OPTIONS = {
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
 
 TR_RAMP_SHAPES = ("linear", "half_cosine")
+FOOT_PHASE_REDUCTIONS = ("sum", "mean")
+JOINT_TARGET_LIMIT_MODES = ("legacy_clamped", "requested_overflow")
+ACTOR_MEAN_BOUND_MODES = ("legacy_global", "per_joint_feasible")
+TR_POLICY_OUTPUT_SPACES = ("raw_action_mean", "normalized_requested_joint_target")
+GAIT_SAMPLING_PROFILES = (
+    "trclosed_v2_equal_family",
+    "trclosed_v2_v1_equivalent",
+    "trclosed_v2_halfbound_anneal",
+)
 TR_SCHEDULE_VARIANTS = ("no_trs", "hard", "linear", "delayed_linear", "half_cosine")
 TR_SCHEDULE_SETTINGS = {
     "no_trs": (True, 0, 0, "linear"),
@@ -119,6 +136,19 @@ class _StoreExplicitAction(argparse.Action):
 def repo_root() -> Path:
     """Return the Isaac Lab repository root."""
     return Path(__file__).resolve().parents[2]
+
+
+def canonical_python_entrypoint(value: str) -> str:
+    """Return a stable repository-relative label for the active Python entry point."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    else:
+        path = path.resolve()
+    try:
+        return path.relative_to(repo_root().resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def repo_subprocess_environment() -> dict[str, str]:
@@ -376,16 +406,20 @@ def convert_latest_video(
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add launcher options shared by all subcommands."""
     parser.add_argument("--robot", choices=robot_choices(), default=DEFAULT_ROBOT, help="Robot task to run.")
-    parser.add_argument("--conda-env", default=CONDA_ENV, help="Conda env used for Isaac Lab commands.")
-    parser.add_argument("--use-conda-run", action="store_true", help="Force wrapping commands with conda run.")
-    parser.add_argument("--no-conda-run", action="store_true", help="Run the Isaac Lab wrapper directly.")
+    parser.add_argument("--conda_env", "--conda-env", default=CONDA_ENV, help="Conda env used for Isaac Lab commands.")
     parser.add_argument(
-        "--expected-branch",
+        "--use_conda_run", "--use-conda-run", action="store_true", help="Force wrapping commands with conda run."
+    )
+    parser.add_argument(
+        "--no_conda_run", "--no-conda-run", action="store_true", help="Run the Isaac Lab wrapper directly."
+    )
+    parser.add_argument(
         "--expected_branch",
+        "--expected-branch",
         default=None,
         help="Abort unless the launcher repository has this Git branch checked out.",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
+    parser.add_argument("--dry_run", "--dry-run", action="store_true", help="Print commands without running them.")
 
 
 def add_train_args(parser: argparse.ArgumentParser) -> None:
@@ -442,12 +476,72 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=DEFAULT_TR_MIN_ABS_CMD_VEL,
     )
+    parser.add_argument("--foot_phase_weight", "--foot-phase-weight", type=float, default=DEFAULT_FOOT_PHASE_WEIGHT)
+    parser.add_argument(
+        "--foot_phase_reduction",
+        "--foot-phase-reduction",
+        choices=FOOT_PHASE_REDUCTIONS,
+        default=DEFAULT_FOOT_PHASE_REDUCTION,
+    )
+    parser.add_argument(
+        "--joint_target_limit_mode",
+        "--joint-target-limit-mode",
+        choices=JOINT_TARGET_LIMIT_MODES,
+        default=DEFAULT_JOINT_TARGET_LIMIT_MODE,
+    )
+    parser.add_argument(
+        "--joint_target_limit_weight",
+        "--joint-target-limit-weight",
+        type=float,
+        default=None,
+        help="Override the selected robot's joint-target-limit reward weight.",
+    )
+    parser.add_argument(
+        "--actor_mean_bound_mode",
+        "--actor-mean-bound-mode",
+        choices=ACTOR_MEAN_BOUND_MODES,
+        default=DEFAULT_ACTOR_MEAN_BOUND_MODE,
+    )
+    parser.add_argument(
+        "--tr_policy_output_space",
+        "--tr-policy-output-space",
+        choices=TR_POLICY_OUTPUT_SPACES,
+        default=DEFAULT_TR_POLICY_OUTPUT_SPACE,
+    )
+    parser.add_argument(
+        "--gait_sampling_profile",
+        "--gait-sampling-profile",
+        choices=GAIT_SAMPLING_PROFILES,
+        default=DEFAULT_GAIT_SAMPLING_PROFILE,
+    )
+    parser.add_argument(
+        "--gait_curriculum_iterations",
+        "--gait-curriculum-iterations",
+        type=int,
+        default=DEFAULT_GAIT_CURRICULUM_ITERATIONS,
+    )
     parser.add_argument("--no-trs", "--disable-symmetry", action="store_true", dest="disable_symmetry")
     parser.add_argument("--smoke", action="store_true", help="Run one env for one iteration.")
 
 
 def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     """Build Isaac Lab arguments for a training run."""
+    foot_phase_weight = getattr(args, "foot_phase_weight", DEFAULT_FOOT_PHASE_WEIGHT)
+    foot_phase_reduction = getattr(args, "foot_phase_reduction", DEFAULT_FOOT_PHASE_REDUCTION)
+    joint_target_limit_mode = getattr(args, "joint_target_limit_mode", DEFAULT_JOINT_TARGET_LIMIT_MODE)
+    joint_target_limit_weight = getattr(args, "joint_target_limit_weight", None)
+    actor_mean_bound_mode = getattr(args, "actor_mean_bound_mode", DEFAULT_ACTOR_MEAN_BOUND_MODE)
+    tr_policy_output_space = getattr(args, "tr_policy_output_space", DEFAULT_TR_POLICY_OUTPUT_SPACE)
+    gait_sampling_profile = getattr(args, "gait_sampling_profile", DEFAULT_GAIT_SAMPLING_PROFILE)
+    gait_curriculum_iterations = getattr(args, "gait_curriculum_iterations", DEFAULT_GAIT_CURRICULUM_ITERATIONS)
+    if not math.isfinite(foot_phase_weight) or foot_phase_weight < 0.0:
+        raise ValueError("--foot_phase_weight must be finite and nonnegative.")
+    if joint_target_limit_weight is not None and (
+        not math.isfinite(joint_target_limit_weight) or joint_target_limit_weight < 0.0
+    ):
+        raise ValueError("--joint_target_limit_weight must be finite and nonnegative.")
+    if gait_curriculum_iterations < 0:
+        raise ValueError("--gait_curriculum_iterations must be nonnegative.")
     num_envs = 1 if args.smoke else args.num_envs
     iterations = 1 if args.smoke else args.iterations
     if args.run_name:
@@ -482,6 +576,7 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     if args.disable_symmetry:
         command += [
             "agent.algorithm.symmetry_cfg.use_data_augmentation=False",
+            "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false",
             "agent.algorithm.symmetry_cfg.use_mirror_loss=False",
             "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0",
             "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0",
@@ -493,6 +588,7 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     else:
         command += [
             "agent.algorithm.symmetry_cfg.use_data_augmentation=False",
+            "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false",
             f"agent.algorithm.symmetry_cfg.mirror_loss_coeff={args.mirror_loss_coeff}",
             f"agent.algorithm.symmetry_cfg.value_loss_coeff={args.tr_value_coeff}",
             f"agent.algorithm.symmetry_cfg.warmup_iterations={args.tr_warmup_iterations}",
@@ -500,7 +596,40 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
             f"agent.algorithm.symmetry_cfg.ramp_shape={args.tr_ramp_shape}",
             f"agent.algorithm.symmetry_cfg.min_abs_command_velocity={args.tr_min_abs_cmd_vel}",
         ]
-    return command + extra
+    command += [
+        f"env.rewards.foot_phase.weight={foot_phase_weight}",
+        f"env.rewards.foot_phase.params.reduction={foot_phase_reduction}",
+        f"env.rewards.joint_target_limits.params.mode={joint_target_limit_mode}",
+        f"agent.algorithm.symmetry_cfg.actor_mean_bound_mode={actor_mean_bound_mode}",
+        f"agent.algorithm.symmetry_cfg.tr_policy_output_space={tr_policy_output_space}",
+        f"env.commands.base_velocity.gait_sampling_profile={gait_sampling_profile}",
+        f"env.commands.base_velocity.gait_curriculum_iterations={gait_curriculum_iterations}",
+    ]
+    if joint_target_limit_weight is not None:
+        command.append(f"env.rewards.joint_target_limits.weight={joint_target_limit_weight}")
+    resolved_runtime_argv = [*command, *extra]
+    direct_argv = getattr(args, "_direct_launcher_argv", None)
+    direct_interface = getattr(args, "_direct_launcher_interface", "scripts/symm_locomotion/symm_cli.py")
+    direct_context = {
+        "schema_version": 1,
+        "interface": direct_interface,
+        "argv": direct_argv,
+        "resolved_runtime_argv_without_context": resolved_runtime_argv,
+        "robot": args.robot_spec.key,
+        "run_name": run_name,
+    }
+    context_payload = json.dumps(direct_context, separators=(",", ":"), sort_keys=True)
+    hydra_start = next(
+        (index for index, token in enumerate(command) if token.startswith(("agent.", "env."))),
+        len(command),
+    )
+    return [
+        *command[:hydra_start],
+        "--symm_direct_launch_context",
+        context_payload,
+        *command[hydra_start:],
+        *extra,
+    ]
 
 
 def add_checkpoint_args(parser: argparse.ArgumentParser) -> None:
@@ -724,10 +853,21 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
     return command + gait_args + rollout_plot_lab_args(args) + extra, checkpoint
 
 
-def add_analyze_leg_usage_args(parser: argparse.ArgumentParser) -> None:
-    """Add fixed-grid leg-usage evaluation and analysis options."""
+def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
+    """Add fixed-grid policy evaluation and analysis options."""
     add_common_args(parser)
     add_checkpoint_args(parser)
+    parser.set_defaults(_protocol_explicit=False)
+    parser.add_argument(
+        "--protocol",
+        choices=("full", "light", "legacy"),
+        default="full",
+        action=_StoreExplicitAction,
+        help=(
+            "Evaluation profile (default: immutable full 60-cell grid; light: immutable 8-cell screen; "
+            "legacy: deprecated custom v1 grid)."
+        ),
+    )
     parser.add_argument(
         "--velocities",
         "--vx_values",
@@ -782,9 +922,15 @@ def add_analyze_leg_usage_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Regenerate metrics and figures from an existing identical study without simulation.",
     )
+    parser.add_argument(
+        "--evaluation_config",
+        "--evaluation-config",
+        type=Path,
+        help="Optional JSON file containing nested contact, gait, tracking, load, or success overrides.",
+    )
 
 
-def analyze_leg_usage_lab_args(
+def evaluation_lab_args(
     args: argparse.Namespace,
     checkpoint: Path,
     study_path: Path,
@@ -810,21 +956,21 @@ def analyze_leg_usage_lab_args(
     ]
 
 
-def validate_leg_usage_runtime_overrides(extra: list[str]) -> None:
+def validate_evaluation_runtime_overrides(extra: list[str]) -> None:
     """Reject forwarded options that could escape the immutable grid plan."""
     for token in extra:
         option = token.split("=", 1)[0]
         if option in LEG_USAGE_PROTECTED_RUNTIME_OPTIONS:
-            raise ValueError(f"Leg-usage evaluation controls {option} and does not allow overriding it after '--'.")
+            raise ValueError(f"Evaluation controls {option} and does not allow overriding it after '--'.")
 
 
-def _load_leg_usage_module():
+def _load_evaluation_module():
     """Load the adjacent analysis module without relying on ``sys.path`` setup."""
-    module_name = "_symm_leg_usage_analysis"
+    module_name = "_symm_policy_evaluation"
     existing = sys.modules.get(module_name)
     if existing is not None:
         return existing
-    module_path = Path(__file__).with_name("analyze_leg_usage.py")
+    module_path = Path(__file__).with_name("evaluation.py")
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ValueError(f"Unable to load leg-usage analysis module: {module_path}")
@@ -834,18 +980,54 @@ def _load_leg_usage_module():
     return module
 
 
-def run_analyze_leg_usage(args: argparse.Namespace, extra: list[str]) -> int:
-    """Record, analyze, and report one checkpoint's fixed leg-usage grid."""
-    validate_leg_usage_runtime_overrides(extra)
+def run_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
+    """Record, analyze, and report one checkpoint's fixed policy-evaluation grid."""
+    validate_evaluation_runtime_overrides(extra)
     checkpoint = resolve_checkpoint(args).resolve()
-    analysis = _load_leg_usage_module()
+    analysis = _load_evaluation_module()
+    evaluation_config = None
+    if args.evaluation_config is not None:
+        try:
+            evaluation_config = json.loads(args.evaluation_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Unable to read evaluation config {args.evaluation_config}: {exc}") from exc
+        if not isinstance(evaluation_config, dict):
+            raise ValueError("The evaluation config JSON root must be an object.")
+    if args.protocol == "legacy" and evaluation_config is not None:
+        raise ValueError("The legacy v1 compatibility profile does not accept --evaluation_config.")
+    output_name = analysis.PROTOCOL_OUTPUT_ROOT_NAMES[args.protocol]
+    canonical_study_path = checkpoint.parent / "evaluations" / output_name / "study.json"
+    study_path = (
+        analysis.existing_study_manifest_path(checkpoint.parent, args.protocol)
+        if args.analyze_only or args.resume
+        else canonical_study_path
+    )
     if args.analyze_only:
-        study_path = checkpoint.parent / "evaluations" / "leg_usage_grid" / "study.json"
         study = analysis.validate_existing_study_for_analysis(
             study_path,
             checkpoint=checkpoint,
             robot=args.robot_spec.key,
             task=args.robot_spec.play_task,
+            supplied_runtime_overrides=extra,
+        )
+        analysis.validate_study_profile(study, args.protocol)
+        if evaluation_config is not None and analysis._metrics.evaluation_config(evaluation_config) != study.get(
+            "evaluation_config"
+        ):
+            raise ValueError("Supplied evaluation config does not match the recorded study protocol.")
+    elif args.protocol == "legacy" and args.resume and study_path.is_file():
+        study = analysis.validate_existing_legacy_study_for_resume(
+            study_path,
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            step_dt=args.robot_spec.step_dt,
+            settle_s=args.settle_s,
+            measure_s=args.measure_s,
+            evaluation_seed=args.evaluation_seed,
+            velocities_mps=args.velocities,
+            gait_indices=args.gait_indices,
+            render_cell_plots=args.render_cell_plots,
             supplied_runtime_overrides=extra,
         )
     else:
@@ -862,7 +1044,11 @@ def run_analyze_leg_usage(args: argparse.Namespace, extra: list[str]) -> int:
             gait_indices=args.gait_indices,
             render_cell_plots=args.render_cell_plots,
             runtime_overrides=extra,
+            protocol=args.protocol,
+            evaluation_config=evaluation_config,
         )
+        if study_path != canonical_study_path:
+            study["output_root"] = str(study_path.parent)
         study_path = analysis.prepare_study(
             study,
             resume=args.resume,
@@ -872,13 +1058,13 @@ def run_analyze_leg_usage(args: argparse.Namespace, extra: list[str]) -> int:
     print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
     print(f"{log_prefix(args)}output: {study_path.parent}", flush=True)
     print(
-        f"{log_prefix(args)}grid: {len(study['gaits'])} gait rows x {len(study['velocities_mps'])} "
-        f"velocities = {len(study['cells'])} cells",
+        f"{log_prefix(args)}profile: {args.protocol}; method: {study.get('method_version')} "
+        f"({len(study['gaits'])} represented gait rows, {len(study['cells'])} cells)",
         flush=True,
     )
     child_code = 0
     if not args.analyze_only:
-        child_code = run_isaaclab(args, analyze_leg_usage_lab_args(args, checkpoint, study_path, extra))
+        child_code = run_isaaclab(args, evaluation_lab_args(args, checkpoint, study_path, extra))
         if args.dry_run:
             return child_code
     elif args.dry_run:
@@ -903,6 +1089,14 @@ def run_analyze_leg_usage(args: argparse.Namespace, extra: list[str]) -> int:
         flush=True,
     )
     return child_code
+
+
+# Compatibility aliases retained for callers using the original leg-usage names.
+add_analyze_leg_usage_args = add_evaluation_args
+analyze_leg_usage_lab_args = evaluation_lab_args
+validate_leg_usage_runtime_overrides = validate_evaluation_runtime_overrides
+_load_leg_usage_module = _load_evaluation_module
+run_analyze_leg_usage = run_evaluation
 
 
 def add_ablation_args(parser: argparse.ArgumentParser) -> None:
@@ -1109,11 +1303,12 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser = subparsers.add_parser("record", help="Record a checkpoint rollout.")
     add_record_args(record_parser)
 
-    leg_usage_parser = subparsers.add_parser(
-        "analyze_leg_usage",
-        help="Record and analyze the fixed gait-by-velocity leg-usage grid.",
+    evaluation_parser = subparsers.add_parser(
+        "evaluation",
+        aliases=["analyze_leg_usage"],
+        help="Evaluate tracking, gait fidelity, and leg usage on a fixed gait-by-velocity grid.",
     )
-    add_analyze_leg_usage_args(leg_usage_parser)
+    add_evaluation_args(evaluation_parser)
 
     ablation_parser = subparsers.add_parser("ablation", help="Run symmetry ablations.")
     add_ablation_args(ablation_parser)
@@ -1158,6 +1353,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         args.robot_spec = get_robot(args.robot)
+        if args.command == "train":
+            entrypoint = canonical_python_entrypoint(sys.argv[0])
+            entrypoint_args = raw_args if Path(entrypoint).name == "symm_cli.py" else raw_args[1:]
+            args._direct_launcher_interface = entrypoint
+            args._direct_launcher_argv = [entrypoint, *entrypoint_args]
         validate_expected_branch(args)
         if args.command == "train":
             return run_isaaclab(args, train_lab_args(args, extra))
@@ -1180,8 +1380,15 @@ def main(argv: list[str] | None = None) -> int:
             if not args.gif:
                 return 0
             return convert_latest_video(args, checkpoint, previous_videos)
-        if args.command == "analyze_leg_usage":
-            return run_analyze_leg_usage(args, extra)
+        if args.command in {"evaluation", "analyze_leg_usage"}:
+            if args.command == "analyze_leg_usage":
+                if not args._protocol_explicit:
+                    args.protocol = "legacy"
+                print(
+                    "[symm_locomotion] WARNING: 'analyze_leg_usage' is deprecated; use 'evaluation' instead.",
+                    file=sys.stderr,
+                )
+            return run_evaluation(args, extra)
         if args.command == "ablation":
             return run_ablation(args, extra)
         if args.command == "compare":

@@ -1,9 +1,8 @@
 # Curated symmetric-locomotion runs
 
-This archive is maintained on branch
-`72d-symm-v4-integration`. It contains every retained artifact from each
-curated training run: TensorBoard events, parameters, training-time Git
-provenance, plots, simulation data, videos, and deployment exports.
+This archive contains every retained artifact from each curated training run:
+TensorBoard events, parameters, training-time Git provenance, plots,
+simulation data, videos, and deployment exports.
 
 Only the iteration checkpoint series is reduced. Each run publishes its
 numerically latest `model_*.pt`; intermediate iteration checkpoints remain
@@ -56,5 +55,5 @@ Go2 TRS reward while retaining its allocation gains remains active work.
 
 ## Branch visibility
 
-The repository's `main` branch contains only the early archive subset. Select
-`72d-symm-v4-integration` in GitHub to view this complete curated set.
+The repository's `main` branch contains only the early archive subset. This
+branch snapshot contains the complete curated set listed above.

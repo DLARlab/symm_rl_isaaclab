@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 RSL_RL_VERSION = "5.0.1"
 RL_ROOT = Path(__file__).resolve().parents[1]
 CLI_ARGS = import_local_module("isaaclab_rsl_rl_cli_args", RL_ROOT / "rsl_rl" / "cli_args.py")
+SYMM_PROVENANCE = import_local_module(
+    "isaaclab_symm_training_provenance",
+    Path(__file__).resolve().parents[2] / "symm_locomotion" / "training_provenance.py",
+)
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 with contextlib.suppress(ImportError):
@@ -78,6 +82,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--external_callback",
         default=None,
         help="Fully qualified path to an externally defined callback.",
+    )
+    parser.add_argument(
+        "--symm_study_context",
+        default=None,
+        help="Immutable JSON context emitted by the symmetric-locomotion study launcher.",
+    )
+    parser.add_argument(
+        "--symm_direct_launch_context",
+        default=None,
+        help="Internal JSON provenance supplied by the direct symmetric-locomotion launcher.",
     )
     CLI_ARGS.add_rsl_rl_args(parser)
     add_isaaclab_launcher_args(parser)
@@ -174,6 +188,36 @@ def run(argv: list[str]) -> None:
             runner.load(resume_path)
 
         dump_train_configs(log_dir, env_cfg, agent_cfg)
+
+        initialization_path = SYMM_PROVENANCE.record_training_initialization(
+            runner=runner,
+            env_cfg=env_cfg,
+            agent_cfg=agent_cfg,
+            log_dir=log_dir,
+            repo_root=Path(__file__).resolve().parents[3],
+            study_context_path=args_cli.symm_study_context,
+            resume_checkpoint=(
+                resume_path if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation" else None
+            ),
+            runtime_argv=argv,
+        )
+        if initialization_path is not None:
+            print(f"[INFO] Wrote pre-rollout initialization provenance: {initialization_path}")
+            policy_observations = runner.alg.storage.observations["policy"]
+            command_path, cohort_path = SYMM_PROVENANCE.record_resolved_run_metadata(
+                env_cfg=env_cfg,
+                agent_cfg=agent_cfg,
+                log_dir=log_dir,
+                repo_root=Path(__file__).resolve().parents[3],
+                runtime_argv=argv,
+                observation_dimension=int(policy_observations.shape[-1]),
+                action_dimension=int(runner.alg.storage.actions.shape[-1]),
+                direct_launch_context=args_cli.symm_direct_launch_context,
+                study_context_path=args_cli.symm_study_context,
+                initialization_path=initialization_path,
+            )
+            print(f"[INFO] Wrote resolved command provenance: {command_path}")
+            print(f"[INFO] Wrote cohort eligibility facts: {cohort_path}")
 
         try:
             runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)

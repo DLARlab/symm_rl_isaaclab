@@ -39,7 +39,16 @@ import plot_trs_tensorboard as reward_plot  # noqa: E402
 
 METHOD_VERSION = "gait_famili_v2_fixed_grid_v1"
 MANIFEST_PATH = OUTPUT_DIR / "study.json"
-COLORS = ("#202124", "#0072B2", "#D97706", "#00875A")
+COLORS = (
+    "#202124",
+    "#0072B2",
+    "#D97706",
+    "#00875A",
+    "#CC79A7",
+    "#56B4E9",
+    "#8E44AD",
+    "#A65E2E",
+)
 METRICS = (
     ("torque_squared", "Torque²", "N² m² s"),
     ("absolute_work", "Absolute work", "J"),
@@ -119,9 +128,7 @@ def _load_manifest() -> tuple[dict[str, Any], tuple[Run, ...]]:
             folder=str(entry["folder"]),
             mirror_coeff=float(entry["mirror_coeff"]),
             value_coeff=float(entry["value_coeff"]),
-            warmup_iterations=(
-                None if entry["warmup_iterations"] is None else int(entry["warmup_iterations"])
-            ),
+            warmup_iterations=(None if entry["warmup_iterations"] is None else int(entry["warmup_iterations"])),
             rampup_iterations=int(entry["rampup_iterations"]),
             trs_enabled=bool(entry["trs_enabled"]),
             run_root=run_root,
@@ -173,10 +180,7 @@ def _load_grid(
     grid_cfg = manifest["fixed_grid"]
     if protocol["method_version"] != grid_cfg["method_version"]:
         raise ValueError(f"Unexpected grid method for {run.label}.")
-    if (
-        protocol["robot"] != manifest["robot"]
-        or protocol["gait_library_version"] != grid_cfg["gait_library_version"]
-    ):
+    if protocol["robot"] != manifest["robot"] or protocol["gait_library_version"] != grid_cfg["gait_library_version"]:
         raise ValueError(f"Unexpected robot or gait library for {run.label}.")
     if protocol["velocities_mps"] != grid_cfg["velocities_mps"]:
         raise ValueError(f"Velocity grid differs for {run.label}.")
@@ -201,9 +205,7 @@ def _load_grid(
     if len(cells) != 60 or any(cell["status"] != "valid" for cell in cells):
         raise ValueError(f"Expected 60 valid cells for {run.label}, found {len(cells)}.")
     expected_cells = {
-        (int(gait["index"]), float(velocity))
-        for gait in study["gaits"]
-        for velocity in study["velocities_mps"]
+        (int(gait["index"]), float(velocity)) for gait in study["gaits"] for velocity in study["velocities_mps"]
     }
     actual_cells = {(int(cell["gait_index"]), float(cell["velocity_mps"])) for cell in cells}
     if len(study["gaits"]) != 10 or actual_cells != expected_cells:
@@ -217,17 +219,21 @@ def _load_grid(
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     if provenance["input_study_sha256"] != _sha256(study_path):
         raise ValueError(f"Analysis provenance does not match study.json for {run.label}.")
-    return cells, protocol, {
-        "checkpoint_sha256": checkpoint_sha,
-        "grid_study_sha256": _sha256(study_path),
-        "cell_metrics_sha256": _sha256(cell_path),
-        "grid_analysis_provenance_sha256": _sha256(provenance_path),
-        "grid_analyzer_sha256": provenance["analyzer_sha256"],
-        "grid_source_provenance_sha256": study["source_provenance"]["sha256"],
-        "combined_tracking_cells": sum(cell["tracking_success"].lower() == "true" for cell in cells),
-        "planar_tracking_cells": 60,
-        "yaw_tracking_cells": sum(cell["yaw_tracking_success"].lower() == "true" for cell in cells),
-    }
+    return (
+        cells,
+        protocol,
+        {
+            "checkpoint_sha256": checkpoint_sha,
+            "grid_study_sha256": _sha256(study_path),
+            "cell_metrics_sha256": _sha256(cell_path),
+            "grid_analysis_provenance_sha256": _sha256(provenance_path),
+            "grid_analyzer_sha256": provenance["analyzer_sha256"],
+            "grid_source_provenance_sha256": study["source_provenance"]["sha256"],
+            "combined_tracking_cells": sum(cell["tracking_success"].lower() == "true" for cell in cells),
+            "planar_tracking_cells": 60,
+            "yaw_tracking_cells": sum(cell["yaw_tracking_success"].lower() == "true" for cell in cells),
+        },
+    )
 
 
 def _cell_metric_rows(runs: tuple[Run, ...], cells_by_run: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -291,15 +297,11 @@ def _aggregate_direction(
                         "metric_label": label,
                         "unit": unit,
                         "cells": len(selected),
-                        "signed_imbalance_percent": _mean(
-                            [float(row["signed_imbalance_percent"]) for row in selected]
-                        ),
+                        "signed_imbalance_percent": _mean([float(row["signed_imbalance_percent"]) for row in selected]),
                         "mean_absolute_imbalance_percent": _mean(
                             [float(row["absolute_imbalance_percent"]) for row in selected]
                         ),
-                        "total_per_directed_m": _mean(
-                            [float(row["total_per_directed_m"]) for row in selected]
-                        ),
+                        "total_per_directed_m": _mean([float(row["total_per_directed_m"]) for row in selected]),
                     }
                     summaries.append(summary)
                     family_rows.append(summary)
@@ -319,9 +321,7 @@ def _aggregate_direction(
                         "mean_absolute_imbalance_percent": _mean(
                             [float(row["mean_absolute_imbalance_percent"]) for row in family_rows]
                         ),
-                        "total_per_directed_m": _mean(
-                            [float(row["total_per_directed_m"]) for row in family_rows]
-                        ),
+                        "total_per_directed_m": _mean([float(row["total_per_directed_m"]) for row in family_rows]),
                     }
                 )
     return summaries
@@ -362,15 +362,11 @@ def _aggregate_commands(
                         "metric_label": label,
                         "unit": unit,
                         "cells": len(selected),
-                        "signed_imbalance_percent": _mean(
-                            [float(row["signed_imbalance_percent"]) for row in selected]
-                        ),
+                        "signed_imbalance_percent": _mean([float(row["signed_imbalance_percent"]) for row in selected]),
                         "mean_absolute_imbalance_percent": _mean(
                             [float(row["absolute_imbalance_percent"]) for row in selected]
                         ),
-                        "total_per_directed_m": _mean(
-                            [float(row["total_per_directed_m"]) for row in selected]
-                        ),
+                        "total_per_directed_m": _mean([float(row["total_per_directed_m"]) for row in selected]),
                     }
                     summaries.append(summary)
                     family_rows.append(summary)
@@ -391,9 +387,7 @@ def _aggregate_commands(
                         "mean_absolute_imbalance_percent": _mean(
                             [float(row["mean_absolute_imbalance_percent"]) for row in family_rows]
                         ),
-                        "total_per_directed_m": _mean(
-                            [float(row["total_per_directed_m"]) for row in family_rows]
-                        ),
+                        "total_per_directed_m": _mean([float(row["total_per_directed_m"]) for row in family_rows]),
                     }
                 )
     return summaries
@@ -410,9 +404,7 @@ def _overall_leg_summary(
             rows = [
                 row
                 for row in directional
-                if row["run"] == run.folder
-                and row["metric"] == metric
-                and row["family"] == "all_family_balanced"
+                if row["run"] == run.folder and row["metric"] == metric and row["family"] == "all_family_balanced"
             ]
             result[run.slug][metric] = {
                 "mean_absolute_imbalance_percent": _mean(
@@ -495,19 +487,18 @@ def _write_learning_points(runs: tuple[Run, ...], curves: list[reward_plot.Rewar
     _write_csv(OUTPUT_DIR / "learning_curve_points.csv", rows)
 
 
-def _write_learning_svg(
-    manifest: dict[str, Any], runs: tuple[Run, ...], curves: list[reward_plot.RewardCurve]
-) -> Path:
+def _write_learning_svg(manifest: dict[str, Any], runs: tuple[Run, ...], curves: list[reward_plot.RewardCurve]) -> Path:
     """Draw the old-style two-panel sample/wall-time learning plot."""
     svg = reward_plot._svg_tag
     rewards = [value for curve in curves for value in curve.rewards]
     y_min, y_max, y_ticks = reward_plot._nice_bounds([35.0, *rewards])
+    canvas_height = 805 if len(runs) > 4 else 760
     root = ET.Element(
         svg("svg"),
         {
-            "viewBox": "0 0 1600 760",
+            "viewBox": f"0 0 1600 {canvas_height}",
             "width": "1600",
-            "height": "760",
+            "height": str(canvas_height),
             "role": "img",
             "aria-labelledby": "plot-title plot-description",
         },
@@ -515,9 +506,14 @@ def _write_learning_svg(
     display_name = str(manifest["display_name"])
     ET.SubElement(root, svg("title"), {"id": "plot-title"}).text = f"{display_name} matched learning curves"
     ET.SubElement(root, svg("desc"), {"id": "plot-description"}).text = (
-        "Three 200-iteration-smoothed reward curves plotted against environment transitions and elapsed hours."
+        f"The same {len(runs)} 200-iteration-smoothed reward curves are plotted against environment "
+        "transitions and elapsed hours."
     )
-    ET.SubElement(root, svg("rect"), {"width": "1600", "height": "760", "fill": "#FFFFFF"})
+    ET.SubElement(
+        root,
+        svg("rect"),
+        {"width": "1600", "height": str(canvas_height), "fill": "#FFFFFF"},
+    )
     definitions = ET.SubElement(root, svg("defs"))
     reward_plot._add_text(
         root,
@@ -532,7 +528,10 @@ def _write_learning_svg(
         root,
         800.0,
         72.0,
-        "Train/mean_reward, 200-iteration trailing mean · seed 42 · 512 environments · 24 steps/iteration · 20,000 iterations",
+        (
+            "Train/mean_reward, 200-iteration trailing mean · seed 42 · "
+            "512 environments · 24 steps/iteration · 20,000 iterations"
+        ),
         size=13,
         anchor="middle",
         fill="#5F6368",
@@ -565,60 +564,70 @@ def _write_learning_svg(
         curve_colors=COLORS[: len(runs)],
         curve_dash_arrays=(None,) * len(runs),
     )
-    legend_width = 360.0
-    start = (1600.0 - legend_width * len(runs)) / 2.0
+    legend_columns = min(len(runs), 4)
+    legend_width = 380.0 if len(runs) > 4 else 360.0
+    legend_start_y = 700.0 if len(runs) > 4 else 710.0
+    start = (1600.0 - legend_width * legend_columns) / 2.0
     for index, run in enumerate(runs):
-        x = start + index * legend_width
+        row, column = divmod(index, legend_columns)
+        x = start + column * legend_width
+        y = legend_start_y + row * 38.0
         ET.SubElement(
             root,
             svg("line"),
             {
                 "x1": f"{x:.2f}",
                 "x2": f"{x + 45.0:.2f}",
-                "y1": "710.00",
-                "y2": "710.00",
+                "y1": f"{y:.2f}",
+                "y2": f"{y:.2f}",
                 "stroke": COLORS[index],
                 "stroke-width": "3.0" if index == 0 else "2.0",
                 "stroke-linecap": "round",
             },
         )
-        reward_plot._add_text(root, x + 55.0, 715.0, run.label, size=13)
+        reward_plot._add_text(root, x + 55.0, y + 5.0, run.label, size=12 if len(runs) > 4 else 13)
     path = OUTPUT_DIR / "learning_curve_sample_and_wall_time.svg"
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
     return path
 
 
-def _write_balance_svg(
-    manifest: dict[str, Any], runs: tuple[Run, ...], directional: list[dict[str, Any]]
-) -> Path:
+def _write_balance_svg(manifest: dict[str, Any], runs: tuple[Run, ...], directional: list[dict[str, Any]]) -> Path:
     """Draw old-style grouped bars from the balanced fixed-grid summaries."""
     svg = reward_plot._svg_tag
-    width, height = 1600.0, 780.0
-    panel_width, panel_height, panel_top = 675.0, 470.0, 135.0
-    panel_lefts = (105.0, 865.0)
+    width = 2000.0 if len(runs) > 4 else 1600.0
+    height = 850.0 if len(runs) > 4 else 780.0
+    panel_height, panel_top = 470.0, 135.0
+    panel_gap = 85.0
+    panel_margin = 105.0
+    panel_width = (width - 2.0 * panel_margin - panel_gap) / 2.0
+    panel_lefts = (panel_margin, panel_margin + panel_width + panel_gap)
     y_min, y_max = (float(value) for value in manifest["balance_y_range"])
     y_ticks = [float(value) for value in manifest["balance_y_ticks"]]
     root = ET.Element(
         svg("svg"),
         {
-            "viewBox": "0 0 1600 780",
-            "width": "1600",
-            "height": "780",
+            "viewBox": f"0 0 {width:.0f} {height:.0f}",
+            "width": f"{width:.0f}",
+            "height": f"{height:.0f}",
             "role": "img",
             "aria-labelledby": "balance-title balance-description",
         },
     )
     display_name = str(manifest["display_name"])
-    ET.SubElement(root, svg("title"), {"id": "balance-title"}).text = (
-        f"{display_name} fixed-grid front and hind load allocation by direction"
+    ET.SubElement(
+        root, svg("title"), {"id": "balance-title"}
+    ).text = f"{display_name} fixed-grid front and hind load allocation by direction"
+    ET.SubElement(
+        root, svg("desc"), {"id": "balance-description"}
+    ).text = "Grouped bars show family-balanced signed front-hind imbalance over three speeds and ten gaits."
+    ET.SubElement(
+        root,
+        svg("rect"),
+        {"width": f"{width:.0f}", "height": f"{height:.0f}", "fill": "#FFFFFF"},
     )
-    ET.SubElement(root, svg("desc"), {"id": "balance-description"}).text = (
-        "Grouped bars show family-balanced signed front-hind imbalance over three speeds and ten gaits."
-    )
-    ET.SubElement(root, svg("rect"), {"width": "1600", "height": "780", "fill": "#FFFFFF"})
     reward_plot._add_text(
         root,
-        800.0,
+        width / 2.0,
         43.0,
         f"{display_name}: front/hind load allocation in fixed gait-speed grid",
         size=24,
@@ -627,7 +636,7 @@ def _write_balance_svg(
     )
     reward_plot._add_text(
         root,
-        800.0,
+        width / 2.0,
         72.0,
         "Signed imbalance = 100 × (front − hind) / (front + hind); equal-family mean; zero is equal usage",
         size=13,
@@ -663,9 +672,7 @@ def _write_balance_svg(
                     "stroke-width": "1.5" if tick == 0.0 else "1",
                 },
             )
-            reward_plot._add_text(
-                root, left - 11.0, y + 5.0, f"{tick:+.0f}", size=12, anchor="end", fill="#5F6368"
-            )
+            reward_plot._add_text(root, left - 11.0, y + 5.0, f"{tick:+.0f}", size=12, anchor="end", fill="#5F6368")
         category_width = panel_width / len(METRICS)
         group_width = category_width * 0.72
         bar_width = group_width / len(runs)
@@ -722,21 +729,34 @@ def _write_balance_svg(
                 anchor="middle",
                 transform=f"rotate(-90 29.00 {panel_top + panel_height / 2.0:.2f})",
             )
-    legend_width = 360.0
-    start = (width - legend_width * len(runs)) / 2.0
+    legend_columns = min(len(runs), 4)
+    legend_width = 470.0 if len(runs) > 4 else 360.0
+    legend_start_y = 689.0
+    start = (width - legend_width * legend_columns) / 2.0
     for index, run in enumerate(runs):
-        x = start + index * legend_width
+        row, column = divmod(index, legend_columns)
+        x = start + column * legend_width
+        y = legend_start_y + row * 36.0
         ET.SubElement(
             root,
             svg("rect"),
-            {"x": f"{x:.2f}", "y": "689.00", "width": "28", "height": "14", "fill": COLORS[index]},
+            {
+                "x": f"{x:.2f}",
+                "y": f"{y:.2f}",
+                "width": "28",
+                "height": "14",
+                "fill": COLORS[index],
+            },
         )
-        reward_plot._add_text(root, x + 40.0, 702.0, run.label, size=13)
+        reward_plot._add_text(root, x + 40.0, y + 13.0, run.label, size=12 if len(runs) > 4 else 13)
     reward_plot._add_text(
         root,
-        800.0,
-        746.0,
-        "Each panel averages three speeds within each gait family, then weights trot, bound, half-bound, and gallop equally.",
+        width / 2.0,
+        800.0 if len(runs) > 4 else 746.0,
+        (
+            "Each panel averages three speeds within each gait family, then weights "
+            "trot, bound, half-bound, and gallop equally."
+        ),
         size=12,
         anchor="middle",
         fill="#5F6368",
@@ -816,11 +836,12 @@ def _write_report(
     robot_short_name = "Go2" if manifest["robot"] == "go2" else manifest["robot"].upper()
     run_word = "run" if len(runs) == 1 else "runs"
     reproduction_path = str((OUTPUT_DIR / "reproduce.py").relative_to(REPO_ROOT)).replace("/", "\\")
+    default_scope = f"This study compares the latest {len(runs)} archived {robot_short_name} {run_word}."
+    scope_description = str(manifest.get("scope_description", default_scope))
     lines = [
         f"# {display_name} gait-family V2 analysis",
         "",
-        f"This study compares the latest {len(runs)} archived {robot_short_name} {run_word}. "
-        "The learning plot retains the earlier good-runs "
+        f"{scope_description} The learning plot retains the earlier good-runs "
         "style. The leg-usage plot retains its two-direction grouped-bar style, but replaces the incidental "
         "`-0.567/+1.682 m/s` playback samples with the controlled 10-gait grid at `vx = ±{0.5, 1.0, 1.5} m/s`.",
         "",
@@ -876,8 +897,7 @@ def _write_report(
     for run in runs:
         item = validation[run.slug]
         lines.append(
-            f"| {run.label} | 60/60 | {item['planar_tracking_cells']}/60 | "
-            f"{item['combined_tracking_cells']}/60 |"
+            f"| {run.label} | 60/60 | {item['planar_tracking_cells']}/60 | {item['combined_tracking_cells']}/60 |"
         )
     lines.extend(
         [
@@ -902,7 +922,10 @@ def _write_report(
             f".\\isaaclab.bat -p .\\{reproduction_path}",
             "```",
             "",
-            "The SVG outputs are always regenerated. PNG previews are regenerated when a local Chromium-family browser is available.",
+            (
+                "The SVG outputs are always regenerated. PNG previews are regenerated when a local "
+                "Chromium-family browser is available."
+            ),
         ]
     )
     (OUTPUT_DIR / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from collections.abc import Mapping
@@ -18,6 +19,67 @@ import torch
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+
+_GROUND_COLLISION_PATH = "/World/ground/terrain/mesh"
+
+
+def _as_numpy(value) -> np.ndarray:
+    """Convert an Isaac Lab tensor-like value to a NumPy array."""
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value)
+
+
+def _resolve_configured_effort_limits(
+    robot,
+    ordered_joint_names: tuple[str, ...],
+    env_index: int,
+) -> tuple[np.ndarray, tuple[str, ...], bool]:
+    """Resolve actuator-config effort limits in action-joint order.
+
+    The articulation data buffer contains the solver-side limit.  Explicit
+    actuators intentionally use a very large solver sentinel there, so the
+    physical normalization denominator must come from each actuator model's
+    resolved ``effort_limit`` instead.
+    """
+    resolved: dict[str, tuple[float, str]] = {}
+    for group_name, actuator in getattr(robot, "actuators", {}).items():
+        names = tuple(str(name) for name in actuator.joint_names)
+        limits = _as_numpy(actuator.effort_limit)
+        if limits.ndim == 2:
+            limits = limits[env_index]
+        limits = limits.reshape(-1)
+        if limits.shape != (len(names),):
+            raise ValueError(
+                f"Actuator group {group_name!r} effort limits have shape {limits.shape}; expected ({len(names)},)."
+            )
+        for name, limit in zip(names, limits, strict=True):
+            value = float(limit)
+            source = f"robot.actuators[{group_name!r}].effort_limit"
+            if name in resolved and resolved[name] != (value, source):
+                raise ValueError(f"Joint {name!r} has conflicting configured effort-limit sources.")
+            resolved[name] = (value, source)
+    if all(name in resolved for name in ordered_joint_names):
+        limits = np.asarray([resolved[name][0] for name in ordered_joint_names], dtype=float)
+        sources = tuple(resolved[name][1] for name in ordered_joint_names)
+        return limits, sources, False
+
+    runtime_limits = _as_numpy(robot.data.joint_effort_limits.torch[env_index]).reshape(-1)
+    all_joint_names = tuple(str(name) for name in getattr(robot.data, "joint_names", ()))
+    if all_joint_names and all(name in all_joint_names for name in ordered_joint_names):
+        indices = [all_joint_names.index(name) for name in ordered_joint_names]
+        runtime_limits = runtime_limits[indices]
+    elif runtime_limits.shape != (len(ordered_joint_names),):
+        raise ValueError("Unable to resolve fallback joint effort limits in action-joint order.")
+    return (
+        runtime_limits.astype(float, copy=True),
+        tuple("robot.data.joint_effort_limits (solver fallback)" for _ in ordered_joint_names),
+        True,
+    )
 
 
 def _centered_moving_mean(
@@ -89,6 +151,8 @@ class SymmetricRolloutPlotter:
         output_dir: str | Path,
         env_index: int = 0,
         max_samples: int | None = None,
+        require_configured_effort_limits: bool = False,
+        require_ground_filtered_forces: bool = False,
     ) -> None:
         """Initialize the rollout collector.
 
@@ -97,6 +161,10 @@ class SymmetricRolloutPlotter:
             output_dir: Directory in which plots and sampled data are saved.
             env_index: Environment index to plot.
             max_samples: Maximum number of post-step samples to retain.
+            require_configured_effort_limits: Require physical actuator-model
+                effort limits and forbid a solver-data fallback.
+            require_ground_filtered_forces: Require each foot sensor to expose
+                a ground-filtered force matrix.
         """
         if env_index < 0 or env_index >= env.num_envs:
             raise ValueError(f"Plot env_index {env_index} is outside the valid range [0, {env.num_envs - 1}].")
@@ -139,6 +207,22 @@ class SymmetricRolloutPlotter:
         )
         if not np.all(np.isfinite(self._joint_effort_limits)) or np.any(self._joint_effort_limits <= 0.0):
             raise ValueError("Symmetric rollout leg-usage plots require finite, positive joint effort limits.")
+        (
+            self._configured_joint_effort_limits,
+            self._configured_effort_limit_sources,
+            self._configured_effort_limit_fallback,
+        ) = _resolve_configured_effort_limits(self._robot, self._joint_names, env_index)
+        configured_valid = (
+            np.all(np.isfinite(self._configured_joint_effort_limits))
+            and np.all(self._configured_joint_effort_limits > 0.0)
+            and np.all(self._configured_joint_effort_limits < 1.0e8)
+        )
+        if require_configured_effort_limits and (self._configured_effort_limit_fallback or not configured_valid):
+            raise ValueError(
+                "Leg-usage evaluation requires finite physical actuator-config effort limits below the solver "
+                "sentinel; robot.data.joint_effort_limits is not an allowed fallback."
+            )
+        self._configured_effort_limits_valid = bool(configured_valid and not self._configured_effort_limit_fallback)
         self._output_dir = Path(output_dir)
         self._step_dt = float(env.step_dt)
         self._max_samples = max_samples
@@ -153,6 +237,18 @@ class SymmetricRolloutPlotter:
                 raise ValueError(f"Contact sensor '{sensor_name}' must resolve exactly one foot body.")
             self._foot_sensors.append(sensor)
             foot_body_names.append(sensor.body_names[0])
+        self._foot_body_names = tuple(foot_body_names)
+        self._ground_filter_paths = tuple(
+            tuple(str(path) for path in getattr(getattr(sensor, "cfg", None), "filter_prim_paths_expr", ()))
+            for sensor in self._foot_sensors
+        )
+        self._require_ground_filtered_forces = require_ground_filtered_forces
+        filters_match_ground = all(paths == (_GROUND_COLLISION_PATH,) for paths in self._ground_filter_paths)
+        if require_ground_filtered_forces and not filters_match_ground:
+            raise ValueError(
+                "Leg-usage evaluation requires every foot sensor to filter exactly the declared terrain collision "
+                f"path {_GROUND_COLLISION_PATH!r}."
+            )
         self._env._rollout_foot_sensor_names = self._FOOT_SENSOR_NAMES
 
         self._foot_body_ids, matched_body_names = self._robot.find_bodies(foot_body_names, preserve_order=True)
@@ -163,29 +259,44 @@ class SymmetricRolloutPlotter:
         root_position = self._robot.data.root_pos_w.torch[env_index, :2].detach().cpu().numpy()
         self._desired_position = root_position.astype(np.float64, copy=True)
         self._desired_heading = float(self._robot.data.heading_w.torch[env_index].detach().cpu())
+        body_mass = getattr(self._robot.data, "body_mass", None)
+        self._robot_mass_kg = (
+            float("nan")
+            if body_mass is None
+            else float(_as_numpy(body_mass.torch[env_index]).astype(float, copy=False).sum())
+        )
+        if require_ground_filtered_forces and (not np.isfinite(self._robot_mass_kg) or self._robot_mass_kg <= 0.0):
+            raise ValueError("Leg-usage evaluation requires a finite positive articulated robot mass.")
         self._data: dict[str, list[np.ndarray | float]] = {
             "time_steps": [],
             "true_lin_vel": [],
             "desired_lin_vel": [],
             "base_positions": [],
             "desired_positions": [],
+            "base_headings": [],
+            "desired_headings": [],
+            "heading_sample_valid": [],
             "foot_thetas": [],
             "gait_periods": [],
             "duty_factors": [],
             "common_gait_phases": [],
+            "pre_decision_common_gait_phases": [],
             "E_C_frc": [],
             "E_C_spd": [],
             "foot_normal_forces_w": [],
             "foot_ground_reaction_forces_w": [],
             "ground_reaction_force_includes_friction": [],
+            "foot_normal_force_is_ground_filtered": [],
             "episode_done": [],
             "rewards": [],
             "foot_forces": [],
             "foot_velocities": [],
             "raw_actions": [],
             "actor_means": [],
+            "critic_values": [],
             "applied_actions": [],
             "joint_positions": [],
+            "requested_joint_position_targets": [],
             "joint_position_targets": [],
             "joint_velocities": [],
             "joint_torques": [],
@@ -198,6 +309,8 @@ class SymmetricRolloutPlotter:
             "joint_target_limit_utilization": [],
             "joint_target_near_limit_fraction": [],
             "joint_target_limit_violation_fraction": [],
+            "joint_action_clamped": [],
+            "action_clamp_fraction": [],
             "forward_score": [],
             "straight_score": [],
             "posture_score": [],
@@ -216,6 +329,8 @@ class SymmetricRolloutPlotter:
         self,
         actions: torch.Tensor | None = None,
         actor_means: torch.Tensor | None = None,
+        critic_values: torch.Tensor | None = None,
+        pre_decision_common_gait_phases: torch.Tensor | None = None,
         dones: torch.Tensor | None = None,
         rewards: torch.Tensor | None = None,
     ) -> None:
@@ -224,6 +339,10 @@ class SymmetricRolloutPlotter:
         Args:
             actions: Raw policy actions before the environment wrapper applies optional clipping.
             actor_means: Deterministic actor means. During inference these are the same as :paramref:`actions`.
+            critic_values: Optional value predictions for the observations that produced
+                :paramref:`actions`. Missing values are recorded as unavailable.
+            pre_decision_common_gait_phases: Optional common gait phases [cycle]
+                sampled immediately before :paramref:`actions` were computed.
             dones: Post-step episode-end mask. It prevents smoothing across resets.
             rewards: Optional post-step task rewards.
         """
@@ -277,6 +396,13 @@ class SymmetricRolloutPlotter:
             .detach()
             .cpu()
         )
+        cached_root_headings_w = getattr(self._env, "_last_root_headings_w", None)
+        root_heading = (
+            self._robot.data.heading_w.torch[env_index]
+            if cached_root_headings_w is None
+            else cached_root_headings_w[env_index]
+        )
+        root_heading = float(root_heading.detach().cpu())
 
         self._desired_heading += float(command[2]) * self._step_dt
         cos_heading = np.cos(self._desired_heading)
@@ -299,9 +425,13 @@ class SymmetricRolloutPlotter:
             foot_normal_forces_w = []
             foot_ground_reaction_forces_w = []
             ground_reaction_force_includes_friction = True
+            ground_filtered_force_source_valid = True
             for sensor in self._foot_sensors:
                 force_matrix_w = getattr(sensor.data, "force_matrix_w", None)
                 if force_matrix_w is None:
+                    ground_filtered_force_source_valid = False
+                    if self._require_ground_filtered_forces:
+                        raise RuntimeError("Ground-filtered foot force_matrix_w is unavailable during evaluation.")
                     net_forces_w = sensor.data.net_forces_w
                     if net_forces_w is None:
                         raise RuntimeError("Foot contact sensor does not expose net_forces_w.")
@@ -329,6 +459,15 @@ class SymmetricRolloutPlotter:
             ground_reaction_force_includes_friction = bool(
                 getattr(self._env, "_last_ground_reaction_force_includes_friction", False)
             )
+            cached_ground_filtered = getattr(self._env, "_last_foot_normal_force_is_ground_filtered", None)
+            ground_filtered_force_source_valid = (
+                False if cached_ground_filtered is None else bool(cached_ground_filtered[env_index].detach().cpu())
+            )
+        ground_filtered = ground_filtered_force_source_valid and all(
+            paths == (_GROUND_COLLISION_PATH,) for paths in self._ground_filter_paths
+        )
+        if self._require_ground_filtered_forces and not ground_filtered:
+            raise RuntimeError("Foot normal-force samples are not ground-filtered.")
         foot_normal_forces_w = foot_normal_forces_w.detach().cpu()
         foot_ground_reaction_forces_w = foot_ground_reaction_forces_w.detach().cpu()
         contact_force_norms = torch.linalg.norm(foot_ground_reaction_forces_w, dim=-1)
@@ -361,6 +500,43 @@ class SymmetricRolloutPlotter:
             .detach()
             .cpu()
         )
+        cached_requested_joint_targets = getattr(
+            self._env,
+            "_last_requested_joint_position_targets",
+            getattr(self._env, "_requested_joint_position_targets", None),
+        )
+        if cached_requested_joint_targets is not None:
+            requested_joint_position_targets = cached_requested_joint_targets[env_index].detach().cpu()
+        else:
+            action_scale = getattr(self._joint_action_term, "_scale", None)
+            action_offset = getattr(self._joint_action_term, "_offset", None)
+            action_term_raw_actions = getattr(self._joint_action_term, "raw_actions", None)
+            if action_scale is None or action_offset is None:
+                requested_joint_position_targets = torch.full_like(joint_position_targets, torch.nan)
+            else:
+                requested_raw_action = (
+                    actions[env_index] if action_term_raw_actions is None else action_term_raw_actions[env_index]
+                )
+                selected_scale = (
+                    action_scale[env_index]
+                    if isinstance(action_scale, torch.Tensor) and action_scale.ndim > 1
+                    else action_scale
+                )
+                selected_offset = (
+                    action_offset[env_index]
+                    if isinstance(action_offset, torch.Tensor) and action_offset.ndim > 1
+                    else action_offset
+                )
+                requested_joint_position_targets = requested_raw_action.detach().cpu().to(joint_position_targets)
+                requested_joint_position_targets = requested_joint_position_targets * torch.as_tensor(
+                    selected_scale,
+                    dtype=joint_position_targets.dtype,
+                    device="cpu",
+                ) + torch.as_tensor(
+                    selected_offset,
+                    dtype=joint_position_targets.dtype,
+                    device="cpu",
+                )
         joint_velocities = (
             (
                 self._robot.data.joint_vel.torch[env_index, self._joint_ids]
@@ -423,9 +599,13 @@ class SymmetricRolloutPlotter:
         self._data["desired_lin_vel"].append(command.numpy())
         self._data["base_positions"].append(root_position.numpy())
         self._data["desired_positions"].append(self._desired_position.copy())
-        foot_thetas = getattr(self._command_term, "foot_thetas", None)
-        gait_periods = getattr(self._command_term, "gait_periods", None)
-        duty_factors = getattr(self._command_term, "duty_factors", None)
+        self._data["base_headings"].append(root_heading)
+        self._data["desired_headings"].append(self._desired_heading)
+        self._data["heading_sample_valid"].append(not episode_done or cached_root_headings_w is not None)
+        foot_thetas = getattr(self._env, "_last_foot_thetas", getattr(self._command_term, "foot_thetas", None))
+        gait_periods = getattr(self._env, "_last_gait_periods", getattr(self._command_term, "gait_periods", None))
+        duty_factors = getattr(self._env, "_last_duty_factors", getattr(self._command_term, "duty_factors", None))
+        cached_common_gait_phases = getattr(self._env, "_last_common_gait_phases", None)
         common_gait_phases = getattr(self._command_term, "common_gait_phases", None)
         self._data["foot_thetas"].append(
             np.full(4, np.nan) if foot_thetas is None else foot_thetas[env_index].detach().cpu().numpy()
@@ -437,7 +617,22 @@ class SymmetricRolloutPlotter:
             float("nan") if duty_factors is None else float(duty_factors[env_index].detach().cpu())
         )
         self._data["common_gait_phases"].append(
-            float("nan") if common_gait_phases is None else float(common_gait_phases()[env_index].detach().cpu())
+            float("nan")
+            if common_gait_phases is None and cached_common_gait_phases is None
+            else float(
+                (
+                    common_gait_phases()[env_index]
+                    if cached_common_gait_phases is None
+                    else cached_common_gait_phases[env_index]
+                )
+                .detach()
+                .cpu()
+            )
+        )
+        self._data["pre_decision_common_gait_phases"].append(
+            float("nan")
+            if pre_decision_common_gait_phases is None
+            else float(pre_decision_common_gait_phases[env_index].detach().cpu())
         )
         cached_periodic_force_weights = getattr(self._env, "_last_periodic_force_weights", None)
         periodic_force_weights = (
@@ -456,14 +651,23 @@ class SymmetricRolloutPlotter:
         self._data["foot_normal_forces_w"].append(foot_normal_forces_w.numpy())
         self._data["foot_ground_reaction_forces_w"].append(foot_ground_reaction_forces_w.numpy())
         self._data["ground_reaction_force_includes_friction"].append(ground_reaction_force_includes_friction)
+        self._data["foot_normal_force_is_ground_filtered"].append(ground_filtered)
         self._data["episode_done"].append(episode_done)
         self._data["rewards"].append(float("nan") if rewards is None else float(rewards[env_index].detach().cpu()))
         self._data["foot_forces"].append(contact_force_norms.numpy())
         self._data["foot_velocities"].append(torch.linalg.norm(foot_velocity, dim=-1).detach().cpu().numpy())
         self._data["raw_actions"].append(actions[env_index].detach().cpu().numpy())
         self._data["actor_means"].append(actor_means[env_index].detach().cpu().numpy())
+        if critic_values is None:
+            self._data["critic_values"].append(float("nan"))
+        else:
+            selected_critic_value = critic_values[env_index].detach().cpu().reshape(-1)
+            if selected_critic_value.numel() != 1:
+                raise ValueError("Critic values must provide exactly one scalar per environment.")
+            self._data["critic_values"].append(float(selected_critic_value[0]))
         self._data["applied_actions"].append(joint_position_targets.numpy())
         self._data["joint_positions"].append(joint_positions.numpy())
+        self._data["requested_joint_position_targets"].append(_as_numpy(requested_joint_position_targets))
         self._data["joint_position_targets"].append(joint_position_targets.numpy())
         self._data["joint_velocities"].append(joint_velocities.numpy())
         self._data["joint_torques"].append(joint_torques.numpy())
@@ -478,6 +682,48 @@ class SymmetricRolloutPlotter:
         self._data["joint_target_limit_violation_fraction"].append(
             float(joint_target_limit_violation.to(torch.float32).mean())
         )
+        clipped_mask = getattr(self._env, "_joint_target_clipped_mask", None)
+        if clipped_mask is None:
+            action_scale = getattr(self._joint_action_term, "_scale", None)
+            action_offset = getattr(self._joint_action_term, "_offset", None)
+            if action_scale is None or action_offset is None:
+                selected_clipped_mask = None
+                self._data["joint_action_clamped"].append(np.full(len(self._joint_names), np.nan))
+            else:
+                selected_raw_action = actions[env_index].detach().cpu()
+                selected_scale = (
+                    action_scale[env_index].detach().cpu() if isinstance(action_scale, torch.Tensor) else action_scale
+                )
+                selected_offset = (
+                    action_offset[env_index].detach().cpu()
+                    if isinstance(action_offset, torch.Tensor)
+                    else action_offset
+                )
+                unclamped_target = selected_raw_action * selected_scale + selected_offset
+                tolerance = (
+                    8.0
+                    * torch.finfo(joint_position_targets.dtype).eps
+                    * torch.maximum(
+                        torch.ones_like(joint_position_targets),
+                        unclamped_target.abs(),
+                    )
+                )
+                selected_clipped_mask = (unclamped_target - joint_position_targets).abs() > tolerance
+                self._data["joint_action_clamped"].append(selected_clipped_mask.numpy())
+        else:
+            selected_clipped_mask = clipped_mask[env_index]
+            self._data["joint_action_clamped"].append(_as_numpy(selected_clipped_mask).astype(float))
+        clipped_fraction = getattr(self._env, "_joint_target_clipped_fraction", None)
+        if clipped_fraction is None:
+            selected_clipped_fraction = (
+                float("nan") if selected_clipped_mask is None else float(_as_numpy(selected_clipped_mask).mean())
+            )
+        else:
+            selected_clipped_fraction_tensor = (
+                clipped_fraction if clipped_fraction.ndim == 0 else clipped_fraction[env_index]
+            )
+            selected_clipped_fraction = float(selected_clipped_fraction_tensor.detach().cpu().item())
+        self._data["action_clamp_fraction"].append(selected_clipped_fraction)
         self._data["forward_score"].append(reward_component("forward_score"))
         self._data["straight_score"].append(reward_component("straight_score"))
         self._data["posture_score"].append(reward_component("posture_score"))
@@ -497,8 +743,35 @@ class SymmetricRolloutPlotter:
         data = {name: np.asarray(values) for name, values in self._data.items()}
         data["joint_names"] = np.asarray(self._joint_names)
         data["joint_effort_limits"] = self._joint_effort_limits.copy()
+        data["configured_joint_effort_limits"] = self._configured_joint_effort_limits.copy()
+        data["configured_effort_limit_source_by_joint"] = np.asarray(self._configured_effort_limit_sources)
+        data["configured_effort_limit_fallback"] = np.asarray(self._configured_effort_limit_fallback)
+        data["configured_effort_limits_valid"] = np.asarray(self._configured_effort_limits_valid)
+        data["robot_mass_kg"] = np.asarray(self._robot_mass_kg)
+        data["ground_filter_paths"] = np.asarray([";".join(paths) for paths in self._ground_filter_paths])
+        if extra_data is not None and "evaluation_config_json" in extra_data:
+            evaluation_config = json.loads(str(extra_data["evaluation_config_json"]))
+            contact_config = evaluation_config["contact"]
+            if contact_config["mode"] == "absolute":
+                contact_threshold_on_n = float(contact_config["on_n"])
+                contact_threshold_off_n = float(contact_config["off_n"])
+            else:
+                quarter_weight_n = self._robot_mass_kg * 9.80665 / 4.0
+                contact_threshold_on_n = max(
+                    float(contact_config["minimum_on_n"]),
+                    float(contact_config["alpha_on"]) * quarter_weight_n,
+                )
+                contact_threshold_off_n = max(
+                    float(contact_config["minimum_off_n"]),
+                    float(contact_config["alpha_off"]) * quarter_weight_n,
+                )
+            if not contact_threshold_on_n > contact_threshold_off_n >= 0.0:
+                raise ValueError("Resolved contact thresholds must satisfy F_on > F_off >= 0 N.")
+            data["contact_threshold_on_n"] = np.asarray(contact_threshold_on_n)
+            data["contact_threshold_off_n"] = np.asarray(contact_threshold_off_n)
         data["leg_names"] = np.asarray(self._LEG_NAMES)
         data["motor_role_names"] = np.asarray(self._MOTOR_ROLE_NAMES)
+        data["foot_body_names"] = np.asarray(self._foot_body_names)
         data["leg_joint_torques"] = data["joint_torques"].reshape(
             -1,
             len(self._LEG_NAMES),

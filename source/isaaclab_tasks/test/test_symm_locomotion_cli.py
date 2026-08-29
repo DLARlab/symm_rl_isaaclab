@@ -263,6 +263,7 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
     assert command[command.index("--max_iterations") + 1] == "20000"
     assert args.tr_min_abs_cmd_vel == 0.0
     assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
+    assert "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false" in command
     assert "agent.algorithm.symmetry_cfg.rampup_iterations=0" in command
     assert "agent.algorithm.symmetry_cfg.ramp_shape=linear" in command
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
@@ -361,9 +362,50 @@ def test_no_trs_disables_every_auxiliary_symmetry_training_path():
     command = symm_cli.train_lab_args(args, [])
 
     assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
+    assert "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false" in command
     assert "agent.algorithm.symmetry_cfg.use_mirror_loss=False" in command
     assert "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0" in command
     assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0" in command
+
+
+def test_train_forwards_reward_action_geometry_and_gait_options_directly():
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(
+        [
+            "train",
+            "--robot",
+            "go2",
+            "--foot-phase-weight",
+            "0.4",
+            "--foot-phase-reduction",
+            "mean",
+            "--joint-target-limit-mode",
+            "requested_overflow",
+            "--joint-target-limit-weight",
+            "0.075",
+            "--actor-mean-bound-mode",
+            "per_joint_feasible",
+            "--tr-policy-output-space",
+            "normalized_requested_joint_target",
+            "--gait-sampling-profile",
+            "trclosed_v2_halfbound_anneal",
+            "--gait-curriculum-iterations",
+            "4000",
+            "--no-conda-run",
+        ]
+    )
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert "env.rewards.foot_phase.weight=0.4" in command
+    assert "env.rewards.foot_phase.params.reduction=mean" in command
+    assert "env.rewards.joint_target_limits.params.mode=requested_overflow" in command
+    assert "env.rewards.joint_target_limits.weight=0.075" in command
+    assert "agent.algorithm.symmetry_cfg.actor_mean_bound_mode=per_joint_feasible" in command
+    assert "agent.algorithm.symmetry_cfg.tr_policy_output_space=normalized_requested_joint_target" in command
+    assert "env.commands.base_velocity.gait_sampling_profile=trclosed_v2_halfbound_anneal" in command
+    assert "env.commands.base_velocity.gait_curriculum_iterations=4000" in command
 
 
 def test_record_defaults_to_thirty_seconds(monkeypatch, tmp_path):

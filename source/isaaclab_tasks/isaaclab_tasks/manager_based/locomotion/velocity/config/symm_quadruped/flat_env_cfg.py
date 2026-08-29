@@ -145,6 +145,8 @@ def make_gait_velocity_command(
     mdp_module,
     *,
     base_height_range: tuple[float, float] = (0.35, 0.45),
+    gait_sampling_profile: str = "trclosed_v2_equal_family",
+    gait_curriculum_iterations: int = 0,
 ):
     """Create the shared forward-velocity gait command config."""
     return mdp_module.GaitVelocityCommandCfg(
@@ -164,6 +166,8 @@ def make_gait_velocity_command(
         vel_yaw_success_rel_threshold=0.25,
         base_height_range=base_height_range,
         init_foot_theta_weights=mdp_module.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS,
+        gait_sampling_profile=gait_sampling_profile,
+        gait_curriculum_iterations=gait_curriculum_iterations,
         ranges=mdp_module.GaitVelocityCommandCfg.Ranges(
             lin_vel_x=(-2.0, 2.0),
             lin_vel_y=(0.0, 0.0),
@@ -181,12 +185,12 @@ def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str
     policy.base_lin_vel = ObsTerm(
         func=base_mdp.base_lin_vel,
         noise=Unoise(n_min=-0.1, n_max=0.1),
-        scale=(2.0, 2.0, 2.0),
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.measured_base_twist[:3],
     )
     policy.base_ang_vel = ObsTerm(
         func=base_mdp.base_ang_vel,
         noise=Unoise(n_min=-0.2, n_max=0.2),
-        scale=(0.25, 0.25, 0.25),
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.measured_base_twist[3:],
     )
     policy.projected_gravity = ObsTerm(
         func=base_mdp.projected_gravity,
@@ -195,7 +199,7 @@ def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str
     policy.velocity_commands = ObsTerm(
         func=mdp_module.desired_base_twist,
         params={"command_name": "base_velocity"},
-        scale=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.desired_base_twist,
     )
     policy.joint_pos = ObsTerm(
         func=base_mdp.joint_pos_rel,
@@ -205,7 +209,7 @@ def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str
     policy.joint_vel = ObsTerm(
         func=base_mdp.joint_vel_rel,
         noise=Unoise(n_min=-1.5, n_max=1.5),
-        scale=0.05,
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.joint_velocity[0],
         params={"asset_cfg": ordered_joint_cfg},
     )
     policy.actions = ObsTerm(func=base_mdp.last_action)
@@ -235,6 +239,10 @@ def configure_rewards(
     foot_clearance_mode: str = "phase_penalty",
     foot_clearance_weight: float = 0.10,
     pitch_scale: float = 0.50,
+    foot_phase_weight: float = 0.30,
+    foot_phase_reduction: str = "sum",
+    joint_target_limit_mode: str = "legacy_clamped",
+    joint_target_limit_weight: float = 0.05,
 ) -> None:
     """Configure the shared symmetric quadruped reward layout."""
     env_cfg.rewards.track_lin_vel_xy_exp = None
@@ -259,13 +267,14 @@ def configure_rewards(
     env_cfg.rewards.cmd = None
     env_cfg.rewards.foot_phase = RewTerm(
         func=mdp_module.foot_phase_penalty,
-        weight=0.30,
+        weight=foot_phase_weight,
         params={
             "command_name": "base_velocity",
             "feet_cfg": feet_cfg,
             "foot_sensor_names": tuple(foot_sensor_names),
             "foot_sensor_body_names": tuple(foot_sensor_body_names),
             "force_scale": 0.005,
+            "reduction": foot_phase_reduction,
         },
     )
     env_cfg.rewards.base_height = RewTerm(
@@ -312,8 +321,12 @@ def configure_rewards(
     env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.10)
     env_cfg.rewards.joint_target_limits = RewTerm(
         func=mdp_module.joint_position_target_limit_penalty,
-        weight=0.05,
-        params={"action_term_name": "joint_pos", "margin_fraction": 0.05},
+        weight=joint_target_limit_weight,
+        params={
+            "action_term_name": "joint_pos",
+            "margin_fraction": 0.05,
+            "mode": joint_target_limit_mode,
+        },
     )
     env_cfg.rewards.sagittal_plane = None
     env_cfg.rewards.straight_line_motion = RewTerm(

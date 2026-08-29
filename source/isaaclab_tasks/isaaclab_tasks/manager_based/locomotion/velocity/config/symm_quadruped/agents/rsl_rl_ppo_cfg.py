@@ -7,7 +7,9 @@
 
 from collections.abc import Callable
 
-from isaaclab_rl.rsl_rl import RslRlSymmetryCfg
+from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_cfg import (
+    TimeReversalSymmetryCfg,
+)
 
 
 def configure_symm_quadruped_ppo(
@@ -29,7 +31,8 @@ def configure_symm_quadruped_ppo(
         cfg: Runner config to mutate.
         experiment_name: RSL-RL experiment directory name.
         data_augmentation_func: Time-reversal data augmentation function.
-        use_data_augmentation: Whether to duplicate mini-batch samples with time-reversed states.
+        use_data_augmentation: Whether to duplicate mini-batch samples with time-reversed states. This legacy
+            compatibility path is deprecated; prefer the filtered ``tr_augmentation`` configuration.
         value_loss_coeff: Weight for the value-function TRS consistency loss.
         mirror_loss_coeff: Weight for the policy mirror loss.
         min_abs_command_velocity: Minimum forward command velocity [m/s] for TRS losses.
@@ -49,7 +52,7 @@ def configure_symm_quadruped_ppo(
         "isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_ppo:TimeReversalPPO"
     )
     cfg.algorithm.entropy_coef = 0.005
-    cfg.algorithm.symmetry_cfg = RslRlSymmetryCfg(
+    cfg.algorithm.symmetry_cfg = TimeReversalSymmetryCfg(
         use_data_augmentation=use_data_augmentation,
         use_mirror_loss=True,
         data_augmentation_func=data_augmentation_func,

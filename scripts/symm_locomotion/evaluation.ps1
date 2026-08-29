@@ -3,6 +3,5 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-Write-Warning "analyze_leg_usage.ps1 is deprecated; use evaluation.ps1 instead."
-& "$PSScriptRoot\evaluation.ps1" --protocol legacy @args
+& "$PSScriptRoot\_run.ps1" "evaluation.py" @args
 exit $LASTEXITCODE

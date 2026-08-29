@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import math
+import re
 import warnings
+import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 import pytest
@@ -450,6 +452,58 @@ def test_joint_position_targets_are_clamped_to_soft_limits():
     assert clipped_fraction.item() == pytest.approx(4.0 / 6.0)
 
 
+def test_requested_joint_targets_are_cached_before_the_execution_clamp():
+    env = SimpleNamespace()
+    action_term = SimpleNamespace(
+        _joint_ids=[0, 1, 2],
+        _offset=torch.tensor([[0.0, 0.5, -1.0]]),
+        _scale=0.25,
+        raw_actions=torch.tensor([[0.0, 4.0, 12.0]]),
+        processed_actions=torch.tensor([[0.0, 1.5, 2.0]]),
+    )
+    env.action_manager = SimpleNamespace(get_term=lambda _: action_term)
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(
+            soft_joint_pos_limits=_tensor_data(torch.tensor([[[-1.0, 1.0], [-1.0, 1.0], [-2.0, 0.0]]]))
+        )
+    )
+    env.scene = scene
+
+    symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv._clamp_processed_joint_position_targets(env)
+
+    assert torch.equal(env._requested_joint_position_targets, torch.tensor([[0.0, 1.5, 2.0]]))
+    assert torch.equal(action_term.processed_actions, torch.tensor([[0.0, 1.0, 0.0]]))
+    assert env._joint_target_clipped_fraction.item() == pytest.approx(2.0 / 3.0)
+
+
+def test_feasible_action_metadata_follows_resolved_joint_ids():
+    env = object.__new__(symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv)
+    env._is_closed = True
+    action_term = SimpleNamespace(
+        _joint_ids=[2, 0],
+        _offset=torch.tensor([[0.25, -0.50]]),
+        _scale=torch.tensor([[0.5, -0.25]]),
+    )
+    env.action_manager = SimpleNamespace(get_term=lambda _: action_term)
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(
+            soft_joint_pos_limits=_tensor_data(torch.tensor([[[-1.0, 1.0], [-2.0, 2.0], [-3.0, 3.0]]]))
+        )
+    )
+    env.scene = scene
+
+    offset, scale, limits = symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv.get_joint_position_action_metadata(env)
+    lower, upper = symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv.get_joint_position_action_feasible_bounds(env)
+
+    assert torch.equal(offset, action_term._offset)
+    assert torch.equal(scale, action_term._scale)
+    assert torch.equal(limits, torch.tensor([[[-3.0, 3.0], [-1.0, 1.0]]]))
+    assert torch.allclose(lower, torch.tensor([[-6.5, -6.0]]))
+    assert torch.allclose(upper, torch.tensor([[5.5, 2.0]]))
+
+
 def test_soft_joint_limit_diagnostics_detect_proximity_and_violation():
     joint_pos = torch.tensor([[0.0, 0.95, 1.10]])
     soft_limits = torch.tensor([[[-1.0, 1.0], [-1.0, 1.0], [-1.0, 1.0]]])
@@ -478,6 +532,7 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
             applied_torque=_tensor_data(torch.ones_like(joint_pos)),
             soft_joint_pos_limits=_tensor_data(soft_limits),
             root_pos_w=_tensor_data(torch.full((3, 3), 2.0)),
+            heading_w=_tensor_data(torch.full((3,), 2.5)),
             root_lin_vel_b=_tensor_data(torch.full((3, 3), 3.0)),
             root_ang_vel_b=_tensor_data(torch.full((3, 3), 4.0)),
             body_lin_vel_w=_tensor_data(torch.full((3, 4, 3), 5.0)),
@@ -502,8 +557,23 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
     env._rollout_foot_sensor_names = foot_sensor_names
     env._rollout_foot_body_ids = [0, 1, 2, 3]
     env.action_manager = SimpleNamespace(get_term=lambda _: joint_term)
+    env.reward_manager = SimpleNamespace(
+        get_term_cfg=lambda name: (
+            SimpleNamespace(params={"reduction": "mean"}, weight=0.4)
+            if name == "foot_phase"
+            else SimpleNamespace(params={"margin_fraction": 0.05}, weight=0.05)
+        )
+    )
+    env._foot_phase_diagnostics = {
+        "raw_sum": torch.tensor([1.0, 2.0, 3.0]),
+        "raw_mean": torch.tensor([0.25, 0.50, 0.75]),
+    }
     command_term = SimpleNamespace(
         command=torch.full((3, 3), 6.0),
+        foot_thetas=torch.full((3, 4), 0.25),
+        gait_periods=torch.full((3,), 0.4),
+        duty_factors=torch.full((3,), 0.6),
+        common_gait_phases=lambda: torch.full((3,), 1.5),
         periodic_force_weights=lambda: torch.full((3, 4), 7.0),
         periodic_speed_weights=lambda: torch.full((3, 4), 8.0),
     )
@@ -534,24 +604,56 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
     assert diagnostics["Diagnostics/reward_clipped_fraction"].item() == pytest.approx(1.0 / 3.0)
     assert diagnostics["Diagnostics/joint_near_limit_fraction"].item() == pytest.approx(1.0 / 6.0)
     assert diagnostics["Diagnostics/joint_target_limit_violation_fraction"].item() == pytest.approx(1.0 / 6.0)
+    assert diagnostics["Diagnostics/requested_target_overflow_fraction"].item() == pytest.approx(1.0 / 6.0)
+    assert diagnostics["Diagnostics/executed_target_clipped_fraction"].item() == 0.0
+    assert diagnostics["Diagnostics/foot_phase_weight"].item() == pytest.approx(0.4)
+    assert diagnostics["Diagnostics/foot_phase_reduction"].item() == 1.0
+    assert diagnostics["Diagnostics/foot_phase_sum_equivalent_weight"].item() == pytest.approx(0.1)
+    assert diagnostics["Diagnostics/foot_phase_per_foot_effective_weight"].item() == pytest.approx(0.1)
+    assert diagnostics["Diagnostics/raw_foot_phase_sum"].item() == pytest.approx(2.0)
+    assert diagnostics["Diagnostics/raw_foot_phase_mean"].item() == pytest.approx(0.5)
+    assert diagnostics["Diagnostics/weighted_foot_phase"].item() == pytest.approx(-0.2)
     assert diagnostics["Diagnostics/straight_line_forward_score"].item() == pytest.approx(0.5)
     assert diagnostics["Diagnostics/foot_clearance_mean_swing_height"].item() == pytest.approx(0.05)
     assert diagnostics["Diagnostics/foot_clearance_mean_shortfall"].item() == pytest.approx(0.03)
     assert torch.equal(env._last_policy_actions, actions)
     assert torch.equal(env._last_joint_position_targets, joint_target)
+    assert torch.equal(env._last_requested_joint_position_targets, joint_target)
     assert torch.equal(env._last_joint_velocities, torch.zeros_like(joint_pos))
     assert torch.equal(env._last_joint_torques, torch.ones_like(joint_pos))
     assert torch.equal(env._last_root_positions_w, torch.full((3, 2), 2.0))
+    assert torch.equal(env._last_root_headings_w, torch.full((3,), 2.5))
     assert torch.equal(env._last_root_lin_velocities_b, torch.full((3, 3), 3.0))
     assert torch.equal(env._last_root_ang_velocities_b, torch.full((3, 3), 4.0))
     assert torch.equal(env._last_base_velocity_commands, torch.full((3, 3), 6.0))
+    assert torch.equal(env._last_foot_thetas, torch.full((3, 4), 0.25))
+    assert torch.equal(env._last_gait_periods, torch.full((3,), 0.4))
+    assert torch.equal(env._last_duty_factors, torch.full((3,), 0.6))
+    assert torch.equal(env._last_common_gait_phases, torch.full((3,), 1.5))
     assert torch.equal(env._last_periodic_force_weights, torch.full((3, 4), 7.0))
     assert torch.equal(env._last_periodic_speed_weights, torch.full((3, 4), 8.0))
     assert torch.equal(env._last_foot_velocities_w, torch.full((3, 4, 3), 5.0))
     assert env._last_foot_normal_forces_w.shape == (3, 4, 3)
     assert torch.equal(env._last_foot_normal_forces_w[0, :, 2], torch.arange(1.0, 5.0))
     assert torch.equal(env._last_foot_ground_reaction_forces_w[0, :, 0], 0.5 * torch.arange(1.0, 5.0))
+    assert env._last_foot_normal_force_is_ground_filtered.tolist() == [True, True, True]
     assert env._last_ground_reaction_force_includes_friction
+
+    def get_cfg_without_target_limit(name):
+        if name == "joint_target_limits":
+            raise ValueError("Reward term 'joint_target_limits' not found.")
+        return SimpleNamespace(params={"reduction": "mean"}, weight=0.4)
+
+    env.reward_manager = SimpleNamespace(get_term_cfg=get_cfg_without_target_limit)
+    diagnostics_without_target_reward = symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv._compute_step_diagnostics(
+        env,
+        actions,
+        torch.tensor([-0.2, 0.0, 0.1]),
+    )
+
+    assert diagnostics_without_target_reward["Diagnostics/requested_target_overflow_fraction"].item() == pytest.approx(
+        1.0 / 6.0
+    )
 
 
 def test_gait_command_uses_fixed_zero_yaw_rate():
@@ -578,6 +680,7 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     assert env_cfg.rewards.alive_bonus.weight == 0.20
     assert env_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
     assert env_cfg.rewards.foot_phase.weight == 0.30
+    assert env_cfg.rewards.foot_phase.params["reduction"] == "sum"
     assert "foot_periodicity" not in env_cfg.rewards.__dict__
     assert env_cfg.rewards.cmd is None
     assert env_cfg.rewards.sagittal_plane is None
@@ -594,6 +697,7 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     assert env_cfg.rewards.termination_penalty.weight == -200.0
     assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_target_limit_penalty
     assert env_cfg.rewards.joint_target_limits.weight == 0.05
+    assert env_cfg.rewards.joint_target_limits.params["mode"] == "legacy_clamped"
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
     assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.20
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
@@ -665,6 +769,12 @@ def test_robot_configs_use_robot_specific_foot_clearance_shaping():
     assert go2_cfg.rewards.foot_phase.func is symm_quadruped.foot_phase_penalty
     assert x1_cfg.rewards.foot_phase.weight == 0.30
     assert go2_cfg.rewards.foot_phase.weight == 0.30
+    assert x1_cfg.rewards.foot_phase.params["reduction"] == "sum"
+    assert go2_cfg.rewards.foot_phase.params["reduction"] == "sum"
+    assert x1_cfg.rewards.joint_target_limits.weight == 0.05
+    assert go2_cfg.rewards.joint_target_limits.weight == 0.05
+    assert x1_cfg.rewards.joint_target_limits.params["mode"] == "legacy_clamped"
+    assert go2_cfg.rewards.joint_target_limits.params["mode"] == "legacy_clamped"
     assert x1_cfg.rewards.hip_action_penalty.weight == 0.10
     assert go2_cfg.rewards.hip_action_penalty.weight == 0.10
     assert x1_cfg.rewards.leg_permutation_symmetry.func is dobot_x1_symm.leg_permutation_symmetry_penalty
@@ -678,6 +788,148 @@ def test_robot_configs_use_robot_specific_foot_clearance_shaping():
     assert go2_cfg.rewards.foot_clearance.weight == 0.15
     assert go2_cfg.rewards.foot_clearance.params["target_height"] == 0.08
     assert go2_cfg.rewards.foot_clearance.params["excess_height_margin"] == 0.03
+
+
+@pytest.mark.parametrize(
+    ("env_cfg_type", "expected_joint_order", "expected_lower", "expected_upper"),
+    (
+        (
+            UnitreeGo2SymmFlatEnvCfg,
+            (
+                "FL_hip_joint",
+                "FL_thigh_joint",
+                "FL_calf_joint",
+                "FR_hip_joint",
+                "FR_thigh_joint",
+                "FR_calf_joint",
+                "RL_hip_joint",
+                "RL_thigh_joint",
+                "RL_calf_joint",
+                "RR_hip_joint",
+                "RR_thigh_joint",
+                "RR_calf_joint",
+            ),
+            (
+                -3.76992,
+                -8.4709,
+                -4.513812,
+                -3.76992,
+                -8.4709,
+                -4.513812,
+                -3.76992,
+                -4.2821,
+                -4.513812,
+                -3.76992,
+                -4.2821,
+                -4.513812,
+            ),
+            (
+                3.76992,
+                9.7505,
+                2.271972,
+                3.76992,
+                9.7505,
+                2.271972,
+                3.76992,
+                13.9393,
+                2.271972,
+                3.76992,
+                13.9393,
+                2.271972,
+            ),
+        ),
+        (
+            DobotX1SymmFlatEnvCfg,
+            (
+                "joint_front_left_abad",
+                "joint_front_left_thigh_pitch",
+                "joint_front_left_calf_pitch",
+                "joint_front_right_abad",
+                "joint_front_right_thigh_pitch",
+                "joint_front_right_calf_pitch",
+                "joint_rear_left_abad",
+                "joint_rear_left_thigh_pitch",
+                "joint_rear_left_calf_pitch",
+                "joint_rear_right_abad",
+                "joint_rear_right_thigh_pitch",
+                "joint_rear_right_calf_pitch",
+            ),
+            (
+                -2.38752,
+                -12.218,
+                -3.9712,
+                -2.38752,
+                -12.218,
+                -3.9712,
+                -2.38752,
+                -6.6316,
+                -14.2448,
+                -2.38752,
+                -6.6316,
+                -14.2448,
+            ),
+            (
+                2.38752,
+                6.6316,
+                14.2448,
+                2.38752,
+                6.6316,
+                14.2448,
+                2.38752,
+                12.218,
+                3.9712,
+                2.38752,
+                12.218,
+                3.9712,
+            ),
+        ),
+    ),
+)
+def test_robot_urdf_limits_resolve_to_expected_per_joint_raw_action_bounds(
+    env_cfg_type,
+    expected_joint_order,
+    expected_lower,
+    expected_upper,
+):
+    cfg = env_cfg_type()
+    joint_order = tuple(cfg.actions.joint_pos.joint_names)
+    assert joint_order == expected_joint_order
+    assert cfg.actions.joint_pos.preserve_order
+    assert cfg.actions.joint_pos.scale == 0.25
+    assert cfg.scene.robot.soft_joint_pos_limit_factor == 0.9
+
+    urdf_root = ET.parse(cfg.scene.robot.spawn.asset_path).getroot()
+    urdf_limits = {
+        joint.attrib["name"]: (float(joint.find("limit").attrib["lower"]), float(joint.find("limit").attrib["upper"]))
+        for joint in urdf_root.findall("joint")
+        if joint.attrib.get("type") == "revolute"
+    }
+    default_joint_positions = []
+    for joint_name in joint_order:
+        matches = [
+            float(value)
+            for name_pattern, value in cfg.scene.robot.init_state.joint_pos.items()
+            if re.fullmatch(name_pattern, joint_name)
+        ]
+        assert len(matches) == 1, f"Expected exactly one default-position match for {joint_name}, received {matches}."
+        default_joint_positions.append(matches[0])
+
+    hard_limits = torch.tensor([[urdf_limits[joint_name] for joint_name in joint_order]])
+    limit_midpoint = hard_limits.mean(dim=-1, keepdim=True)
+    limits = limit_midpoint + cfg.scene.robot.soft_joint_pos_limit_factor * (hard_limits - limit_midpoint)
+    offset = torch.tensor([default_joint_positions])
+    lower, upper = symm_quadruped_env.compute_feasible_raw_action_bounds(
+        offset,
+        cfg.actions.joint_pos.scale,
+        limits,
+    )
+
+    assert lower[0].tolist() == pytest.approx(expected_lower, abs=1.0e-5)
+    assert upper[0].tolist() == pytest.approx(expected_upper, abs=1.0e-5)
+    calf_indices = [2, 5, 8, 11]
+    if env_cfg_type is UnitreeGo2SymmFlatEnvCfg:
+        assert lower[0, calf_indices].tolist() == pytest.approx([-4.513812] * 4, abs=1.0e-5)
+        assert upper[0, calf_indices].tolist() == pytest.approx([2.271972] * 4, abs=1.0e-5)
 
 
 def test_play_configs_enable_ground_filtered_normal_and_friction_forces():
@@ -699,6 +951,8 @@ def test_play_configs_enable_fixed_six_gait_sequence_only_for_playback():
         assert train_command.gait_library_version == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
         assert train_command.init_foot_thetas == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS
         assert train_command.init_foot_theta_weights == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS
+        assert train_command.gait_sampling_profile == symm_quadruped.SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_EQUAL_FAMILY
+        assert train_command.gait_curriculum_iterations == 0
         assert train_cfg.commands.base_velocity.gait_sequence_enabled is False
         assert play_command.gait_library_version == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_PLAY_VERSION
         expected_play_gaits = (
@@ -719,6 +973,101 @@ def test_play_configs_enable_fixed_six_gait_sequence_only_for_playback():
         assert len(play_command.init_foot_thetas) == 6
         assert play_cfg.terminations.time_out is not None
         assert play_cfg.episode_length_s == pytest.approx(30.02)
+
+
+@pytest.mark.parametrize("iteration", (0, 1, 49, 100, 1000))
+def test_gait_sampling_profiles_preserve_partner_weight_equality(iteration):
+    profiles_and_durations = (
+        (symm_quadruped.SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_EQUAL_FAMILY, 0),
+        (symm_quadruped.SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_V1_EQUIVALENT, 0),
+        (symm_quadruped.SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_HALFBOUND_ANNEAL, 100),
+    )
+    for profile, duration in profiles_and_durations:
+        weights = symm_quadruped.resolve_gait_sampling_profile_weights(
+            profile,
+            iteration=iteration,
+            curriculum_iterations=duration,
+        )
+        for row_index, partner_index in enumerate(
+            symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_TIME_REVERSAL_PARTNERS
+        ):
+            assert weights[row_index] == pytest.approx(weights[partner_index])
+
+
+def test_gait_sampling_curriculum_endpoints_and_absolute_iteration_resume():
+    profile = symm_quadruped.SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_HALFBOUND_ANNEAL
+    start = symm_quadruped.resolve_gait_sampling_profile_weights(
+        profile,
+        iteration=0,
+        curriculum_iterations=100,
+    )
+    middle_before_resume = symm_quadruped.resolve_gait_sampling_profile_weights(
+        profile,
+        iteration=37,
+        curriculum_iterations=100,
+    )
+    middle_after_resume = symm_quadruped.resolve_gait_sampling_profile_weights(
+        profile,
+        iteration=37,
+        curriculum_iterations=100,
+    )
+    final = symm_quadruped.resolve_gait_sampling_profile_weights(
+        profile,
+        iteration=100,
+        curriculum_iterations=100,
+    )
+    after_final = symm_quadruped.resolve_gait_sampling_profile_weights(
+        profile,
+        iteration=175,
+        curriculum_iterations=100,
+    )
+
+    assert start == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_V1_EQUIVALENT_WEIGHTS
+    assert middle_before_resume == middle_after_resume
+    assert middle_before_resume[4] == pytest.approx(0.37)
+    assert middle_before_resume[2] == pytest.approx(1.63)
+    assert final == symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_WEIGHTS
+    assert after_final == final
+    assert all(weight > 0.0 for weight in final)
+
+
+def test_gait_command_curriculum_publishes_row_and_family_probabilities():
+    command_term = object.__new__(symm_quadruped.GaitVelocityCommand)
+    command_term._env = SimpleNamespace(device="cpu", num_envs=3)
+    command_term.cfg = SimpleNamespace(
+        gait_sampling_profile=symm_quadruped.SYMM_QUADRUPED_GAIT_SAMPLING_PROFILE_HALFBOUND_ANNEAL,
+        gait_library_version=symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION,
+        gait_curriculum_iterations=100,
+    )
+    command_term.init_foot_thetas = torch.tensor(symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS)
+    command_term._gait_row_metric_names = symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES
+    command_term._gait_row_metric_families = symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES
+    command_term.metrics = {
+        **{f"gait_row_probability_{row_name}": torch.zeros(3) for row_name in command_term._gait_row_metric_names},
+        **{
+            f"gait_family_probability_{family_name}": torch.zeros(3)
+            for family_name in set(command_term._gait_row_metric_families)
+        },
+    }
+    command_term.foot_theta_sampling_weights = None
+    command_term._training_iteration = 0
+
+    command_term.set_training_iteration(50)
+
+    expected_weights = torch.tensor((4.0, 4.0, 1.5, 1.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0))
+    expected_probabilities = expected_weights / expected_weights.sum()
+    assert command_term.training_iteration == 50
+    assert torch.allclose(command_term.foot_theta_sampling_weights, expected_probabilities)
+    for row_index, row_name in enumerate(command_term._gait_row_metric_names):
+        assert torch.equal(
+            command_term.metrics[f"gait_row_probability_{row_name}"],
+            torch.full((3,), expected_probabilities[row_index]),
+        )
+    for family_name in ("trot", "bound", "half_bound", "gallop"):
+        assert torch.equal(
+            command_term.metrics[f"gait_family_probability_{family_name}"],
+            torch.full((3,), 0.25),
+        )
 
 
 def test_robot_configs_use_requested_pitch_and_height_postures():
@@ -1110,6 +1459,61 @@ def test_joint_position_target_limit_penalty_activates_only_inside_limit_margin(
     penalty = symm_quadruped.joint_position_target_limit_penalty(env, margin_fraction=0.10)
 
     assert penalty.item() == pytest.approx(-(0.0 + 0.25 + 1.0) / 3.0)
+
+
+def test_foot_phase_mean_and_sum_coefficients_have_explicit_equivalent_semantics():
+    per_foot_penalties = torch.tensor(
+        [
+            [0.0, 0.25, 0.50, 1.0],
+            [0.2, 0.4, 0.6, 0.8],
+        ]
+    )
+
+    weighted_mean = -0.4 * symm_quadruped.reduce_foot_phase_penalties(per_foot_penalties, reduction="mean")
+    weighted_sum = -0.1 * symm_quadruped.reduce_foot_phase_penalties(per_foot_penalties, reduction="sum")
+
+    assert torch.equal(weighted_mean, weighted_sum)
+
+
+def test_requested_target_overflow_penalty_uses_preclamp_request_and_is_uncapped():
+    limits = torch.tensor([[[-1.0, 1.0], [-1.0, 1.0], [-1.0, 1.0]]])
+    requested_targets = torch.tensor([[0.0, 1.0, 5.0]])
+    executed_targets = requested_targets.clamp(-1.0, 1.0)
+    action_term = SimpleNamespace(
+        _joint_ids=[0, 1, 2],
+        _offset=0.0,
+        _scale=1.0,
+        raw_actions=requested_targets,
+        processed_actions=executed_targets,
+    )
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(soft_joint_pos_limits=_tensor_data(limits)))
+    env = SimpleNamespace(
+        scene=scene,
+        action_manager=SimpleNamespace(get_term=lambda _: action_term),
+        _requested_joint_position_targets=requested_targets,
+    )
+
+    normalized_overflow = symm_quadruped.requested_joint_position_target_overflow(
+        requested_targets,
+        limits,
+        margin_fraction=0.1,
+    )
+    requested_penalty = symm_quadruped.joint_position_target_limit_penalty(
+        env,
+        margin_fraction=0.1,
+        mode="requested_overflow",
+    )
+    legacy_penalty = symm_quadruped.joint_position_target_limit_penalty(
+        env,
+        margin_fraction=0.1,
+        mode="legacy_clamped",
+    )
+
+    assert normalized_overflow.tolist()[0] == pytest.approx([0.0, 0.1, 2.1])
+    assert normalized_overflow[0, 2].item() > 1.0
+    assert requested_penalty.item() == pytest.approx(-(0.0 + 0.005 + 1.6) / 3.0)
+    assert legacy_penalty.item() == pytest.approx(-(0.0 + 1.0 + 1.0) / 3.0)
 
 
 def test_sagittal_plane_penalty_allows_gait_sway_and_rejects_low_posture():

@@ -46,19 +46,21 @@ ROBOT_TITLES = {
     "go2": "Unitree Go2",
     "x1": "Dobot X1",
 }
-LEGACY_RUN_NAMES = {
-    "2026-07-07_00-11-14_no_trs",
-    "2026-07-11_02-59-13_no_trs",
-    "2026-07-13_01-30-42_more_trs_lr1e4_fixed_zero_lateral",
-    "2026-07-13_01-31-40_more_trs_lr1e4_fixed_zero_lateral",
+PHASE_V2_RUN_NAMES = {
+    "2026-07-31_22-48-10_go2_no_trs_20k_512",
+    "2026-07-31_22-48-38_go2_trs_m0p2_v0p1_w500_20k_512",
+    "2026-08-01_11-09-46_go2_trs_m0p1_v0p05_w500_minv0_20k_512",
+    "2026-08-02_10-28-45_x1_trs_m0p2_v0p10_w500_minv0_20k_512",
+    "2026-08-02_10-35-06_x1_no_trs_20k_512",
+    "2026-08-02_21-02-49_x1_trs_m0p1_v0p05_w500_minv0_20k_512",
 }
-UPDATED_RUN_NAMES = {
-    "2026-07-19_10-32-57_go2_no_trs_pitch0p50_pterm1p20",
-    "2026-07-19_17-37-55_go2_trs_m0p1_v0p05_w500_minv0_pitch0p50_pterm1p20",
-    "2026-07-20_16-23-32_go2_trs_m0p20_v0p10_w500",
-    "2026-07-19_10-33-04_x1_no_trs_pitch0p35",
-    "2026-07-19_17-46-27_x1_trs_m0p1_v0p05_w500_pitch0p35_pterm0p70",
-    "2026-07-20_16-24-19_x1_trs_m0p20_v0p10_w500",
+GAIT_V2_RUN_NAMES = {
+    "2026-08-20_21-04-16_go2_72d_no_trs_gait_trclosed_v2",
+    "2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2",
+    "2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
+    "2026-08-21_10-22-39_go2_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
+    "2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
+    "2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
 }
 CONDITION_COLORS = {
     (0.0, 0.0): "#202124",
@@ -144,22 +146,23 @@ def _parse_yaml_scalar(path: Path, key: str) -> Any:
 
 
 def _generation(run_name: str) -> str:
-    """Return the documented observation generation for a curated run."""
-    if run_name in LEGACY_RUN_NAMES:
-        return "60D"
-    if run_name in UPDATED_RUN_NAMES:
-        return "72D"
+    """Return the documented training cohort for a curated run."""
+    if run_name in PHASE_V2_RUN_NAMES:
+        return "phase-v2"
+    if run_name in GAIT_V2_RUN_NAMES:
+        return "gait-v2"
     raise ValueError(
-        f"Curated run {run_name!r} is not classified as 60D or 72D. Update the generation inventory before plotting it."
+        f"Curated run {run_name!r} is not classified as phase-v2 or gait-v2. "
+        "Update the cohort inventory before plotting it."
     )
 
 
 def discover_curated_runs() -> list[CuratedRun]:
-    """Discover the fixed legacy 60D/72D comparison inventory."""
+    """Discover the matched phase-v2/gait-v2 comparison inventory."""
     runs = []
     for robot, run_root in ROBOT_RUN_DIRS.items():
         for run_path in sorted(path for path in run_root.iterdir() if path.is_dir()):
-            if run_path.name not in LEGACY_RUN_NAMES | UPDATED_RUN_NAMES:
+            if run_path.name not in PHASE_V2_RUN_NAMES | GAIT_V2_RUN_NAMES:
                 continue
             event_paths = sorted(run_path.glob("events.out.tfevents.*"))
             agent_path = run_path / "params/agent.yaml"
@@ -189,8 +192,8 @@ def discover_curated_runs() -> list[CuratedRun]:
             )
     for robot in ROBOT_RUN_DIRS:
         robot_runs = [run for run in runs if run.robot == robot]
-        if len(robot_runs) != 5:
-            raise ValueError(f"Expected five curated TensorBoard runs for {robot}, found {len(robot_runs)}.")
+        if len(robot_runs) != 6:
+            raise ValueError(f"Expected six curated TensorBoard runs for {robot}, found {len(robot_runs)}.")
     return runs
 
 
@@ -233,9 +236,9 @@ def load_curve(run: CuratedRun) -> CuratedCurve:
 
 
 def _curve_sort_key(curve: CuratedCurve) -> tuple[int, float, float]:
-    """Sort curves by generation and then TRS coefficients."""
+    """Sort curves by cohort and then TRS coefficients."""
     return (
-        0 if curve.run.generation == "60D" else 1,
+        0 if curve.run.generation == "phase-v2" else 1,
         curve.run.mirror_coeff,
         curve.run.value_coeff,
     )
@@ -264,7 +267,7 @@ def _draw_legend(root: ET.Element, curves: Sequence[CuratedCurve]) -> None:
             "stroke-width": "3.0",
             "stroke-linecap": "round",
         }
-        if curve.run.generation == "60D":
+        if curve.run.generation == "phase-v2":
             attributes["stroke-dasharray"] = "9 5"
         ET.SubElement(root, _svg_tag("line"), attributes)
         _add_text(root, item_x + 59.0, item_y + 5.0, curve.run.label, size=12)
@@ -273,8 +276,8 @@ def _draw_legend(root: ET.Element, curves: Sequence[CuratedCurve]) -> None:
 def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: Path) -> None:
     """Export one reward-versus-iteration SVG for a robot."""
     robot_curves = sorted((curve for curve in curves if curve.run.robot == robot), key=_curve_sort_key)
-    if len(robot_curves) != 5:
-        raise ValueError(f"Expected five curves for {robot}, found {len(robot_curves)}.")
+    if len(robot_curves) != 6:
+        raise ValueError(f"Expected six curves for {robot}, found {len(robot_curves)}.")
 
     canvas_width = 1400.0
     canvas_height = 825.0
@@ -304,8 +307,8 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
     title.text = f"{ROBOT_TITLES[robot]} curated TensorBoard reward by training iteration"
     description = ET.SubElement(root, _svg_tag("desc"), {"id": "plot-description"})
     description.text = (
-        "Five mean-reward curves from runs physically archived under good_runs. "
-        "Dashed lines are the historical 60D generation and solid lines are the 72D generation."
+        "Six mean-reward curves from runs physically archived under good_runs. "
+        "Dashed lines are the phase-v2 cohort and solid lines are the gait-v2 cohort."
     )
     ET.SubElement(
         root,
@@ -347,7 +350,7 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
         root,
         canvas_width / 2.0,
         98.0,
-        "Reward definitions changed between 60D (dashed) and 72D (solid); compare within generation.",
+        "TRS doses and budgets are matched; gait and reward definitions differ, so compare within each cohort.",
         size=12,
         anchor="middle",
         fill="#5F6368",
@@ -400,41 +403,6 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
             fill="#5F6368",
         )
 
-    legacy_budget_x = plot_left + 10_000.0 / x_max * plot_width
-    ET.SubElement(
-        root,
-        _svg_tag("line"),
-        {
-            "x1": f"{legacy_budget_x:.2f}",
-            "x2": f"{legacy_budget_x:.2f}",
-            "y1": f"{plot_top:.2f}",
-            "y2": f"{plot_top + plot_height:.2f}",
-            "stroke": "#7A7A7A",
-            "stroke-width": "1.2",
-            "stroke-dasharray": "4 4",
-        },
-    )
-    ET.SubElement(
-        root,
-        _svg_tag("rect"),
-        {
-            "x": f"{legacy_budget_x + 5.0:.2f}",
-            "y": f"{plot_top + 6.0:.2f}",
-            "width": "122",
-            "height": "19",
-            "fill": "#FFFFFF",
-            "fill-opacity": "0.88",
-        },
-    )
-    _add_text(
-        root,
-        legacy_budget_x + 10.0,
-        plot_top + 20.0,
-        "60D budget ends",
-        size=11,
-        fill="#5F6368",
-    )
-
     for attributes in (
         {
             "x1": plot_left,
@@ -481,7 +449,7 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
             "stroke-linecap": "round",
             "opacity": "0.92",
         }
-        if curve.run.generation == "60D":
+        if curve.run.generation == "phase-v2":
             attributes["stroke-dasharray"] = "9 5"
         ET.SubElement(curve_group, _svg_tag("polyline"), attributes)
 

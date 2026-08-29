@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "cohort_id": "x1_confirmatory_cohort",
+  "robot": "x1",
+  "cohort_kind": "prospective_confirmatory",
+  "statistical_claim_status": "planned_no_runs_registered",
+  "selection_basis": "protocol_facts_only",
+  "selection_policy": "Register every prospectively assigned seed that meets the frozen protocol, including failed and unfavorable outcomes.",
+  "protocol": {
+    "required": {
+      "reward_profile": "x1_confirmatory_v4_defaults_preserved",
+      "gait_library": "time_reversal_closed_v2",
+      "gait_sampling_profile": "trclosed_v2_equal_family",
+      "observation_dim": 72,
+      "action_dim": 12,
+      "training_budget.max_iterations": 20000,
+      "training_budget.num_envs": 512,
+      "training_budget.num_steps_per_env": 24,
+      "initialization": "fresh_independent_seed",
+      "evaluation_protocol": "light_v2_and_full_v3_with_paired_tr_phase_v1",
+      "checkpoint_status.state": "complete",
+      "checkpoint_status.final_iteration": 19999
+    },
+    "allowed": {},
+    "required_present": [
+      "code_hashes.archived_git_commit",
+      "code_hashes.source_snapshot_sha256",
+      "code_hashes.agent_config_sha256",
+      "code_hashes.env_config_sha256",
+      "checkpoint_status.sha256"
+    ]
+  },
+  "common_facts": {
+    "reward_profile": "x1_confirmatory_v4_defaults_preserved",
+    "gait_library": "time_reversal_closed_v2",
+    "gait_sampling_profile": "trclosed_v2_equal_family",
+    "observation_dim": 72,
+    "action_dim": 12,
+    "training_budget": {
+      "max_iterations": 20000,
+      "num_envs": 512,
+      "num_steps_per_env": 24,
+      "transitions": 245760000
+    },
+    "initialization": "fresh_independent_seed",
+    "evaluation_protocol": "light_v2_and_full_v3_with_paired_tr_phase_v1"
+  },
+  "runs": []
+}

@@ -176,6 +176,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_clearance_height_scale=0.03,
             foot_clearance_mode="tracking_reward",
             foot_clearance_weight=0.15,
+            joint_target_limit_weight=0.05,
         )
 
     def _configure_go2_symm_terminations(self) -> None:

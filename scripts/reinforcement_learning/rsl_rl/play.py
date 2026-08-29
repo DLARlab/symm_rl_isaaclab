@@ -105,6 +105,57 @@ sys.argv = [sys.argv[0]] + remaining_args
 installed_version = metadata.version("rsl-rl-lib")
 
 
+def _inference_load_cfg(
+    runner_class_name: str,
+    rsl_rl_version: str,
+    *,
+    load_critic: bool = False,
+) -> dict[str, bool] | None:
+    """Return the supported playback checkpoint selection for one runner."""
+    if runner_class_name not in {"OnPolicyRunner", "DistillationRunner"}:
+        return None
+    if runner_class_name == "DistillationRunner" and load_critic:
+        raise ValueError("DistillationRunner checkpoints do not provide the critic required by paired capture.")
+    if version.parse(rsl_rl_version) < version.parse("4.0.0"):
+        return None
+    if runner_class_name == "OnPolicyRunner":
+        return {
+            "actor": True,
+            "critic": load_critic,
+            "optimizer": False,
+            "iteration": False,
+            "environment_iteration": True,
+            "rnd": False,
+            "augmentation": False,
+        }
+    return {
+        "student": True,
+        "teacher": False,
+        "optimizer": False,
+        "iteration": False,
+    }
+
+
+def _load_runner_checkpoint(
+    runner,
+    checkpoint_path: str,
+    runner_class_name: str,
+    rsl_rl_version: str,
+    *,
+    load_critic: bool = False,
+) -> None:
+    """Load a checkpoint without requesting options unsupported by older RSL-RL."""
+    load_cfg = _inference_load_cfg(
+        runner_class_name,
+        rsl_rl_version,
+        load_critic=load_critic,
+    )
+    if load_cfg is None:
+        runner.load(checkpoint_path)
+    else:
+        runner.load(checkpoint_path, load_cfg=load_cfg)
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -180,7 +231,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # do not interfere with the runner's internal initialization.
         if args_cli.deterministic:
             configure_seed(env_cfg.seed, True)
-        runner.load(resume_path)
+        _load_runner_checkpoint(runner, resume_path, agent_cfg.class_name, installed_version)
 
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
