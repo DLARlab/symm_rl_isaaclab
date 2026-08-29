@@ -374,8 +374,8 @@ for example `logs/rsl_rl/unitree_go2_symm_flat/`. To play a curated
 `good_runs` checkpoint, pass the checkpoint path directly:
 
 ```powershell
-.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-07-07_00-11-14_no_trs\model_9999.pt
-.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs\dobot_x1_symm_flat\2026-07-11_02-59-13_no_trs\model_9999.pt
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-07-31_22-48-10_go2_no_trs_20k_512\model_19999.pt
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs\dobot_x1_symm_flat\2026-08-02_10-35-06_x1_no_trs_20k_512\model_19999.pt
 ```
 
 Record videos:

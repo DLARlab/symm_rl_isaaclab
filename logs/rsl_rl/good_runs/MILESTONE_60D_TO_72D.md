@@ -2,6 +2,10 @@
 
 Date: 2026-07-21
 
+Archive status: the ten policies documented here are retained as a historical
+record but are no longer part of the active `good_runs` branch tree. Their last
+complete branch snapshot is commit `eb523deb0da5793209352cc88a3b51058c4af99f`.
+
 This document records the transition from the first two curated 60D policies
 for each robot to the updated 72D sagittal-motion controller. It also records
 the no/low/high time-reversal-symmetry (TRS) comparison and the procedure for
@@ -17,27 +21,27 @@ coefficients increased.
 ## Archived runs
 
 The "first two" runs below mean the two chronologically oldest directories
-currently curated for each robot.
+curated for each robot when this milestone was recorded.
 
 ### Unitree Go2
 
 | Structure | TRS level | Mirror/value | Run | Checkpoint |
 | --- | --- | --- | --- | --- |
-| 60D | none | `0 / 0` | [`2026-07-07_00-11-14_no_trs`](unitree_go2_symm_flat/2026-07-07_00-11-14_no_trs/) | `model_9999.pt` |
-| 60D | more | `0.10 / 0.05` | [`2026-07-13_01-30-42_more_trs_lr1e4_fixed_zero_lateral`](unitree_go2_symm_flat/2026-07-13_01-30-42_more_trs_lr1e4_fixed_zero_lateral/) | `model_9999.pt` |
-| 72D | none | `0 / 0` | [`2026-07-19_10-32-57_go2_no_trs_pitch0p50_pterm1p20`](unitree_go2_symm_flat/2026-07-19_10-32-57_go2_no_trs_pitch0p50_pterm1p20/) | `model_19999.pt` |
-| 72D | low | `0.10 / 0.05` | [`2026-07-19_17-37-55_go2_trs_m0p1_v0p05_w500_minv0_pitch0p50_pterm1p20`](unitree_go2_symm_flat/2026-07-19_17-37-55_go2_trs_m0p1_v0p05_w500_minv0_pitch0p50_pterm1p20/) | `model_19999.pt` |
-| 72D | high | `0.20 / 0.10` | [`2026-07-20_16-23-32_go2_trs_m0p20_v0p10_w500`](unitree_go2_symm_flat/2026-07-20_16-23-32_go2_trs_m0p20_v0p10_w500/) | `model_19999.pt` |
+| 60D | none | `0 / 0` | `2026-07-07_00-11-14_no_trs` | `model_9999.pt` |
+| 60D | more | `0.10 / 0.05` | `2026-07-13_01-30-42_more_trs_lr1e4_fixed_zero_lateral` | `model_9999.pt` |
+| 72D | none | `0 / 0` | `2026-07-19_10-32-57_go2_no_trs_pitch0p50_pterm1p20` | `model_19999.pt` |
+| 72D | low | `0.10 / 0.05` | `2026-07-19_17-37-55_go2_trs_m0p1_v0p05_w500_minv0_pitch0p50_pterm1p20` | `model_19999.pt` |
+| 72D | high | `0.20 / 0.10` | `2026-07-20_16-23-32_go2_trs_m0p20_v0p10_w500` | `model_19999.pt` |
 
 ### Dobot X1
 
 | Structure | TRS level | Mirror/value | Run | Checkpoint |
 | --- | --- | --- | --- | --- |
-| 60D | none | `0 / 0` | [`2026-07-11_02-59-13_no_trs`](dobot_x1_symm_flat/2026-07-11_02-59-13_no_trs/) | `model_9999.pt` |
-| 60D | more | `0.10 / 0.05` | [`2026-07-13_01-31-40_more_trs_lr1e4_fixed_zero_lateral`](dobot_x1_symm_flat/2026-07-13_01-31-40_more_trs_lr1e4_fixed_zero_lateral/) | `model_9999.pt` |
-| 72D | none | `0 / 0` | [`2026-07-19_10-33-04_x1_no_trs_pitch0p35`](dobot_x1_symm_flat/2026-07-19_10-33-04_x1_no_trs_pitch0p35/) | `model_19999.pt` |
-| 72D | low | `0.10 / 0.05` | [`2026-07-19_17-46-27_x1_trs_m0p1_v0p05_w500_pitch0p35_pterm0p70`](dobot_x1_symm_flat/2026-07-19_17-46-27_x1_trs_m0p1_v0p05_w500_pitch0p35_pterm0p70/) | `model_19999.pt` |
-| 72D | high | `0.20 / 0.10` | [`2026-07-20_16-24-19_x1_trs_m0p20_v0p10_w500`](dobot_x1_symm_flat/2026-07-20_16-24-19_x1_trs_m0p20_v0p10_w500/) | `model_19999.pt` |
+| 60D | none | `0 / 0` | `2026-07-11_02-59-13_no_trs` | `model_9999.pt` |
+| 60D | more | `0.10 / 0.05` | `2026-07-13_01-31-40_more_trs_lr1e4_fixed_zero_lateral` | `model_9999.pt` |
+| 72D | none | `0 / 0` | `2026-07-19_10-33-04_x1_no_trs_pitch0p35` | `model_19999.pt` |
+| 72D | low | `0.10 / 0.05` | `2026-07-19_17-46-27_x1_trs_m0p1_v0p05_w500_pitch0p35_pterm0p70` | `model_19999.pt` |
+| 72D | high | `0.20 / 0.10` | `2026-07-20_16-24-19_x1_trs_m0p20_v0p10_w500` | `model_19999.pt` |
 
 ## Observation change
 
@@ -254,10 +258,10 @@ of resetting the active checkout:
 git worktree add ..\symm_rl_isaaclab_60d b61d36a9b8f38bf464d8a767732f7041c5fcacaf
 ```
 
-Use the absolute checkpoint path from this curated directory when playing an
-old policy in that worktree. The archived `params/env.yaml` and
-`params/agent.yaml` are the authority for restoring configuration values. They
-are resolved snapshots, not files that should be copied over the current
+Check out the historical snapshot named above and use its absolute checkpoint
+path when playing an old policy in that worktree. The archived `params/env.yaml`
+and `params/agent.yaml` are the authority for restoring configuration values.
+They are resolved snapshots, not files that should be copied over the current
 Python configuration modules.
 
 To undo this entire milestone later while retaining Git history, create a new
