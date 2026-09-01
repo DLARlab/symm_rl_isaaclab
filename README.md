@@ -9,7 +9,8 @@ uses one shared symmetric-quadruped task layer for multiple robots:
 - Unitree Go2 symmetric flat locomotion.
 - Dobot X1 symmetric flat locomotion.
 - Time-reversal symmetry regularization for RSL-RL PPO.
-- Shared train, play, record, ablation, compare, and TensorBoard launchers.
+- Shared train, play, record, evaluation, gait-closure comparison, ablation,
+  recent-run listing, and TensorBoard launchers.
 
 The goal of the structure is to make Go2 and X1 consistent now, while keeping
 the path open for more quadruped robots later.
@@ -146,8 +147,10 @@ scripts/symm_locomotion/
   train.py/sh/ps1
   play.py/sh/ps1
   record.py/sh/ps1
+  evaluation.py/sh/ps1
+  comparison.py/sh/ps1
   ablation.py/sh/ps1
-  compare.py/sh/ps1
+  compare.py/sh/ps1  # deprecated compatibility launchers
   tensorboard.py/sh/ps1
 ```
 
@@ -163,7 +166,7 @@ Windows PowerShell:
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
-.\scripts\symm_locomotion\compare.ps1 --robots go2 x1
+.\scripts\symm_locomotion\symm_locomotion.ps1 compare --robots go2 x1
 .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
 ```
 
@@ -175,7 +178,7 @@ bash scripts/symm_locomotion/train.sh --robot x1 --iterations 20000 --num-envs 5
 bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
-bash scripts/symm_locomotion/compare.sh --robots go2 x1
+bash scripts/symm_locomotion/symm_locomotion.sh compare --robots go2 x1
 bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
 ```
 
@@ -374,8 +377,8 @@ for example `logs/rsl_rl/unitree_go2_symm_flat/`. To play a curated
 `good_runs` checkpoint, pass the checkpoint path directly:
 
 ```powershell
-.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-07-31_22-48-10_go2_no_trs_20k_512\model_19999.pt
-.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs\dobot_x1_symm_flat\2026-08-02_10-35-06_x1_no_trs_20k_512\model_19999.pt
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs\dobot_x1_symm_flat\2026-08-25_06-08-02_notrs_x1def_s42\model_19999.pt
 ```
 
 Record videos:
@@ -434,17 +437,19 @@ logs/rsl_rl/dobot_x1_symm_flat/
 ```
 
 Selected backed-up runs are copied under `logs/rsl_rl/good_runs/`. See the
-[curated-run index](logs/rsl_rl/good_runs/README.md) and the
-[60D-to-72D milestone](logs/rsl_rl/good_runs/MILESTONE_60D_TO_72D.md) for the
-original controller comparison and restoration procedure. The
-[Phase Mapping V2 milestone](logs/rsl_rl/good_runs/MILESTONE_PHASE_MAPPING_V2.md)
-documents the corrected gait/TR semantics and matched Go2/X1 studies.
-The
-[leg-permutation fix and gait-family V2 milestone](logs/rsl_rl/good_runs/MILESTONE_LEG_PERMUTATION_FIX_GAIT_FAMILY_V2.md)
-records the fixed 10-gait by 6-velocity leg-usage grid, the latest X1 and Go2
-learning comparisons, and the archived run log. X1 has a clear observed
-`m0.1/v0.05` winner; Go2 TRS reward remains below no TRS and still requires
-coefficient/schedule improvement while preserving leg-usage gains.
+[curated-run index](logs/rsl_rl/good_runs/README.md) and the four chronological
+milestones:
+
+1. [60D to 72D](logs/rsl_rl/good_runs/MILESTONE_1_60D_TO_72D.md)
+2. [Phase Mapping V2 and the leg-permutation fix](logs/rsl_rl/good_runs/MILESTONE_2_PHASE_MAPPING_V2_AND_LEG_PERMUTATION_FIX.md)
+3. [Gait-family V2](logs/rsl_rl/good_runs/MILESTONE_3_GAIT_FAMILY_V2.md)
+4. [Gait-closure parameter V4](logs/rsl_rl/good_runs/MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md)
+
+Milestone 4 records the current five-policy cohort for each robot. The Go2
+screen recovers the Milestone 3 reward deficit for selected TRS settings while
+retaining useful leg-usage tradeoffs. Results remain single-seed,
+configuration-specific checkpoint comparisons rather than method-level causal
+claims.
 
 Leave routine training outputs in the robot-specific experiment directories
 unless a run is intentionally curated and copied into `good_runs`.
@@ -452,7 +457,7 @@ unless a run is intentionally curated and copied into `good_runs`.
 Compare recent runs:
 
 ```powershell
-.\scripts\symm_locomotion\compare.ps1 --robots go2 x1 --limit 5
+.\scripts\symm_locomotion\symm_locomotion.ps1 compare --robots go2 x1 --limit 5
 ```
 
 Open TensorBoard:
@@ -548,10 +553,10 @@ When changing shared logic:
 Lightweight checks:
 
 ```powershell
-.\isaaclab.bat -p -m py_compile scripts\symm_locomotion\symm_cli.py scripts\symm_locomotion\train.py scripts\symm_locomotion\play.py scripts\symm_locomotion\record.py scripts\symm_locomotion\ablation.py scripts\symm_locomotion\compare.py scripts\symm_locomotion\tensorboard.py
+.\isaaclab.bat -p -m py_compile scripts\symm_locomotion\symm_cli.py scripts\symm_locomotion\train.py scripts\symm_locomotion\play.py scripts\symm_locomotion\record.py scripts\symm_locomotion\evaluation.py scripts\symm_locomotion\comparison.py scripts\symm_locomotion\ablation.py scripts\symm_locomotion\tensorboard.py
 .\isaaclab.bat -p scripts\symm_locomotion\train.py --robot go2 --smoke --dry-run --no-conda-run
 .\isaaclab.bat -p scripts\symm_locomotion\train.py --robot x1 --smoke --dry-run --no-conda-run
-.\isaaclab.bat -p scripts\symm_locomotion\compare.py --robots go2 x1 --limit 1 --dry-run --no-conda-run
+.\isaaclab.bat -p scripts\symm_locomotion\symm_cli.py compare --robots go2 x1 --limit 1 --dry-run --no-conda-run
 ```
 
 Conda/IsaacLab tests:

@@ -1,0 +1,255 @@
+{
+  "action_dimension": 12,
+  "checkpoint_status": "pending",
+  "code_and_source_hashes": {
+    "dirty_tree_diff_sha256": "2494c04444b62decee904d4d47be6ff03ecc4afb6369ac1e68e81008466a9945",
+    "repo_commit": "eb523deb0da5793209352cc88a3b51058c4af99f"
+  },
+  "direct_launch": {
+    "argv": [
+      ".\\scripts\\symm_locomotion\\train.ps1",
+      "--robot",
+      "go2",
+      "--num-envs",
+      "512",
+      "--iterations",
+      "20000",
+      "--run-name",
+      "d5_go2_recover_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "--seed",
+      "43",
+      "--no-trs",
+      "--tr-policy-coef",
+      "0.0",
+      "--tr-value-coef",
+      "0.0",
+      "--tr-warmup-iterations",
+      "500",
+      "--tr-rampup-iterations",
+      "1000",
+      "--tr-ramp-shape",
+      "linear",
+      "--tr-min-abs-cmd-vel",
+      "0.0",
+      "--foot-phase-weight",
+      "0.3",
+      "--foot-phase-reduction",
+      "sum",
+      "--joint-target-limit-mode",
+      "requested_overflow",
+      "--joint-target-limit-weight",
+      "0.2",
+      "--actor-mean-bound-mode",
+      "per_joint_feasible",
+      "--tr-policy-output-space",
+      "normalized_requested_joint_target",
+      "--gait-sampling-profile",
+      "trclosed_v2_equal_family",
+      "--gait-curriculum-iterations",
+      "0",
+      "--expected-branch",
+      "72d-symm-v4-integration",
+      "--no-conda-run",
+      "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false",
+      "agent.algorithm.symmetry_cfg.actor_mean_feasible_margin_fraction=0.0"
+    ],
+    "interface": ".\\scripts\\symm_locomotion\\train.ps1",
+    "resolved_runtime_argv_without_context": [
+      "train",
+      "--rl_library",
+      "rsl_rl",
+      "--task",
+      "Isaac-Velocity-Flat-Unitree-Go2-Symm-v0",
+      "--num_envs",
+      "512",
+      "--max_iterations",
+      "20000",
+      "--run_name",
+      "d5_go2_recover_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "--seed",
+      "43",
+      "agent.algorithm.symmetry_cfg.use_data_augmentation=False",
+      "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false",
+      "agent.algorithm.symmetry_cfg.use_mirror_loss=False",
+      "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.0",
+      "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0",
+      "agent.algorithm.symmetry_cfg.warmup_iterations=500",
+      "agent.algorithm.symmetry_cfg.rampup_iterations=1000",
+      "agent.algorithm.symmetry_cfg.ramp_shape=linear",
+      "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0",
+      "env.rewards.foot_phase.weight=0.3",
+      "env.rewards.foot_phase.params.reduction=sum",
+      "env.rewards.joint_target_limits.params.mode=requested_overflow",
+      "agent.algorithm.symmetry_cfg.actor_mean_bound_mode=per_joint_feasible",
+      "agent.algorithm.symmetry_cfg.tr_policy_output_space=normalized_requested_joint_target",
+      "env.commands.base_velocity.gait_sampling_profile=trclosed_v2_equal_family",
+      "env.commands.base_velocity.gait_curriculum_iterations=0",
+      "env.rewards.joint_target_limits.weight=0.2",
+      "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false",
+      "agent.algorithm.symmetry_cfg.actor_mean_feasible_margin_fraction=0.0"
+    ],
+    "robot": "go2",
+    "run_name": "d5_go2_recover_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+    "schema_version": 1
+  },
+  "eligibility_is_result_independent": true,
+  "eligibility_status": "incomplete",
+  "evaluation_protocol": null,
+  "gait_library": {
+    "add_noise_period": true,
+    "add_noise_theta": true,
+    "asset_name": "robot",
+    "base_height_range": [
+      0.35,
+      0.45
+    ],
+    "calculate_from_sampling_curve": true,
+    "class_type": "isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped:GaitVelocityCommand",
+    "cmd_kind": null,
+    "debug_vis": false,
+    "duty_factor": 0.45,
+    "element_names": null,
+    "gait_curriculum_iterations": 0,
+    "gait_library_version": "time_reversal_closed_v2",
+    "gait_period": 0.45,
+    "gait_sampling_profile": "trclosed_v2_equal_family",
+    "gait_sequence_duration_s": 5.0,
+    "gait_sequence_enabled": false,
+    "heading_ang_vel_clip": [
+      -1.0,
+      1.0
+    ],
+    "heading_command": false,
+    "heading_control_stiffness": 0.5,
+    "init_foot_theta_weights": [
+      4.0,
+      4.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "init_foot_thetas": [
+      [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ]
+    ],
+    "kappa": 16.0,
+    "min_xy_command_norm": 0.0,
+    "noise_level_theta": 2,
+    "noise_scale_theta": 0.001,
+    "phase_mapping_version": "same_gait_backward_duty_aware_integrated_reward_boundary_v4",
+    "ranges": {
+      "ang_vel_z": [
+        0.0,
+        0.0
+      ],
+      "heading": [
+        0.0,
+        0.0
+      ],
+      "lin_vel_x": [
+        -2.0,
+        2.0
+      ],
+      "lin_vel_y": [
+        0.0,
+        0.0
+      ]
+    },
+    "rel_heading_envs": 0.0,
+    "rel_standing_envs": 0.0,
+    "resample_gait_once_after_reset": true,
+    "resample_once_after_reset": true,
+    "resampling_time_gait": 20.0,
+    "resampling_time_range": [
+      10.0,
+      10.0
+    ],
+    "vel_xy_success_rel_threshold": 0.25,
+    "vel_xy_success_threshold": 0.05,
+    "vel_yaw_success_rel_threshold": 0.25,
+    "vel_yaw_success_threshold": 0.05
+  },
+  "gait_library_sha256": "5dc7b856b0db002423346fe1f363dc66bf052788cc1b75905bc530ed10dc03e5",
+  "initialization_record": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-29_11-56-35_d5_go2_recover_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\\provenance\\initialization.json",
+  "initialization_record_sha256": "11c3f968c358730e3427f83b59ad1f34b333e91bbc24355a29aec3a5a267fd6b",
+  "observation_dimension": 72,
+  "record_kind": "cohort_eligibility_facts",
+  "record_sha256": "2b3b76061c7d81246f060d620f2762d9275d121caca14023b7480ff1d3821b20",
+  "recorded_at_utc": "2026-08-29T03:56:57.396332+00:00",
+  "result_quality_used_for_eligibility": false,
+  "reward_profile_sha256": "9a23a85f410a06e4aea828779b1d61f9d71db9534c488c6f68c588906fddf355",
+  "run_name": "d5_go2_recover_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+  "schema_version": 1,
+  "seed": 43,
+  "study_context": null,
+  "study_name": null,
+  "training_budget": {
+    "max_iterations": 20000,
+    "num_envs": 512,
+    "num_steps_per_env": 24
+  },
+  "training_budget_sha256": "e67d9a1bc69f41ec99e47845497b449feb7aeebbf1c3e246fc9c84e088126624"
+}

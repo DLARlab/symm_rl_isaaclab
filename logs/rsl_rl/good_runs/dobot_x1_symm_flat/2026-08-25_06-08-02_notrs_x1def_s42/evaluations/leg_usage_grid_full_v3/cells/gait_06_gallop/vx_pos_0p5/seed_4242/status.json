@@ -1,0 +1,12 @@
+{
+  "cell_id": "gait_06_gallop__vx_pos_0p5__seed_4242",
+  "ended_at": "2026-09-01T04:03:07.379028+00:00",
+  "expected_steps": 750,
+  "outcome": "completed",
+  "plan_sha256": "33f6a45f6f359a9a79f942c40071799c72abbab7d2652d09a76259b824023e57",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "started_at": "2026-09-01T04:02:29.641599+00:00",
+  "status": "complete",
+  "termination_terms": []
+}

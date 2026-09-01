@@ -1,0 +1,42 @@
+{
+  "cell_id": "gait_01_bound__vx_pos_1p0__seed_0042",
+  "cell_index": 10,
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\good_runs\\dobot_x1_symm_flat\\2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2\\model_19999.pt",
+    "sha256": "5bcb69a972c15aa17bdd9f11531a0628112627b95b24fd3eff60a97aeecba4e9"
+  },
+  "configured_gait_index": 1,
+  "ended_at": "2026-08-31T12:09:07.309583+00:00",
+  "evaluation_seed": 42,
+  "expected_steps": 750,
+  "gait_family": "bound",
+  "gait_index": 1,
+  "gait_name": "bound",
+  "gait_phases": [
+    0.0,
+    0.0,
+    0.5,
+    0.5
+  ],
+  "gait_weight": 4.0,
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "measurement_start_step": 250,
+  "measurement_stop_step": 750,
+  "nominal_profile": true,
+  "outcome": "completed",
+  "plan_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\good_runs\\dobot_x1_symm_flat\\2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2\\evaluations\\leg_usage_grid_full_v3\\study.json",
+  "plan_sha256": "9941c12534e9cac6273a9bd644aefbe2411021c7597a579d9a7a0db2220dc448",
+  "protocol_version": "leg_usage_grid_full_v3",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "started_at": "2026-08-31T12:08:27.020625+00:00",
+  "step_dt": 0.02,
+  "termination_terms": [],
+  "termination_time_s": null,
+  "velocity_mps": 1.0,
+  "wall_duration_s": 40.28911370001151
+}

@@ -1,0 +1,251 @@
+{
+  "action_dimension": 12,
+  "checkpoint_status": "pending",
+  "code_and_source_hashes": {
+    "dirty_tree_diff_sha256": "1b49e8b5b508579077bc22f0801cf12cd8863dcc9661a8f00c5e4f4a69a5118a",
+    "repo_commit": "9d977a6d2197afb235ce1eee69bfa74e09fcd08d"
+  },
+  "direct_launch": {
+    "argv": [
+      "scripts/symm_locomotion/train.py",
+      "--robot",
+      "x1",
+      "--num-envs",
+      "512",
+      "--iterations",
+      "20000",
+      "--run-name",
+      "d1_x1_dev_main_m0p1_v0p05_w500_r0_x1def_s42",
+      "--seed",
+      "42",
+      "--tr-policy-coef",
+      "0.1",
+      "--tr-value-coef",
+      "0.05",
+      "--tr-warmup-iterations",
+      "500",
+      "--tr-rampup-iterations",
+      "0",
+      "--tr-ramp-shape",
+      "linear",
+      "--tr-min-abs-cmd-vel",
+      "0.0",
+      "--foot-phase-weight",
+      "0.3",
+      "--foot-phase-reduction",
+      "sum",
+      "--joint-target-limit-mode",
+      "legacy_clamped",
+      "--joint-target-limit-weight",
+      "0.05",
+      "--actor-mean-bound-mode",
+      "legacy_global",
+      "--tr-policy-output-space",
+      "raw_action_mean",
+      "--gait-sampling-profile",
+      "trclosed_v2_equal_family",
+      "--gait-curriculum-iterations",
+      "0",
+      "--expected-branch",
+      "72d-symm-v4-integration",
+      "--no-conda-run",
+      "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false"
+    ],
+    "interface": "scripts/symm_locomotion/train.py",
+    "resolved_runtime_argv_without_context": [
+      "train",
+      "--rl_library",
+      "rsl_rl",
+      "--task",
+      "Isaac-Velocity-Flat-Dobot-X1-Symm-v0",
+      "--num_envs",
+      "512",
+      "--max_iterations",
+      "20000",
+      "--run_name",
+      "d1_x1_dev_main_m0p1_v0p05_w500_r0_x1def_s42",
+      "--seed",
+      "42",
+      "agent.algorithm.symmetry_cfg.use_data_augmentation=False",
+      "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false",
+      "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.1",
+      "agent.algorithm.symmetry_cfg.value_loss_coeff=0.05",
+      "agent.algorithm.symmetry_cfg.warmup_iterations=500",
+      "agent.algorithm.symmetry_cfg.rampup_iterations=0",
+      "agent.algorithm.symmetry_cfg.ramp_shape=linear",
+      "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0",
+      "env.rewards.foot_phase.weight=0.3",
+      "env.rewards.foot_phase.params.reduction=sum",
+      "env.rewards.joint_target_limits.params.mode=legacy_clamped",
+      "agent.algorithm.symmetry_cfg.actor_mean_bound_mode=legacy_global",
+      "agent.algorithm.symmetry_cfg.tr_policy_output_space=raw_action_mean",
+      "env.commands.base_velocity.gait_sampling_profile=trclosed_v2_equal_family",
+      "env.commands.base_velocity.gait_curriculum_iterations=0",
+      "env.rewards.joint_target_limits.weight=0.05",
+      "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false"
+    ],
+    "robot": "x1",
+    "run_name": "d1_x1_dev_main_m0p1_v0p05_w500_r0_x1def_s42",
+    "schema_version": 1
+  },
+  "eligibility_is_result_independent": true,
+  "eligibility_status": "incomplete",
+  "evaluation_protocol": null,
+  "gait_library": {
+    "add_noise_period": true,
+    "add_noise_theta": true,
+    "asset_name": "robot",
+    "base_height_range": [
+      0.45,
+      0.6
+    ],
+    "calculate_from_sampling_curve": true,
+    "class_type": "isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped:GaitVelocityCommand",
+    "cmd_kind": null,
+    "debug_vis": false,
+    "duty_factor": 0.45,
+    "element_names": null,
+    "gait_curriculum_iterations": 0,
+    "gait_library_version": "time_reversal_closed_v2",
+    "gait_period": 0.45,
+    "gait_sampling_profile": "trclosed_v2_equal_family",
+    "gait_sequence_duration_s": 5.0,
+    "gait_sequence_enabled": false,
+    "heading_ang_vel_clip": [
+      -1.0,
+      1.0
+    ],
+    "heading_command": false,
+    "heading_control_stiffness": 0.5,
+    "init_foot_theta_weights": [
+      4.0,
+      4.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "init_foot_thetas": [
+      [
+        0.0,
+        0.5,
+        0.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.5,
+        0.5
+      ],
+      [
+        0.13,
+        -0.13,
+        0.5,
+        0.5
+      ],
+      [
+        -0.13,
+        0.13,
+        0.5,
+        0.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.63,
+        0.37
+      ],
+      [
+        0.0,
+        0.0,
+        0.37,
+        0.63
+      ],
+      [
+        -0.13,
+        0.13,
+        0.63,
+        0.37
+      ],
+      [
+        0.13,
+        -0.13,
+        0.63,
+        0.37
+      ],
+      [
+        0.13,
+        -0.13,
+        0.37,
+        0.63
+      ],
+      [
+        -0.13,
+        0.13,
+        0.37,
+        0.63
+      ]
+    ],
+    "kappa": 16.0,
+    "min_xy_command_norm": 0.0,
+    "noise_level_theta": 2,
+    "noise_scale_theta": 0.001,
+    "phase_mapping_version": "same_gait_backward_duty_aware_integrated_reward_boundary_v4",
+    "ranges": {
+      "ang_vel_z": [
+        0.0,
+        0.0
+      ],
+      "heading": [
+        0.0,
+        0.0
+      ],
+      "lin_vel_x": [
+        -2.0,
+        2.0
+      ],
+      "lin_vel_y": [
+        0.0,
+        0.0
+      ]
+    },
+    "rel_heading_envs": 0.0,
+    "rel_standing_envs": 0.0,
+    "resample_gait_once_after_reset": true,
+    "resample_once_after_reset": true,
+    "resampling_time_gait": 20.0,
+    "resampling_time_range": [
+      10.0,
+      10.0
+    ],
+    "vel_xy_success_rel_threshold": 0.25,
+    "vel_xy_success_threshold": 0.05,
+    "vel_yaw_success_rel_threshold": 0.25,
+    "vel_yaw_success_threshold": 0.05
+  },
+  "gait_library_sha256": "91666490420cca1cfb1ad1fa66dc3e27b2c9d96d7174fc9fe6498b1cf0327719",
+  "initialization_record": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-31_23-23-40_d1_x1_dev_main_m0p1_v0p05_w500_r0_x1def_s42\\provenance\\initialization.json",
+  "initialization_record_sha256": "1924137f3bd31ebda1e50ed63dc85e8b3d63ce146b32cd5e2989319d01c6ecd2",
+  "observation_dimension": 72,
+  "record_kind": "cohort_eligibility_facts",
+  "record_sha256": "9cd5abe71228f9859e408dfc7c71510fa08ae7d6fcdd33896d7fdcdc3a7f4aeb",
+  "recorded_at_utc": "2026-08-31T15:23:57.260828+00:00",
+  "result_quality_used_for_eligibility": false,
+  "reward_profile_sha256": "045ec4ea3be1bac686f654de502464873f52e86b20086e9c6625b7fa9a9fa233",
+  "run_name": "d1_x1_dev_main_m0p1_v0p05_w500_r0_x1def_s42",
+  "schema_version": 1,
+  "seed": 42,
+  "study_context": null,
+  "study_name": null,
+  "training_budget": {
+    "max_iterations": 20000,
+    "num_envs": 512,
+    "num_steps_per_env": 24
+  },
+  "training_budget_sha256": "e67d9a1bc69f41ec99e47845497b449feb7aeebbf1c3e246fc9c84e088126624"
+}

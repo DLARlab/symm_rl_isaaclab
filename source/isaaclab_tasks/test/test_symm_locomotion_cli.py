@@ -577,6 +577,29 @@ def test_compare_handles_missing_log_directories(capsys):
     assert "x1" in captured.out
 
 
+def test_compare_platform_launchers_are_deprecated():
+    repo_root = Path(__file__).resolve().parents[3]
+    script_dir = repo_root / "scripts" / "symm_locomotion"
+    result = subprocess.run(
+        [sys.executable, str(script_dir / "compare.py"), "--help"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "compare.py is deprecated" in result.stderr
+    assert "symm_cli.py compare" in result.stderr
+    assert "--robots" in result.stdout
+    assert "Maximum runs shown per robot." in result.stdout
+    bash = (script_dir / "compare.sh").read_text(encoding="utf-8")
+    powershell = (script_dir / "compare.ps1").read_text(encoding="utf-8")
+    assert "deprecated; use symm_locomotion.sh compare" in bash
+    assert "deprecated; use symm_locomotion.ps1 compare" in powershell
+    assert 'symm_cli.py compare "$@"' in bash
+    assert '"symm_cli.py" "compare" @RemainingArgs' in powershell
+
+
 def test_tensorboard_dry_run_uses_python_module(capsys):
     symm_cli = _load_symm_cli()
 

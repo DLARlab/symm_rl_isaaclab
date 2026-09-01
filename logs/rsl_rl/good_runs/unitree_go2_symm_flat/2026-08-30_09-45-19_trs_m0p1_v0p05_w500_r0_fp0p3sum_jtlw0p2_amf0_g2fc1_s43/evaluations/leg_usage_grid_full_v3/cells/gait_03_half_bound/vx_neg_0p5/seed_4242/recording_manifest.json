@@ -1,0 +1,22 @@
+{
+  "archive_sha256": "95a7e78a731c284e1788cb2c793fad75fe5e27098077160692385ef9053494de",
+  "cell_id": "gait_03_half_bound__vx_neg_0p5__seed_4242",
+  "contact_threshold_mode": "body_weight",
+  "contact_threshold_off_n": 5.0,
+  "contact_threshold_on_n": 10.0,
+  "evaluation_seed": 4242,
+  "gait_index": 3,
+  "ground_filter_paths": [
+    "/World/ground/terrain/mesh",
+    "/World/ground/terrain/mesh",
+    "/World/ground/terrain/mesh",
+    "/World/ground/terrain/mesh"
+  ],
+  "ground_filtered_samples": 750,
+  "method_version": "leg_usage_grid_full_v3",
+  "plan_sha256": "a408a97e649a5b23a7d2b2a5016b2aa7e63ac1188266864a3f1dcca501772a8b",
+  "record_sha256": "c89a488d0c483f02925e56c20cbc051464e21cec4ca8a3281a8fbd329ba70b3e",
+  "recorded_steps": 750,
+  "robot_mass_kg": 15.01900016865693,
+  "schema_version": 1
+}

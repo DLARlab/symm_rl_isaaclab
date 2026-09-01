@@ -1,0 +1,15 @@
+{
+  "analysis_method_version": "leg_usage_grid_full_v3",
+  "analyzer_path": "D:\\symm_rl_isaaclab\\scripts\\symm_locomotion\\evaluation.py",
+  "analyzer_sha256": "426e139510f69e205e2d5d2789cabe1098cd934e4b58d440e676cbb7b6fd206c",
+  "generated_at_utc": "2026-09-01T12:25:24.233847+00:00",
+  "git_branch": "72d-symm-v4-integration",
+  "git_commit": "9d977a6d2197afb235ce1eee69bfa74e09fcd08d",
+  "input_study_identity_sha256": "19e39df2f3bfbaeda35093aba31d703f0c194174d2511d2a0f673bb005219e60",
+  "input_study_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-27_00-44-04_trs_m0p2_v0p1_w500_r0_x1def_s42\\evaluations\\leg_usage_grid_full_v3\\study.json",
+  "input_study_sha256": "577004ebfb231d32768db740fb187d265aaf0b5e72eb1d5241f2eda2713db87c",
+  "metrics_path": "D:\\symm_rl_isaaclab\\scripts\\symm_locomotion\\_leg_usage_metrics.py",
+  "metrics_sha256": "deca1f51b63eceed0b6c536abf0dd12a51673a8fd157b05424c5b4f4e01a083b",
+  "record_sha256": "eeaf21ba25fb81de9fa51e6cbd2b031cedc010f2b55259fece33d659479de062",
+  "schema_version": 1
+}

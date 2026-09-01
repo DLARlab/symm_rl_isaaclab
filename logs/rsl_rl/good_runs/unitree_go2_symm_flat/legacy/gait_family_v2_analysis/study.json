@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "analysis_method_version": "gait_famili_v2_fixed_grid_v1",
+  "robot": "go2",
+  "display_name": "Unitree Go2",
+  "run_root": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/gait_family_v2_analysis",
+  "training": {
+    "seed": 42,
+    "num_envs": 512,
+    "num_steps_per_env": 24,
+    "max_iterations": 20000,
+    "smoothing_window_iterations": 200,
+    "threshold_sustain_iterations": 500
+  },
+  "fixed_grid": {
+    "method_version": "leg_usage_grid_v1",
+    "gait_library_version": "time_reversal_closed_v2",
+    "velocities_mps": [-1.5, -1.0, -0.5, 0.5, 1.0, 1.5],
+    "families": ["trot", "bound", "half_bound", "gallop"],
+    "family_weights": {
+      "trot": 0.25,
+      "bound": 0.25,
+      "half_bound": 0.25,
+      "gallop": 0.25
+    },
+    "settle_s": 5.0,
+    "measure_s": 10.0,
+    "primary_metrics": [
+      "torque_squared",
+      "absolute_work",
+      "vertical_grf_impulse"
+    ],
+    "directional_signed_aggregation": "equal mean across speeds and rows within each family, then equal mean across the four gait families",
+    "overall_absolute_aggregation": "equal mean of per-cell absolute imbalance within each family, then equal mean across the four gait families"
+  },
+  "balance_y_range": [-100.0, 100.0],
+  "balance_y_ticks": [-100.0, -50.0, 0.0, 50.0, 100.0],
+  "interpretation": {
+    "conclusion": "No single TRS run dominates this four-run Go2 cohort. No TRS remains the strongest learner and has the lowest work per metre. `m0.1/v0.05, w500/r0` provides the best torque-allocation balance and the strongest TRS learning, but worsens work and GRF balance. `m0.2/v0.1, w500/r0` provides the best work and GRF balance but pays the largest reward cost. Adding the `r1000` ramp to `m0.2/v0.1` substantially recovers learning and lowers torque-squared and work exposure per metre, while giving back some of the hard-start run's allocation balance. The result is a measured reward-versus-leg-usage tradeoff, not a universal winner."
+  },
+  "runs": [
+    {
+      "label": "No TRS",
+      "slug": "no_trs",
+      "folder": "2026-08-20_21-04-16_go2_72d_no_trs_gait_trclosed_v2",
+      "mirror_coeff": 0.0,
+      "value_coeff": 0.0,
+      "warmup_iterations": null,
+      "rampup_iterations": 0,
+      "trs_enabled": false
+    },
+    {
+      "label": "TRS m0.1/v0.05, w500/r0",
+      "slug": "trs_m0p1_v0p05_w500_r0",
+      "folder": "2026-08-21_10-22-39_go2_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
+      "mirror_coeff": 0.1,
+      "value_coeff": 0.05,
+      "warmup_iterations": 500,
+      "rampup_iterations": 0,
+      "trs_enabled": true
+    },
+    {
+      "label": "TRS m0.2/v0.1, w500/r0",
+      "slug": "trs_m0p2_v0p1_w500_r0",
+      "folder": "2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
+      "mirror_coeff": 0.2,
+      "value_coeff": 0.1,
+      "warmup_iterations": 500,
+      "rampup_iterations": 0,
+      "trs_enabled": true
+    },
+    {
+      "label": "TRS m0.2/v0.1, w500/r1000",
+      "slug": "trs_m0p2_v0p1_w500_r1000",
+      "folder": "2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2",
+      "mirror_coeff": 0.2,
+      "value_coeff": 0.1,
+      "warmup_iterations": 500,
+      "rampup_iterations": 1000,
+      "trs_enabled": true
+    }
+  ]
+}

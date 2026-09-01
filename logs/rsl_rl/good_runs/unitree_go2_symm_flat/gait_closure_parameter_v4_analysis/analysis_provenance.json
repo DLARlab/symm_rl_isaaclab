@@ -1,0 +1,302 @@
+{
+  "comparison_launchers": {
+    "bash": {
+      "path": "scripts/symm_locomotion/comparison.sh",
+      "sha256": "f06d54c447f38d22dd1688550e49676744b0f955d7d13f4ddfaced4f8ea97d59"
+    },
+    "powershell": {
+      "path": "scripts/symm_locomotion/comparison.ps1",
+      "sha256": "b41accecd95d7f749197db3fcfcf9e6a7e9d4fe804df48ffa4c2e1c92a1b0637"
+    },
+    "python": {
+      "path": "scripts/symm_locomotion/comparison.py",
+      "sha256": "0c6d1e2a130e186427406fa5064f8352f9a9fb2bb357aa8521abde8243fb7902"
+    }
+  },
+  "comparison_script": {
+    "path": "scripts/symm_locomotion/comparison.py",
+    "sha256": "0c6d1e2a130e186427406fa5064f8352f9a9fb2bb357aa8521abde8243fb7902"
+  },
+  "evaluation_protocol_sha256": "2433b0e6b8dc47da1f3fbeb3e19eed124b54c6293cccdac27cb2ff7d6046a9ea",
+  "generated_at_utc": "2026-09-01T14:10:05.556408+00:00",
+  "inputs": [
+    {
+      "abbreviation": "NoTRS",
+      "checkpoint_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
+      "checkpoint_sha256": "eb1070b5f85b03a1233fa0308b04650cc3ac1dc39548b903dc6201cda54ed2b8",
+      "evaluation_analysis_record_sha256": "de52b6fdb53f4c77b64eff8ca2f90e209d137b71a3dfb51ec621db4b35c0ae99",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "555c3528b706cfd38398fc702772a588b0dc78d55c20b811e419b04772bab78a"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "b9b271b84731c135caafcd50382dacb6e44d9883eeeefb915ccae84fdf33a677"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "419d77ae28fead101d0cb0857bcc119321ea37273dbc86e07ffb9fffbaf6300e"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "44772027eeecae8200916d45c787398c388d76bbe5065491355f8cefb6de7482"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "7069a2d39bb8416a988f4f05f14a12bb0124c6e18cceda54fffce51b0c1af6f6"
+        }
+      },
+      "event_sha256": "19d25f8a22ae47e0f56cd45b23b45a35dfb35f2232db6c8bd87afbff23f07722",
+      "initialization_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+      "initialization_sha256": "11c3f968c358730e3427f83b59ad1f34b333e91bbc24355a29aec3a5a267fd6b",
+      "run_id": "run_00",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+            "sha256": "11c3f968c358730e3427f83b59ad1f34b333e91bbc24355a29aec3a5a267fd6b"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "Low-r0",
+      "checkpoint_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
+      "checkpoint_sha256": "dff79524d302b278d653b90e80c22316bdcde7a8d1831dcec9874a589e453abd",
+      "evaluation_analysis_record_sha256": "f17a6b9fd7309fe23bf295ef3c8b7f8236dd72c195273b5ba74835447b09d74c",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "75af3aba7b9df98b6517eaa98d1f8eb9af5ddedf9fa2e1a62e690084fb00d219"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "e7e55663438369a5258bd3fb47df65bf5b04bfb646bcb63e151e66d87329c610"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "97fa48813ff7f4b4e8e3c97bec37df993183f5ce47ddc3d78f0629bc5708f57f"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "0dfea3f4a52fbd25da845e784e5391a7eb7e3d59893528ca9467eaf12e6603a3"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "a408a97e649a5b23a7d2b2a5016b2aa7e63ac1188266864a3f1dcca501772a8b"
+        }
+      },
+      "event_sha256": "daf0c2d98e186e7877eb5e0b1a250ee91971b5dd92ef6145129a678097ecffe6",
+      "initialization_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+      "initialization_sha256": "56dc119b930325b80f19f237dddd2ac55daf25b2c16e0b2f9ecffa2edd5bcf5c",
+      "run_id": "run_01",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+            "sha256": "56dc119b930325b80f19f237dddd2ac55daf25b2c16e0b2f9ecffa2edd5bcf5c"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "Low-r500",
+      "checkpoint_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
+      "checkpoint_sha256": "97b19eaffca4b515ee46baf2d2dcd4d63963e8dcce1519c375b81eb04d413b9a",
+      "evaluation_analysis_record_sha256": "e2d2498377804d748cb9690fabc6b57a64924fb8a55b2e55aa410f58267efe2c",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "74ae51f8a10e4daa53b8a6384a5ea64690fe7caec7fdb5e49c80c72fb4424f65"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "dd1f61823b798cc6c4efbdf4ca2ed0ebbb4a801d4a45151a04cfc6a1080e4cba"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "94369793b40cc8589d50fdcda518c8726163c99631c0a2b29fb5ed28d5787aad"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "cd5cf17654765770f544e3fa2ffc083b6c265961dfe4b326323decdbf4f359cb"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "76ebccd62a828246a2939b60f9d7a4d5b6a35d9eda3b578a25d2751909bdf748"
+        }
+      },
+      "event_sha256": "679ea32f461d89624618bdeab1646afa4f679ec1deef3598505b10ce25e79e61",
+      "initialization_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+      "initialization_sha256": "e578ee6231b1c7e43243fd9c0a7f7d9f9226382a43f6ec6f77bab37eecddefcb",
+      "run_id": "run_02",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+            "sha256": "e578ee6231b1c7e43243fd9c0a7f7d9f9226382a43f6ec6f77bab37eecddefcb"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "High-r0",
+      "checkpoint_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
+      "checkpoint_sha256": "d147caa27a3d99d36435eaf827470bd07981d44e5babb7dc94069c86f59f963e",
+      "evaluation_analysis_record_sha256": "e34c25be56c5b3ded5c17aa0a2082743f114a3ba86ebee510e994ad1b24bb9ee",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "4f65c8069ff8965a36aa0a36f579d121638a70049875895950c9b2ce6330ae6b"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "0081f6fd08108c92c52c2a358f67bf9364794c810e82b9948cef13398d3827de"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "c03c8b72d5404da3861b0f57f324ecedea5c25555eead2192ac0b86de672650d"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "67bd18d4deabec088fa37e6b651c75db05aa64d22044ea873bd6d2036848559d"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "7eb58e08f2da3de33007c07f24f3806cc132a17b007581f81af688b2013eda4f"
+        }
+      },
+      "event_sha256": "8f039ae1ad043695702651f77436ad0301f601d072581818d41f775c6cd31bbf",
+      "initialization_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+      "initialization_sha256": "6931eb4df90ef17f9559898bffcfc67697942c1775ed899ec2a2391573a76b4b",
+      "run_id": "run_03",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+            "sha256": "6931eb4df90ef17f9559898bffcfc67697942c1775ed899ec2a2391573a76b4b"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "High-r500",
+      "checkpoint_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
+      "checkpoint_sha256": "d98ff52ff70ebc6f6024bad97a9c0dd1b6c6ae11ad825245ddfc569c614d8439",
+      "evaluation_analysis_record_sha256": "e17b994e83d6f5acfaeb806963364926427cf2b6e74d3c7e8c6e398b0206e062",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "3ba5fced8a59065331bd4434fbd88d3b21310613218fbecf9580e4fbf2ad3f77"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "31629814b3a48fed5dd0b868a00c8cad5e230936fdd22c912322885826ece4d7"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "0972d09a50e80583b3325eb11ff2bd97e41667e6f8e16c5ce687ed587c7afba5"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "4a9127b3c3b556b72c44fe381214d920f641c8b9f7f12f234e8772e1cfb35533"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "f596fbc61e9ee7a839a2132abd47ab6a85d3fef667a810b27cb2da417c5ce2a1"
+        }
+      },
+      "event_sha256": "d654b120585e17666540b369be0e0038dc01213be3b00591aacde712760a503a",
+      "initialization_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+      "initialization_sha256": "8eabf96da0a3ff0997b1621f99bef96cc1003e55f582ea8a096a4f3638f518cd",
+      "run_id": "run_04",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/provenance/initialization.json",
+            "sha256": "8eabf96da0a3ff0997b1621f99bef96cc1003e55f582ea8a096a4f3638f518cd"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    }
+  ],
+  "method_version": "gait_closure_comparison_v1",
+  "outputs": {
+    "REPORT.md": "188f1a396db82496bf780122fd4252b50618ec1c1909f2855211e621bde3a353",
+    "evaluation_cells.csv": "e1822990fffb29ada2827b2778590830518a7a9c94f988711cd2326f05250ffc",
+    "fig01_training_efficiency.png": "bf7c6ea12ca47d1e1fec138c7cfc061f9ddea0eb1f738cac60c4e7eae2b105f3",
+    "fig01_training_efficiency.svg": "58e03065a57df88522ad9bc703bc97af4e549ac673ef22c88f9ed28dc7b0fbc2",
+    "fig02_velocity_tracking_overall_direction.png": "9c2e688d437b0fbd7fe005d5e44d463bae01d4f74be6e943fa93dc3b1edae100",
+    "fig02_velocity_tracking_overall_direction.svg": "8f226c1b10a01c663d798902df6cc9c95462c137ea16029ec2fbc33ac1abb0fa",
+    "fig03_01_velocity_tracking_by_family_all.png": "69abc42ad2170b297ada63ed1d4739251d7b904002a306543bf7f6fdf334f1ea",
+    "fig03_01_velocity_tracking_by_family_all.svg": "1fb95cf3fbe03b7397395c99a94dc921485de943562b2b844c3b79e16d0f8a87",
+    "fig03_02_velocity_tracking_by_family_negative.png": "2cd55924fa1fae3c18a47f8e702ea5b9848b29cbf23e72fe17ef5b3f59013922",
+    "fig03_02_velocity_tracking_by_family_negative.svg": "716415bd358f6b561122c87112af8ab52d6f8e4caf2c89fd07d9a6199756f753",
+    "fig03_03_velocity_tracking_by_family_positive.png": "e1d0896833310a1d9777ff72ca3010c691b962fb299e7acb2a2f945b1893efa6",
+    "fig03_03_velocity_tracking_by_family_positive.svg": "951baa24920732e7abff2e2f04fc066f95b21bda665f2656d21c47ae9c294c54",
+    "fig03_velocity_tracking_by_family_combined.png": "c58f803b8dce0bff27fb00d9a7df36648ccf429e3e1cd73bb8e9a87cd11b49dd",
+    "fig03_velocity_tracking_by_family_combined.svg": "13609b3ebf5486d8da4d323298241ee9561f4d7111ec33c26be7f474883cc1f1",
+    "fig04_leg_usage_overall_direction.png": "060b1dadfcad4638f36d80af3f5a511ede00396caddfd320cba929f067125d49",
+    "fig04_leg_usage_overall_direction.svg": "92112cc3653bfc86b6360abbb959bf3640e7af2166053cdf3eb04186ee250411",
+    "fig05_01_leg_usage_by_family_all.png": "0a835cc79663b3c2b0c9885bc3b9de2a914ee26a4652fbc7b51735f3ba3a5a80",
+    "fig05_01_leg_usage_by_family_all.svg": "32bf18c7d8ee80961724cd6ac3810ba48cfff8777be299a1b75862c67eb38775",
+    "fig05_02_leg_usage_by_family_negative.png": "8697787336781454e5e140baa385aa2dc535dbc87c1e41da69f9f1b7b0616e1e",
+    "fig05_02_leg_usage_by_family_negative.svg": "d315ddb21d98c2c33a889075497130b2a5f0758f1fabe1a7addcf2b9ae03a930",
+    "fig05_03_leg_usage_by_family_positive.png": "ed72f8f9d228f3298241bbabd3cb63ac5c0a7c4d6d4826c1aea87f3caf0150f1",
+    "fig05_03_leg_usage_by_family_positive.svg": "dbfb19771e658f77d0ed430fa71ec6608838026a922e8b6ac80c1826d3682eeb",
+    "fig05_leg_usage_by_family_combined.png": "bc15d1fb10527d21312b36c76073a124fe3e1ed99d6d2a240b79fb46282db8dc",
+    "fig05_leg_usage_by_family_combined.svg": "7c61abf655d8cc4a7c0cca0dbd96dcc42390f2d982c91bbe83de07a6842db6d0",
+    "fig06_gait_fidelity_overall_direction.png": "7d1a8353b2c8f38e6a51f5c1bc24270456fc8be9ea24102f8fafcf3c16110c90",
+    "fig06_gait_fidelity_overall_direction.svg": "b96d39c13e133994e5638d033a63b279953777a553b70a8513ff8255c0edb0b3",
+    "fig07_01_gait_fidelity_by_family_all.png": "097f7e8468eac74d5fbb41c4e06ee6bda8fc7a65395bd3f78c8a82cf1bb465ed",
+    "fig07_01_gait_fidelity_by_family_all.svg": "62b5eaadadfab0cb51f6ad1c0b515776921c7756d5e538fd3d128de922038505",
+    "fig07_02_gait_fidelity_by_family_negative.png": "a7f400e92f6d378dbe5a16a45ce6ae4ba777d3b83b7a85c7327c03c494a44e99",
+    "fig07_02_gait_fidelity_by_family_negative.svg": "144d1f6e4846f3dfd3f3d311a06fc617e30909ab5ab18f5212e91df1b336b8c8",
+    "fig07_03_gait_fidelity_by_family_positive.png": "877c567682d11f98f0ce8dad4de0d79c3930cdb82e9a100dbf83ee41201ed7ed",
+    "fig07_03_gait_fidelity_by_family_positive.svg": "e464f856b9b6fedd65a1ac361a090edd913593f564dd40eb54e5fe481c13ac9a",
+    "fig07_gait_fidelity_by_family_combined.png": "5ceea764399913277b2dd7a0a014f06280a6dc39cbc3fb388703ee7885ca3e1c",
+    "fig07_gait_fidelity_by_family_combined.svg": "d6d52739e4e40633ea8739fab64a3aace39ce572fb226d763b549e0cc84faa8f",
+    "figure_manifest.json": "4ee909a80bbff5ba64876b010cbe7ea8a4cbb5471c79e0e8829a2d97f23481ad",
+    "gait_fidelity_summary.csv": "aefb33d45b269dcc181522adfa450ac312e0ce31ba1f88444af52c571ba3f91d",
+    "learning_curve_points.csv": "31311fd5e46bc467888fbc494366dfaabc84e37f36f0255c3ef9c3b2975e4ed4",
+    "leg_usage_summary.csv": "7f2d1cd0db6462cb3f88755c3374200976e7b502f5f87c260768495ef5f3ac5f",
+    "reproduce.py": "12913efb1024a37c53e63426be840b6fa8eb41b5eb949451e32b673a46b16f3d",
+    "source_manifest_snapshot.json": "c93c249238e3694487e628d73238c2b862ea87e64a995d17d15e97382f5da082",
+    "study.json": "01fbfe1568299b1eb09af91ddca8bcd9faf0f6f30dd5efca126e1098e924495b",
+    "style.json": "26215d3ea08d56707fb928bfdb211d4697e1dafa1517ae89f42b3fdf5c81885a",
+    "summary.json": "3fb5c71e8c0c5ce0a188331d41420289091f5d4f47e0a05c848b0bccf19fa008",
+    "training_efficiency.csv": "a137be5c909984a8bdea92f56937be2a5211e38e391ca353bb48329890e185f7",
+    "velocity_tracking_summary.csv": "eeeb776529089d10a89fc7d4e7ff3df2fb317ebfd8e8a2a76b709ce9577ecea2"
+  },
+  "plot_script": {
+    "path": "scripts/symm_locomotion/comparison.py",
+    "sha256": "0c6d1e2a130e186427406fa5064f8352f9a9fb2bb357aa8521abde8243fb7902"
+  },
+  "record_sha256": "b79a95a4e5a4c9254580327e943391e9535905ee48efa7ee8f2c9ab32c256d34",
+  "schema_version": 1,
+  "source_manifest": {
+    "original_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/gait_closure_parameter_v4_analysis/study.json",
+    "path": "source_manifest_snapshot.json",
+    "sha256": "c93c249238e3694487e628d73238c2b862ea87e64a995d17d15e97382f5da082"
+  },
+  "study_sha256": "01fbfe1568299b1eb09af91ddca8bcd9faf0f6f30dd5efca126e1098e924495b",
+  "style_sha256": "26215d3ea08d56707fb928bfdb211d4697e1dafa1517ae89f42b3fdf5c81885a",
+  "tensorboard_scalar_parser": {
+    "path": "scripts/symm_locomotion/_tensorboard_scalars.py",
+    "sha256": "3cb2833b71bdb260e896903a5adbb6de49e2fb2f9649cf26fe91abdd26151d44"
+  },
+  "warnings": [
+    "Training source provenance differs across runs; baseline deltas are descriptive rather than a strict single-factor causal contrast."
+  ]
+}

@@ -39,8 +39,14 @@ REWARD_TAG = "Train/mean_reward"
 SMOOTHING_WINDOW = 200
 PLOT_STRIDE = 10
 ROBOT_RUN_DIRS = {
-    "go2": GOOD_RUNS_ROOT / "unitree_go2_symm_flat",
-    "x1": GOOD_RUNS_ROOT / "dobot_x1_symm_flat",
+    "go2": (
+        GOOD_RUNS_ROOT / "unitree_go2_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward",
+        GOOD_RUNS_ROOT / "unitree_go2_symm_flat/legacy/gait_family_v2_analysis",
+    ),
+    "x1": (
+        GOOD_RUNS_ROOT / "dobot_x1_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward",
+        GOOD_RUNS_ROOT / "dobot_x1_symm_flat/legacy/gait_family_v2_analysis",
+    ),
 }
 ROBOT_TITLES = {
     "go2": "Unitree Go2",
@@ -160,36 +166,37 @@ def _generation(run_name: str) -> str:
 def discover_curated_runs() -> list[CuratedRun]:
     """Discover the matched phase-v2/gait-v2 comparison inventory."""
     runs = []
-    for robot, run_root in ROBOT_RUN_DIRS.items():
-        for run_path in sorted(path for path in run_root.iterdir() if path.is_dir()):
-            if run_path.name not in PHASE_V2_RUN_NAMES | GAIT_V2_RUN_NAMES:
-                continue
-            event_paths = sorted(run_path.glob("events.out.tfevents.*"))
-            agent_path = run_path / "params/agent.yaml"
-            if not event_paths and not agent_path.is_file():
-                continue
-            if len(event_paths) != 1 or not agent_path.is_file():
-                raise ValueError(
-                    f"Curated TensorBoard run {run_path} must contain exactly one event file and params/agent.yaml."
+    for robot, run_roots in ROBOT_RUN_DIRS.items():
+        for run_root in run_roots:
+            for run_path in sorted(path for path in run_root.iterdir() if path.is_dir()):
+                if run_path.name not in PHASE_V2_RUN_NAMES | GAIT_V2_RUN_NAMES:
+                    continue
+                event_paths = sorted(run_path.glob("events.out.tfevents.*"))
+                agent_path = run_path / "params/agent.yaml"
+                if not event_paths and not agent_path.is_file():
+                    continue
+                if len(event_paths) != 1 or not agent_path.is_file():
+                    raise ValueError(
+                        f"Curated TensorBoard run {run_path} must contain exactly one event file and params/agent.yaml."
+                    )
+                runs.append(
+                    CuratedRun(
+                        robot=robot,
+                        generation=_generation(run_path.name),
+                        run_path=run_path,
+                        event_path=event_paths[0],
+                        agent_path=agent_path,
+                        seed=int(_parse_yaml_scalar(agent_path, "seed")),
+                        max_iterations=int(_parse_yaml_scalar(agent_path, "max_iterations")),
+                        learning_rate=float(_parse_yaml_scalar(agent_path, "learning_rate")),
+                        schedule=str(_parse_yaml_scalar(agent_path, "schedule")),
+                        use_mirror_loss=bool(_parse_yaml_scalar(agent_path, "use_mirror_loss")),
+                        mirror_coeff=float(_parse_yaml_scalar(agent_path, "mirror_loss_coeff")),
+                        value_coeff=float(_parse_yaml_scalar(agent_path, "value_loss_coeff")),
+                        warmup_iterations=int(_parse_yaml_scalar(agent_path, "warmup_iterations")),
+                        min_abs_command_velocity=float(_parse_yaml_scalar(agent_path, "min_abs_command_velocity")),
+                    )
                 )
-            runs.append(
-                CuratedRun(
-                    robot=robot,
-                    generation=_generation(run_path.name),
-                    run_path=run_path,
-                    event_path=event_paths[0],
-                    agent_path=agent_path,
-                    seed=int(_parse_yaml_scalar(agent_path, "seed")),
-                    max_iterations=int(_parse_yaml_scalar(agent_path, "max_iterations")),
-                    learning_rate=float(_parse_yaml_scalar(agent_path, "learning_rate")),
-                    schedule=str(_parse_yaml_scalar(agent_path, "schedule")),
-                    use_mirror_loss=bool(_parse_yaml_scalar(agent_path, "use_mirror_loss")),
-                    mirror_coeff=float(_parse_yaml_scalar(agent_path, "mirror_loss_coeff")),
-                    value_coeff=float(_parse_yaml_scalar(agent_path, "value_loss_coeff")),
-                    warmup_iterations=int(_parse_yaml_scalar(agent_path, "warmup_iterations")),
-                    min_abs_command_velocity=float(_parse_yaml_scalar(agent_path, "min_abs_command_velocity")),
-                )
-            )
     for robot in ROBOT_RUN_DIRS:
         robot_runs = [run for run in runs if run.robot == robot]
         if len(robot_runs) != 6:

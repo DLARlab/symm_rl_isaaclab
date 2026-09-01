@@ -29,8 +29,10 @@ def _load_analysis_module():
 study_analysis = _load_analysis_module()
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MANIFESTS = {
-    "go2": REPO_ROOT / "logs/rsl_rl/good_runs/unitree_go2_symm_flat/phase_mapping_v2_go2_trs_run_analysis/study.json",
-    "x1": REPO_ROOT / "logs/rsl_rl/good_runs/dobot_x1_symm_flat/phase_mapping_v2_x1_trs_run_analysis/study.json",
+    "go2": REPO_ROOT
+    / "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward/study.json",
+    "x1": REPO_ROOT
+    / "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward/study.json",
 }
 
 

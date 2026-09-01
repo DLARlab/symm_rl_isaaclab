@@ -681,6 +681,96 @@ def test_reanalysis_removes_stale_optional_metric_tables(tmp_path, monkeypatch):
     assert all(not path.exists() for path in optional_paths)
 
 
+@pytest.mark.parametrize("method_version", ["leg_usage_grid_full_v3", "leg_usage_grid_light_v2"])
+def test_publication_reanalysis_refreshes_paired_diagnostics(tmp_path, monkeypatch, method_version):
+    analysis = _analysis_module()
+    study_path = tmp_path / "study.json"
+    study_path.write_text("{}\n", encoding="utf-8")
+    study = {
+        "method_version": method_version,
+        "study_identity_sha256": "synthetic-study-identity",
+        "cells": [{"id": "cell_0"}],
+    }
+    row = {
+        "cell_id": "cell_0",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "family": "trot",
+        "velocity_mps": 0.5,
+        "seed": 42,
+        "status": "analyzed",
+        "reason": "",
+        "relative_output_dir": "cells/cell_0",
+    }
+    generation = 0
+
+    class FakePairedAnalysis:
+        @staticmethod
+        def analyze_study_file(path):
+            nonlocal generation
+            generation += 1
+            metrics_dir = path.parent / "metrics"
+            metrics_dir.mkdir(parents=True, exist_ok=True)
+            output_names = {
+                "rows": "paired_tr_consistency.csv",
+                "summaries": "paired_tr_consistency_summary.csv",
+                "record": "paired_tr_consistency.json",
+            }
+            for name in output_names.values():
+                (metrics_dir / name).write_text(f"generation-{generation}\n", encoding="utf-8")
+            record_sha256 = hashlib.sha256((metrics_dir / output_names["record"]).read_bytes()).hexdigest()
+            return {
+                "method_version": "paired_tr_consistency_phase_v1",
+                "rows": [{"status": "analyzed"}],
+                "outputs": {**output_names, "record_sha256": record_sha256},
+            }
+
+    monkeypatch.setattr(analysis, "load_study_manifest", lambda _path: study)
+    monkeypatch.setattr(analysis, "analyze_cell", lambda *_args: dict(row))
+    monkeypatch.setattr(analysis, "aggregate_results", lambda _study, _rows: ([], {"coverage": {}}))
+    monkeypatch.setattr(analysis, "_stratified_fidelity_metrics", lambda _study, _rows: [])
+    monkeypatch.setattr(analysis, "_directional_pair_metrics", lambda _study, _rows: [])
+    monkeypatch.setattr(analysis, "_load_paired_consistency_module", lambda: FakePairedAnalysis)
+    for name in (
+        "_save_family_figure",
+        "_save_overall_figure",
+        "_save_coverage_figure",
+        "_save_screening_figure",
+        "_write_screening_report",
+        "_write_report",
+    ):
+        monkeypatch.setattr(analysis, name, lambda *_args, **_kwargs: None)
+
+    analysis.analyze_study(study_path)
+    metrics_dir = study_path.parent / "metrics"
+    for name in (
+        "paired_tr_consistency.csv",
+        "paired_tr_consistency_summary.csv",
+        "paired_tr_consistency.json",
+    ):
+        (metrics_dir / name).write_text("stale\n", encoding="utf-8")
+
+    overall = analysis.analyze_study(study_path)
+
+    assert generation == 2
+    assert all(
+        (metrics_dir / name).read_text(encoding="utf-8") == "generation-2\n"
+        for name in (
+            "paired_tr_consistency.csv",
+            "paired_tr_consistency_summary.csv",
+            "paired_tr_consistency.json",
+        )
+    )
+    paired = overall["paired_tr_consistency"]
+    assert paired["method_version"] == "paired_tr_consistency_phase_v1"
+    assert paired["rows"] == 1
+    assert paired["analyzed_rows"] == 1
+    assert paired["outputs"]["record"] == "metrics/paired_tr_consistency.json"
+    assert (
+        paired["record_sha256"] == hashlib.sha256((metrics_dir / "paired_tr_consistency.json").read_bytes()).hexdigest()
+    )
+
+
 def test_analyze_study_writes_tables_report_and_family_figures(tmp_path):
     analysis = _analysis_module()
     study, _ = _build_study(

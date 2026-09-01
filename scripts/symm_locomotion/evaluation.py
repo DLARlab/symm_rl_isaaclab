@@ -30,7 +30,7 @@ def _load_metrics_module():
     module = sys.modules.get(module_name)
     if module is not None:
         return module
-    module_path = Path(__file__).with_name("leg_usage_metrics.py")
+    module_path = Path(__file__).with_name("_leg_usage_metrics.py")
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Unable to load leg-usage metrics module: {module_path}")
@@ -191,7 +191,7 @@ def _source_provenance(repo_root: Path, robot: str) -> dict[str, Any]:
         repo_root / "scripts" / "reinforcement_learning" / "rsl_rl" / "play_rsl_rl.py",
         repo_root / "scripts" / "reinforcement_learning" / "rsl_rl" / "symm_rollout_plotter.py",
         repo_root / "scripts" / "symm_locomotion" / "evaluation.py",
-        repo_root / "scripts" / "symm_locomotion" / "leg_usage_metrics.py",
+        repo_root / "scripts" / "symm_locomotion" / "_leg_usage_metrics.py",
         repo_root / "scripts" / "symm_locomotion" / "symm_cli.py",
         velocity_root / "mdp" / "symm_quadruped.py",
         velocity_root / "config" / config_folder / "flat_env_cfg.py",

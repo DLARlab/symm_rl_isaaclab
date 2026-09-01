@@ -1,0 +1,42 @@
+{
+  "cell_id": "gait_06_gallop__vx_pos_0p5__seed_4242",
+  "cell_index": 39,
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-31_23-23-31_d1_x1_dev_main_notrs_x1def_s42\\model_19999.pt",
+    "sha256": "fe03f6ad9097698cb19d6a7c525334c450e51d8a527e6ac8452fd8c7344b88cc"
+  },
+  "configured_gait_index": 6,
+  "ended_at": "2026-09-01T04:03:07.379028+00:00",
+  "evaluation_seed": 4242,
+  "expected_steps": 750,
+  "gait_family": "gallop",
+  "gait_index": 6,
+  "gait_name": "gallop_a",
+  "gait_phases": [
+    -0.13,
+    0.13,
+    0.63,
+    0.37
+  ],
+  "gait_weight": 1.0,
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "measurement_start_step": 250,
+  "measurement_stop_step": 750,
+  "nominal_profile": true,
+  "outcome": "completed",
+  "plan_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\dobot_x1_symm_flat\\2026-08-31_23-23-31_d1_x1_dev_main_notrs_x1def_s42\\evaluations\\leg_usage_grid_full_v3\\study.json",
+  "plan_sha256": "33f6a45f6f359a9a79f942c40071799c72abbab7d2652d09a76259b824023e57",
+  "protocol_version": "leg_usage_grid_full_v3",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "started_at": "2026-09-01T04:02:29.641599+00:00",
+  "step_dt": 0.02,
+  "termination_terms": [],
+  "termination_time_s": null,
+  "velocity_mps": 0.5,
+  "wall_duration_s": 37.737457599985646
+}

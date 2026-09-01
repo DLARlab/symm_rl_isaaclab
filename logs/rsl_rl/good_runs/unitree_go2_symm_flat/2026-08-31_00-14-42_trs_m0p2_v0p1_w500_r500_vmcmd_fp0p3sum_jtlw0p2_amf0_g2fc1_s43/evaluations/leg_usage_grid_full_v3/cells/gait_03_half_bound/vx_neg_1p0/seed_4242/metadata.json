@@ -1,0 +1,42 @@
+{
+  "cell_id": "gait_03_half_bound__vx_neg_1p0__seed_4242",
+  "cell_index": 19,
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-31_00-14-42_d10_go2_d5base_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\\model_19999.pt",
+    "sha256": "d98ff52ff70ebc6f6024bad97a9c0dd1b6c6ae11ad825245ddfc569c614d8439"
+  },
+  "configured_gait_index": 3,
+  "ended_at": "2026-08-31T05:16:52.366290+00:00",
+  "evaluation_seed": 4242,
+  "expected_steps": 750,
+  "gait_family": "half_bound",
+  "gait_index": 3,
+  "gait_name": "half_bound_front_b",
+  "gait_phases": [
+    -0.13,
+    0.13,
+    0.5,
+    0.5
+  ],
+  "gait_weight": 1.0,
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "measurement_start_step": 250,
+  "measurement_stop_step": 750,
+  "nominal_profile": true,
+  "outcome": "completed",
+  "plan_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-31_00-14-42_d10_go2_d5base_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\\evaluations\\leg_usage_grid_full_v3\\study.json",
+  "plan_sha256": "f596fbc61e9ee7a839a2132abd47ab6a85d3fef667a810b27cb2da417c5ce2a1",
+  "protocol_version": "leg_usage_grid_full_v3",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "started_at": "2026-08-31T05:16:23.613145+00:00",
+  "step_dt": 0.02,
+  "termination_terms": [],
+  "termination_time_s": null,
+  "velocity_mps": -1.0,
+  "wall_duration_s": 28.753278299991507
+}

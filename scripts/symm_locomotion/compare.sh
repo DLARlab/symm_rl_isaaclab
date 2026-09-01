@@ -7,4 +7,5 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/_run.sh" compare.py "$@"
+echo "WARNING: compare.sh is deprecated; use symm_locomotion.sh compare instead." >&2
+exec "$SCRIPT_DIR/_run.sh" symm_cli.py compare "$@"

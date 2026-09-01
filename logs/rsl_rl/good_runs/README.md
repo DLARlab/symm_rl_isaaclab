@@ -1,59 +1,114 @@
 # Curated symmetric-locomotion runs
 
-This archive contains every retained artifact from each curated training run:
-TensorBoard events, parameters, training-time Git provenance, plots,
-simulation data, videos, and deployment exports.
+This directory is the publication archive for the retained Unitree Go2 and
+Dobot X1 symmetric-locomotion studies. It contains the evidence needed to
+inspect a trained policy and reproduce the committed comparisons: resolved
+configuration and command metadata, training-time source provenance,
+TensorBoard events, terminal checkpoints, exports, rollout data, evaluation
+grids, tables, figures, and reports.
 
-Only the iteration checkpoint series is reduced. Each run publishes its
-numerically latest `model_*.pt`; intermediate iteration checkpoints remain
-local and are excluded by [`.gitignore`](.gitignore).
+## Milestone timeline
 
-## Milestone documentation
+| Milestone | Date | Principal change |
+| --- | --- | --- |
+| [1: 60D to 72D](MILESTONE_1_60D_TO_72D.md) | 2026-07-21 | Expanded the observation and straight-line controller contract and documented the original TRS comparison. |
+| [2: Phase Mapping V2 and leg-permutation fix](MILESTONE_2_PHASE_MAPPING_V2_AND_LEG_PERMUTATION_FIX.md) | 2026-08-03 to 2026-08-21 | Separated command direction from time reversal, added the duty-aware TR map, and later restricted the leg-permutation reward to truly synchronous pairs. |
+| [3: Gait-family V2](MILESTONE_3_GAIT_FAMILY_V2.md) | 2026-08-24 | Introduced the closed ten-gait family, family-balanced sampling, and the fixed 10-gait by 6-speed evaluation. |
+| [4: Gait-closure parameter V4](MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md) | 2026-08-25 to 2026-09-01 | Screened hard and ramped TRS schedules, added the full-V3 comparison, and recovered Go2 reward under the documented recovery profile. |
 
-- [60D-to-72D milestone](MILESTONE_60D_TO_72D.md)
-- [Phase Mapping V2 milestone](MILESTONE_PHASE_MAPPING_V2.md)
-- [Leg-permutation fix and gait-family V2 milestone](MILESTONE_LEG_PERMUTATION_FIX_GAIT_FAMILY_V2.md)
-- [Gait-family V2 run log](RUN_LOG_GAIT_FAMILY_V2.md)
+Every milestone states what changed, what remained stable, which evidence
+supports the result, and which limitations prevent a broader claim.
 
-## Current gait-family V2 status
+## Archive layout
 
-The August 20-22 cohort uses the time-reversal-closed V2 training gait library
-and the fixed 10-gait by 6-velocity leg-usage grid. All 420 recorded grid cells
-are valid and pass the planar tracking criterion. See the robot-specific
-[X1](dobot_x1_symm_flat/README.md) and [Go2](unitree_go2_symm_flat/README.md)
-indexes for the retained checkpoints and concise results.
+```text
+good_runs/
+  MILESTONE_1_*.md ... MILESTONE_4_*.md
+  dobot_x1_symm_flat/
+    2026-08-25_* ... 2026-08-27_*       # current V4 training cohort
+    gait_closure_parameter_v4_analysis/ # current comparison
+    legacy/
+      phase_mapping_v2_legacy_permutation_reward/
+      gait_family_v2_analysis/
+  unitree_go2_symm_flat/
+    2026-08-29_* ... 2026-08-31_*       # current V4 training cohort
+    gait_closure_parameter_v4_analysis/ # current comparison
+    legacy/
+      phase_mapping_v2_legacy_permutation_reward/
+      gait_family_v2_analysis/
+```
 
-X1 has a clear observed winner: `m0.1/v0.05` improves both learning and the
-family-balanced leg-usage measures. Go2 does not yet have a joint learning and
-leg-usage winner. Its no-TRS checkpoint still has the best reward, so improving
-Go2 TRS reward while retaining its allocation gains remains active work.
+The Phase Mapping V2 runs used the legacy Gaussian leg-permutation reward.
+They validate the phase/TR mapping study, not the later synchronized-pair
+reward fix. Milestone 2 records this evidence boundary explicitly.
 
-## Dobot X1 runs
+Generated per-run reports may retain absolute checkpoint paths recorded on the
+capture host. Those strings are capture-time provenance; the curated relative
+paths in this archive and its robot indexes are authoritative for a downloaded
+checkout.
 
-- [`2026-08-02_10-28-45_x1_trs_m0p2_v0p10_w500_minv0_20k_512`](dobot_x1_symm_flat/2026-08-02_10-28-45_x1_trs_m0p2_v0p10_w500_minv0_20k_512/)
-- [`2026-08-02_10-35-06_x1_no_trs_20k_512`](dobot_x1_symm_flat/2026-08-02_10-35-06_x1_no_trs_20k_512/)
-- [`2026-08-02_21-02-49_x1_trs_m0p1_v0p05_w500_minv0_20k_512`](dobot_x1_symm_flat/2026-08-02_21-02-49_x1_trs_m0p1_v0p05_w500_minv0_20k_512/)
-- [`2026-08-02_21-07-58_x1_trs_m0p3_v0p15_w500_minv0_20k_512`](dobot_x1_symm_flat/2026-08-02_21-07-58_x1_trs_m0p3_v0p15_w500_minv0_20k_512/)
-- [`2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2`](dobot_x1_symm_flat/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/)
-- [`2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2`](dobot_x1_symm_flat/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/)
-- [`2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2`](dobot_x1_symm_flat/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/)
-- [Phase Mapping V2 X1 analysis](dobot_x1_symm_flat/phase_mapping_v2_x1_trs_run_analysis/REPORT.md)
-- [Gait-family V2 X1 fixed-grid analysis](dobot_x1_symm_flat/gait_famili_v2_analysis/REPORT.md)
+## Current V4 evidence
 
-## Unitree Go2 runs
+- [Dobot X1 runs and result summary](dobot_x1_symm_flat/README.md)
+- [Dobot X1 comparison report](dobot_x1_symm_flat/gait_closure_parameter_v4_analysis/REPORT.md)
+- [Unitree Go2 runs and result summary](unitree_go2_symm_flat/README.md)
+- [Unitree Go2 comparison report](unitree_go2_symm_flat/gait_closure_parameter_v4_analysis/REPORT.md)
 
-- [`2026-07-31_22-48-10_go2_no_trs_20k_512`](unitree_go2_symm_flat/2026-07-31_22-48-10_go2_no_trs_20k_512/)
-- [`2026-07-31_22-48-38_go2_trs_m0p2_v0p1_w500_20k_512`](unitree_go2_symm_flat/2026-07-31_22-48-38_go2_trs_m0p2_v0p1_w500_20k_512/)
-- [`2026-08-01_11-09-46_go2_trs_m0p1_v0p05_w500_minv0_20k_512`](unitree_go2_symm_flat/2026-08-01_11-09-46_go2_trs_m0p1_v0p05_w500_minv0_20k_512/)
-- [`2026-08-01_22-39-14_go2_trs_m0p3_v0p15_w500_minv0_20k_512`](unitree_go2_symm_flat/2026-08-01_22-39-14_go2_trs_m0p3_v0p15_w500_minv0_20k_512/)
-- [`2026-08-20_21-04-16_go2_72d_no_trs_gait_trclosed_v2`](unitree_go2_symm_flat/2026-08-20_21-04-16_go2_72d_no_trs_gait_trclosed_v2/)
-- [`2026-08-21_10-22-39_go2_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2`](unitree_go2_symm_flat/2026-08-21_10-22-39_go2_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/)
-- [`2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2`](unitree_go2_symm_flat/2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/)
-- [`2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2`](unitree_go2_symm_flat/2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2/)
-- [Phase Mapping V2 Go2 analysis](unitree_go2_symm_flat/phase_mapping_v2_go2_trs_run_analysis/REPORT.md)
-- [Gait-family V2 Go2 fixed-grid analysis](unitree_go2_symm_flat/gait_famili_v2_analysis/REPORT.md)
+For X1, low-r0 has the strongest observed learning while all four TRS
+treatments improve every reported front/hind imbalance domain relative to the
+no-TRS checkpoint. For Go2, low-r0 has the strongest learning, and high-r500
+exceeds no TRS in both full AUC and tail reward while improving all four
+front/hind imbalance domains. Tracking, gait fidelity, and load metrics still
+trade off. These are single-training-seed development results.
 
-## Branch visibility
+## Reproduce from a fresh clone
 
-The repository's `main` branch contains only the early archive subset. This
-branch snapshot contains the complete curated set listed above.
+Follow the repository [installation and environment setup](../../../README.md),
+including the matching Isaac Lab/Isaac Sim runtime. Then regenerate the
+committed V4 tables and figures through the Isaac Lab Python wrapper.
+
+Windows PowerShell:
+
+```powershell
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\gait_closure_parameter_v4_analysis\reproduce.py
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\gait_closure_parameter_v4_analysis\reproduce.py
+```
+
+Linux:
+
+```bash
+./isaaclab.sh -p logs/rsl_rl/good_runs/dobot_x1_symm_flat/gait_closure_parameter_v4_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs/unitree_go2_symm_flat/gait_closure_parameter_v4_analysis/reproduce.py
+```
+
+The V4 comparison validates the archived run identity, terminal checkpoint,
+TensorBoard scalar input, full-V3 metrics, manifest, and provenance before
+writing outputs. The Milestone 3 Go2 folder carries its pinned historical
+analysis engine, while the Milestone 2 phase-mapping wrappers retain an
+archival notice and the exact detached commit required for their original
+regeneration.
+
+To play an archived policy, pass its checkpoint path directly, for example:
+
+```powershell
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
+```
+
+## Checkpoint publication policy
+
+Every curated training directory publishes all non-checkpoint artifacts but
+only the numerically latest iteration checkpoint. All 25 current and legacy
+training directories end at `model_19999.pt`; those 25 files are explicitly
+allowed by [`.gitignore`](.gitignore). The 500 intermediate checkpoints remain
+local and ignored. When adding a completed run, update the exact allow-list and
+verify that precisely one `model_*.pt` path from that run is staged.
+
+The three legacy X1 gait-family runs also retain checksum-only initialization
+records. These preserve the observed `model_0.pt` digest for provenance while
+stating explicitly that the initialization checkpoint bytes are not
+published and cannot be independently rehashed from a clone.
+
+Do not remove the retained event file, resolved configuration, source
+provenance, evaluation inputs, or terminal checkpoint. Together they bind the
+published metrics to the archived policy and are required for independent
+inspection.

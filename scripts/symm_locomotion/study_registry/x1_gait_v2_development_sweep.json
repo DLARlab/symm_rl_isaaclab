@@ -55,7 +55,7 @@
     {
       "run_id": "x1_no_trs",
       "label": "No TRS",
-      "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2",
+      "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2",
       "artifact_availability": "tracked",
       "design_role": "main",
       "classification": "eligible_main",
@@ -85,7 +85,7 @@
     {
       "run_id": "x1_trs_m0p1_v0p05_hard",
       "label": "TRS m0.1/v0.05, w500/r0",
-      "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
+      "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
       "artifact_availability": "tracked",
       "design_role": "main",
       "classification": "eligible_main",
@@ -115,7 +115,7 @@
     {
       "run_id": "x1_trs_m0p2_v0p1_hard",
       "label": "TRS m0.2/v0.1, w500/r0",
-      "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
+      "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
       "artifact_availability": "tracked",
       "design_role": "main",
       "classification": "eligible_main",

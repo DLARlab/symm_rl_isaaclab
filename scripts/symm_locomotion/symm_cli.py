@@ -352,7 +352,7 @@ def latest_play_video(run_dir: Path, previous_videos: dict[Path, tuple[int, int]
 
 def converter_command(args: argparse.Namespace, mp4_path: Path, gif_path: Path) -> list[str]:
     """Build a command that converts an MP4 to GIF inside the target conda env."""
-    script = Path(__file__).with_name("mp4_to_gif.py")
+    script = Path(__file__).with_name("_mp4_to_gif.py")
     command = [
         sys.executable,
         str(script),

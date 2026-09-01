@@ -7,9 +7,9 @@ Added
 * Added optional foot-phase reductions, requested-target overflow penalties,
   per-joint feasible actor-mean bounds, normalized-target consistency, and
   gait-sampling curricula for symmetric quadrupeds.
-* Added light and full symmetric-quadruped evaluation protocols, paired
-  mechanism diagnostics, result-independent cohort registries, resumable study
-  launch, and an isolated-process PowerShell scheduler.
+* Added light and full symmetric-quadruped evaluation protocols,
+  result-independent cohort registries, resumable study launch, and a
+  platform-neutral isolated-process command scheduler.
 
 Changed
 ^^^^^^^
@@ -31,3 +31,6 @@ Deprecated
 * Deprecated the ``analyze_leg_usage`` scripts and CLI command in favor of the
   broader ``evaluation`` entry points. Existing commands continue to run the
   legacy full-grid protocol.
+* Deprecated the ``compare.py``, ``compare.sh``, and ``compare.ps1``
+  convenience launchers. Use the ``compare`` subcommand of
+  ``symm_locomotion.ps1`` or ``symm_locomotion.sh`` instead.

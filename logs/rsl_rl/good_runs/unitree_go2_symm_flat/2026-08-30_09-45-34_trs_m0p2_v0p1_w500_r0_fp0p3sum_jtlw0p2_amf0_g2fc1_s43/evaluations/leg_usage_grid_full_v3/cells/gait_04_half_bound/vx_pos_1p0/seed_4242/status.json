@@ -1,0 +1,12 @@
+{
+  "cell_id": "gait_04_half_bound__vx_pos_1p0__seed_4242",
+  "ended_at": "2026-08-30T14:58:42.348913+00:00",
+  "expected_steps": 750,
+  "outcome": "completed",
+  "plan_sha256": "7eb58e08f2da3de33007c07f24f3806cc132a17b007581f81af688b2013eda4f",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "started_at": "2026-08-30T14:58:00.401224+00:00",
+  "status": "complete",
+  "termination_terms": []
+}

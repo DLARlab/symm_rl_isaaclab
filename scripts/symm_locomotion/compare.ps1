@@ -8,5 +8,6 @@ param(
     [string[]]$RemainingArgs
 )
 
-& "$PSScriptRoot\_run.ps1" "compare.py" @RemainingArgs
+Write-Warning "compare.ps1 is deprecated; use symm_locomotion.ps1 compare instead."
+& "$PSScriptRoot\_run.ps1" "symm_cli.py" "compare" @RemainingArgs
 exit $LASTEXITCODE

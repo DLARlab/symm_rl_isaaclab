@@ -33,7 +33,7 @@ Windows PowerShell:
 .\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
 .\scripts\symm_locomotion\evaluation.ps1 --robot go2 --checkpoint latest
-.\scripts\symm_locomotion\compare.ps1 --robots go2 x1
+.\scripts\symm_locomotion\symm_locomotion.ps1 compare --robots go2 x1
 .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
 .\scripts\symm_locomotion\scheduler.ps1 --help
 ```
@@ -47,8 +47,9 @@ bash scripts/symm_locomotion/play.sh --robot go2 --checkpoint latest
 bash scripts/symm_locomotion/play.sh --robot x1 --checkpoint latest
 bash scripts/symm_locomotion/record.sh --robot x1 --checkpoint latest --gif
 bash scripts/symm_locomotion/evaluation.sh --robot x1 --checkpoint latest
-bash scripts/symm_locomotion/compare.sh --robots go2 x1
+bash scripts/symm_locomotion/symm_locomotion.sh compare --robots go2 x1
 bash scripts/symm_locomotion/tensorboard.sh --robots go2 x1
+bash scripts/symm_locomotion/scheduler.sh --help
 ```
 
 Direct Python style still works from an activated environment:
@@ -57,6 +58,7 @@ Direct Python style still works from an activated environment:
 python scripts/symm_locomotion/train.py --robot go2 --iterations 20000 --no-trs
 python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
 python scripts/symm_locomotion/evaluation.py --robot go2 --checkpoint latest
+python scripts/symm_locomotion/scheduler.py --help
 ```
 
 The generic launcher accepts the command as its first argument:
@@ -69,12 +71,34 @@ bash scripts/symm_locomotion/symm_locomotion.sh train --robot go2 --smoke --dry-
 .\scripts\symm_locomotion\symm_locomotion.ps1 train --robot x1 --smoke --dry-run
 ```
 
+## Script lifecycle and inventory
+
+The supported user surface and its implementation are deliberately separated.
+Use the launcher families below for routine work; do not invoke internal
+modules directly or extend historical study reproducers for new experiments.
+
+| Lifecycle | Files | Purpose and recommendation |
+|---|---|---|
+| General launchers | `train.*`, `play.*`, `record.*`, `evaluation.*`, `comparison.*`, `tensorboard.*`, `ablation.*`, `symm_locomotion.{sh,ps1}`, `symm_cli.py` | Supported interfaces for routine training, playback, recording, evaluation, comparison, TensorBoard, and ablation workflows. Prefer the platform wrapper or the matching Python entry point. |
+| General study utilities | `launch_study.py`, `scheduler.*` | Supported advanced tools for manifest-defined studies and delayed sequential shell jobs. |
+| Internal implementation | `_run.{sh,ps1}`, `_tensorboard_scalars.py`, `_leg_usage_metrics.py`, `training_provenance.py`, `study_registry.py`, `_mp4_to_gif.py` | Required implementation and validation modules. They are not additional launcher families; keep them beside the public entry points. |
+| Archival study reproduction | `analyze_matched_trs_study.py`, `analyze_trs_grid.py`, `plot_good_runs_tensorboard.py`, `plot_trs_tensorboard.py`, `update_gait_family_v3_analysis.py`, `paired_tr_consistency.py` | Retained so existing studies remain reproducible. Use `comparison.*` and `evaluation.*` for new work. |
+| Compatibility modules | `leg_usage_metrics.py`, `mp4_to_gif.py` | Stable historical import and script paths; current launchers use their underscored implementation modules. |
+| Deprecated compatibility | `compare.*`, `analyze_leg_usage.*` | Temporary forwarding interfaces. Migrate to `symm_locomotion.* compare` and `evaluation.*`; these files remain for the required deprecation window. |
+
+The former unreleased `compare_gait_closure_runs.py` alias was removed; use
+`comparison.py`, `comparison.sh`, or `comparison.ps1`. Tests under `test/` and
+the JSON facts under `study_registry/` support the files above and are not user
+launchers.
+
 ## Delayed Command Scheduler
 
-`scheduler.ps1` runs any number of PowerShell commands sequentially. Repeat a
-`--delay`/`--command` pair for every step. The first delay begins immediately;
-each later delay begins only after the preceding command has finished, so the
-commands do not overlap.
+`scheduler.py` is the platform-neutral scheduler implementation;
+`scheduler.ps1` and `scheduler.sh` select PowerShell and bash, respectively.
+All three run any number of shell commands sequentially. Repeat a
+`--delay`/`--command` pair for every step. The first delay begins immediately,
+and each later delay begins only after the preceding command has finished, so
+the commands do not overlap.
 
 For example, this waits five hours before training, ten minutes after training
 finishes before recording, and another ten minutes after recording finishes
@@ -94,16 +118,27 @@ before evaluation:
   }
 ```
 
+The equivalent bash form uses quoted bash command strings:
+
+```bash
+bash scripts/symm_locomotion/scheduler.sh \
+  --update_interval 5m \
+  --delay 5h --command 'bash scripts/symm_locomotion/train.sh --robot go2 --run-name delayed_go2' \
+  --delay 10m --command 'bash scripts/symm_locomotion/record.sh --robot go2 --checkpoint latest --gif' \
+  --delay 10m --command 'bash scripts/symm_locomotion/evaluation.sh --robot go2 --checkpoint latest --protocol light'
+```
+
 Durations accept short or long unit suffixes such as `500ms`, `10min`, `5h`,
-and `2days`, or a PowerShell `TimeSpan` such as `01:30:00`.
+and `2days`, or a clock duration such as `01:30:00`.
 `--update_interval` controls countdown output and defaults to `5m`. Use
 `--dry_run` to validate and print a schedule without waiting or executing it.
 A failed command stops later steps by default; add `--continue_on_error` to run
-them anyway. Commands may also be passed as quoted strings, but script blocks
-(`{ ... }`) avoid an extra parsing layer and are recommended. Every step runs
-in an isolated child PowerShell process, so a command containing `exit` reports
-that child's exit code and cannot terminate the scheduler before remaining
-`--continue_on_error` steps run.
+them anyway. The PowerShell wrapper accepts either script blocks (`{ ... }`) or
+quoted command strings. Every step runs in an isolated child shell, so a
+command containing `exit` reports that child's exit code and cannot terminate
+the scheduler before remaining `--continue_on_error` steps run. Direct
+`scheduler.py` use selects PowerShell on Windows and bash elsewhere; use
+`--shell powershell|bash|sh` or `--shell_executable PATH` to override it.
 
 ## Common Options
 
@@ -706,15 +741,6 @@ common gait cycles when at least one full cycle is available, so its actual
 measurement start, stop, duration, and sample count can be shorter and are
 recorded per cell.
 
-The former `analyze_leg_usage.py`, `analyze_leg_usage.ps1`,
-`analyze_leg_usage.sh`, and `analyze_leg_usage` CLI command remain as deprecated
-compatibility entry points for this release. They default to the `legacy`
-compatibility profile, retain arbitrary nonempty `--velocities` and
-`--gait_indices`, and persist the playback-compatible
-`leg_usage_grid_v1`/`full` method pair. The equivalent explicit spelling is
-`evaluation --protocol legacy`; an explicit `--protocol full` or `light`
-still overrides the compatibility default.
-
 The publication methods are immutable and distinct: `full` uses
 `leg_usage_grid_full_v3`, while `light` uses `leg_usage_grid_light_v2`. The
 eight-cell light screen resolves rows through stable gait names and declared
@@ -1059,35 +1085,6 @@ Directed progress uses commanded-sign world-x displacement across the same
 intervals as effort integration, with integrated body-x velocity retained as a
 consistency diagnostic.
 
-After every run in a `gait_famility_v3_analysis/study.json` cohort has a
-completed grid, combine the fixed-grid results with the existing matched
-training-efficiency table using:
-
-```powershell
-.\isaaclab.bat -p .\scripts\symm_locomotion\update_gait_family_v3_analysis.py `
-  .\logs\rsl_rl\unitree_go2_symm_flat\gait_famility_v3_analysis
-```
-
-The updater preserves the legacy report and tables. It adds
-`FIXED_GRID_COMPARISON.md`, two fixed-grid CSV tables, a provenance JSON file,
-and three prefixed SVG figures in the same analysis directory. Before writing,
-it requires complete grids with current analysis provenance and validates that
-all runs used identical robot, task, gait, velocity, timing, seed, nominal
-profile, runtime-override, source, analyzer, terminal-horizon, and aggregation
-settings. Headline comparisons use the exact cross-run intersection of
-gait/velocity cells that are valid and planar-velocity-tracking-qualified for
-every policy. Yaw RMSE, yaw pass counts, and the strict combined planar-plus-yaw
-flag remain explicit audit results without relaxing its threshold. Per-run
-coverage, all-planned-cell audit values, and each policy's own observed strict
-tracking subset remain available separately. To select or reorder a subset,
-repeat `--run RUN_PATH` or `--run LABEL=RUN_PATH`; the default is the ordered
-cohort in the existing analysis `study.json`.
-
-The cross-run torque domain uses raw torque squared. If recorded
-`joint_effort_limits` are PhysX's `1e9 N m` sentinel instead of physical robot
-limits, normalized torque-squared is marked unavailable and is never used for
-figures, ranks, Pareto status, or per-directed-meter comparisons.
-
 Extra Isaac Lab or Hydra overrides can be passed after `--`. Launcher arguments
 before that delimiter are parsed strictly, and the delimiter itself is not
 forwarded. For compatibility, delimiter-free Hydra `key=value` overrides are
@@ -1098,33 +1095,205 @@ bash scripts/symm_locomotion/train.sh --robot go2 --no-trs -- \
   env.commands.base_velocity.ranges.lin_vel_x='(-1.0, 2.0)'
 ```
 
-## Matched TRS Study Analysis
+## Gait-closure run comparison
 
-`analyze_matched_trs_study.py` is the maintained entry point for the Phase
-Mapping V2 four-run studies. Robot-specific run folders, coefficients, plotting
-bounds, and command windows live in a `study.json` manifest beside each report;
-the metric, validation, table, and SVG implementation is shared.
+`comparison.py` contains the CLI, validation, aggregation, and rendering for
+the reusable gait-closure comparison. It accepts any ordered set of two or more
+completed `leg_usage_grid_full_v3` runs. Each `--run` value
+must be `ABBREVIATION=RUN_NAME`; the abbreviation is the compact label used in
+the legends. Run arguments retain their command-line order, except that the
+explicit `--baseline` is placed first in comparison tables and figures. The
+baseline is always black.
+
+The following command reproduces the five-run Go2 comparison. The resolver
+checks the normal experiment root first and then the curated `good_runs` root;
+this matters because the final run currently lives only in `good_runs`.
 
 ```powershell
-python .\scripts\symm_locomotion\analyze_matched_trs_study.py `
-  .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\phase_mapping_v2_go2_trs_run_analysis\study.json
-
-python .\scripts\symm_locomotion\analyze_matched_trs_study.py `
-  .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\phase_mapping_v2_x1_trs_run_analysis\study.json
+.\isaaclab.bat -p .\scripts\symm_locomotion\comparison.py `
+  --run "NoTRS=2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
+  --run "Low-r0=2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
+  --run "Low-r500=2026-08-31_00-14-06_trs_m0p1_v0p05_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
+  --run "High-r0=2026-08-30_09-45-34_trs_m0p2_v0p1_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
+  --run "High-r500=2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
+  --baseline NoTRS `
+  --run_root .\logs\rsl_rl\unitree_go2_symm_flat `
+  --run_root .\logs\rsl_rl\good_runs\unitree_go2_symm_flat `
+  --output_dir .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis
 ```
 
-The small `reproduce.py` file in either analysis directory invokes the same
-shared engine. Before producing outputs, it verifies matched rollout members,
-terminal checkpoints, resolved configurations, and archived training-source
-provenance. Initial checkpoints are also compared when all are available; the
-latest-only curated archive omits them, and a partially present initial set is
-rejected. Generated `summary.json` files record the validation state, analysis
-method, engine hash, and manifest hash. Treat this manifest-driven utility as
-the source of truth for future matched TRS studies; the older hard-coded grid
-and TensorBoard scripts remain available for compatibility. Analysis method
-`phase_mapping_v2_matched_trs_v1` is intentionally scoped to four-condition,
-20,000-iteration studies; use a new versioned method before changing that
-horizon or the early-AUC definition.
+The equivalent platform launchers are `comparison.ps1` on Windows and
+`comparison.sh` on Linux/macOS. They forward every argument to
+`comparison.py` through the shared environment launcher. For example:
+
+```powershell
+.\scripts\symm_locomotion\comparison.ps1 --manifest `
+  .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis\study.json
+```
+
+```bash
+bash scripts/symm_locomotion/comparison.sh --manifest \
+  logs/rsl_rl/unitree_go2_symm_flat/gait_closure_v4_analysis/study.json
+```
+
+Do not confuse this analysis launcher family with the deprecated `compare.py`,
+`compare.sh`, and `compare.ps1` compatibility launchers. Those launchers
+forward to the supported `compare` subcommand, which only prints recent run
+directories and their latest checkpoint names; it does not load evaluation
+data, aggregate metrics, or generate comparison artifacts. Use
+`symm_locomotion.ps1 compare` or `symm_locomotion.sh compare` while the
+compatibility launchers complete their deprecation cycle.
+
+The example's treatment order deliberately preserves the v2 semantic colors:
+Low-r0 is blue, Low-r500 is light blue, High-r0 is orange, and High-r500 is
+green. `--run_root` is repeatable. When it is omitted, the two roots shown
+above are the defaults. Identical archived copies resolve to the first root;
+copies that differ in any comparison-consumed evaluation, checkpoint,
+training-metadata, or TensorBoard input are rejected as ambiguous.
+Duplicate abbreviations, duplicate resolved paths, a missing baseline, and
+incompatible evaluation protocols are also errors. The v2 palette provides
+unique colors for up to eight runs, including the black baseline; larger
+cohorts are rejected instead of reusing ambiguous colors. `--repo_root` and
+`--evaluation_subdir` may be used for a non-default checkout or evaluation
+folder. The default evaluation subdirectory is
+`evaluations/leg_usage_grid_full_v3`.
+
+### Required run artifacts
+
+The comparison consumes analyzer outputs rather than recalculating metrics
+from simulation arrays. Each selected directory must have this structure:
+
+```text
+RUN_NAME/
+  events.out.tfevents.*
+  model_<checkpoint_iteration>.pt
+  provenance/                         # normal modern training metadata
+    initialization.json
+  evaluations/
+    leg_usage_grid_full_v3/
+      study.json
+      progress.json
+      metrics/
+        analysis_provenance.json
+        cell_metrics.csv
+        overall_metrics.json
+```
+
+Legacy curated runs that predate initialization provenance may instead provide
+`params/agent.yaml`, `params/env.yaml`, `model_0.pt`, and a registered Git
+snapshot. The comparison accepts this fallback only after the run's study
+registry and every registered artifact hash validate. It marks the weaker
+metadata source in its manifest and provenance and adds a report warning
+because pre-rollout RNG and runtime identity cannot be reconstructed.
+
+The checkpoint named by the evaluation `study.json` must still be present and
+must match its recorded SHA-256. The study must contain the same robot, task,
+gait library and definitions, velocity grid, evaluation seed, timing, contact
+configuration, and effort-limit provenance for every run. Every requested
+metric domain must be complete. If `cell_metrics.csv` and its provenance do not
+exist yet, first run the full-v3 evaluator's analyze-only workflow; that step
+also requires the archived cell `sim_data.npz`, metadata, status, and recording
+manifest files.
+
+Other normal run artifacts, including `provenance/cohort_metadata.json`,
+`provenance/resolved_command.json`, family/stratified metric tables, and raw
+cell recordings, remain useful audit material but are not read by this
+comparison once the validated full-v3 summaries exist.
+
+### Manifest and reproduction modes
+
+A successful direct run writes `study.json` with the resolved paths, ordered
+abbreviations, colors, baseline, protocol identity, and plotting settings.
+`analysis_provenance.json` records the input hashes together with the exact
+unified `comparison.py`, `comparison.sh`, `comparison.ps1`, and TensorBoard
+scalar-parser hashes. The output also includes a small
+`reproduce.py`.
+`source_manifest_snapshot.json` preserves the exact
+manifest supplied to a manifest-mode run; in direct mode it mirrors the
+generated canonical study. Either entry point can regenerate the same analysis:
+
+```powershell
+.\isaaclab.bat -p .\scripts\symm_locomotion\comparison.py `
+  --manifest .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis\study.json
+
+.\isaaclab.bat -p `
+  .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis\reproduce.py
+```
+
+In manifest mode, `--output_dir` defaults to the manifest's parent directory.
+Do not hand-edit generated CSV files or figures; edit the manifest or rerun the
+direct command so the recorded configuration remains reproducible.
+
+### Aggregation and metric definitions
+
+The three velocity scopes are all nonzero commands, negative commands, and
+positive commands. Within a commanded gait family, each valid gait-row,
+velocity, and evaluation-seed cell has equal weight. Overall values are the
+equal mean of the family means:
+
+```text
+family_mean(m) = mean(m(cell) for cells in that commanded family and scope)
+overall(m)     = mean(family_mean(m) for each commanded gait family)
+```
+
+This prevents the four half-bound rows and four gallop rows from outweighing
+the single trot and bound rows. The script uses all valid cells and never
+filters a policy by tracking, gait, or joint-success outcomes. The five-run Go2
+grid has 60 cells per run: 6 trot, 6 bound, 24 half-bound, and 24 gallop. Each
+direction contains half of those cells.
+
+Forward-velocity tracking is
+`sqrt(mean((vx - vx_command)^2))` in `[m/s]`; yaw-velocity tracking is
+`sqrt(mean((yaw_rate - yaw_rate_command)^2))` in `[rad/s]`. Gait agreement is
+the boundary-excluded desired-versus-measured contact agreement, reported in
+percent.
+
+All four leg-usage panels report the mean absolute per-cell front/hind
+imbalance, `100 * abs(front - hind) / (front + hind)`, where front is FL+FR and
+hind is RL+RR. Torque squared is the raw actuator exposure
+`sum(integral(torque^2 dt))` in `[N^2 m^2 s]`. Normalized torque squared is the
+distinct utilization exposure `sum(integral((torque / effort_limit)^2 dt))` in
+`[s]`; it uses each action-ordered joint's physical configured effort limit.
+Its canonical comparison ID is `normalized_torque_squared`; its archived
+full-v3 source prefix is `normalized_torque_utilization`.
+The other two sources are absolute work `sum(integral(abs(power) dt))` in `[J]`
+and positive vertical-GRF impulse in `[N s]`. Their plotted imbalance is
+dimensionless percent in every case; the integral units describe the front and
+hind quantities used to form that ratio.
+
+### Figure catalog
+
+Every figure is emitted as PNG and SVG with stable IDs and filenames:
+
+- **Fig1** (`fig01`) — training efficiency, with the learning-curve, sample-efficiency,
+  and wall-time content and styling of the v2 template.
+- **Fig2** (`fig02`) — a 3-by-2 overall velocity grid. Rows are all, negative, and
+  positive velocities; columns are forward-velocity RMSE and yaw-velocity
+  RMSE.
+- **Fig3.1**, **Fig3.2**, and **Fig3.3** (`fig03_01`, `fig03_02`, and
+  `fig03_03`) — two stacked gait-family velocity panels for all, negative, and
+  positive velocities. **Fig3** (`fig03`) stacks those three figures from top
+  to bottom.
+- **Fig4** (`fig04`) — three overall leg-usage rows, one for each velocity
+  scope. Every row contains raw torque squared, normalized torque squared,
+  absolute work, and vertical-GRF impulse.
+- **Fig5.1**, **Fig5.2**, and **Fig5.3** (`fig05_01`, `fig05_02`, and
+  `fig05_03`) — four stacked gait-family leg-usage panels for all, negative,
+  and positive velocities. **Fig5** (`fig05`) stacks those three figures from
+  top to bottom.
+- **Fig6** (`fig06`) — three stacked overall gait-agreement panels for all,
+  negative, and positive velocities.
+- **Fig7.1**, **Fig7.2**, and **Fig7.3** (`fig07_01`, `fig07_02`, and
+  `fig07_03`) — one gait-family agreement panel for all, negative, and positive
+  velocities. **Fig7** (`fig07`) stacks those three figures from top to bottom.
+
+The summary CSVs are tidy long-form data: one plotted run/metric/scope/family
+value per row, with the cell count, family count, unit, direction of
+improvement, and delta from the designated baseline. The combined figures
+reuse their numbered component data and do not perform a second aggregation.
+For the five-run, four-family cohort, `evaluation_cells.csv` has 300 rows;
+the velocity, leg-usage, and gait-fidelity summary tables have 150, 300, and 75
+rows respectively.
 
 ## Logs
 

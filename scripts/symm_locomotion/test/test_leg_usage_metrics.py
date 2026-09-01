@@ -78,7 +78,7 @@ def _gaits() -> tuple[dict, ...]:
 
 
 def test_hysteresis_rejects_chatter_and_enforces_dwell():
-    metrics = _load("leg_usage_metrics_hysteresis", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_hysteresis", "_leg_usage_metrics.py")
     force = np.zeros((9, 4))
     force[:, 0] = [0.0, 12.0, 0.0, 12.0, 13.0, 11.0, 4.0, 3.0, 0.0]
 
@@ -89,7 +89,7 @@ def test_hysteresis_rejects_chatter_and_enforces_dwell():
 
 
 def test_contact_error_rates_use_desired_state_conditional_denominators():
-    metrics = _load("leg_usage_metrics_conditional_rates", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_conditional_rates", "_leg_usage_metrics.py")
     desired = np.asarray([False, False, True, True, True, True])
     actual = np.asarray([True, False, False, True, True, True])
 
@@ -102,7 +102,7 @@ def test_contact_error_rates_use_desired_state_conditional_denominators():
 
 
 def test_event_matching_never_crosses_common_cycle_identity():
-    metrics = _load("leg_usage_metrics_cycle_matching", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_cycle_matching", "_leg_usage_metrics.py")
     common = np.asarray([0.99, 1.01])
     foot_phase = np.asarray([0.50, 0.50])
     target = np.asarray([0.50, 0.50])
@@ -122,7 +122,7 @@ def test_event_matching_never_crosses_common_cycle_identity():
 
 
 def test_ideal_trot_recovers_contact_events_order_and_classifier():
-    metrics = _load("leg_usage_metrics_gait", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_gait", "_leg_usage_metrics.py")
     step_dt = 0.01
     common = np.arange(0.0, 4.0, step_dt)
     offsets = np.asarray(_gaits()[0]["phases"])
@@ -191,7 +191,7 @@ def test_ideal_trot_recovers_contact_events_order_and_classifier():
 
 
 def test_gait_classifier_fails_closed_without_minimum_events():
-    metrics = _load("leg_usage_metrics_gait_coverage", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_gait_coverage", "_leg_usage_metrics.py")
     step_dt = 0.01
     common = np.arange(0.0, 4.0, step_dt)
     force = np.zeros((len(common), 4))
@@ -216,7 +216,7 @@ def test_gait_classifier_fails_closed_without_minimum_events():
 
 
 def test_duty_error_uses_commanded_beta_not_sampled_binary_fraction():
-    metrics = _load("leg_usage_metrics_commanded_duty", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_commanded_duty", "_leg_usage_metrics.py")
     common = np.arange(0.50, 1.00, 0.10)
     offsets = np.zeros(4)
     desired, _, _ = metrics.desired_stance_states(common, offsets, 0.5, 0.0)
@@ -247,7 +247,7 @@ def test_duty_error_uses_commanded_beta_not_sampled_binary_fraction():
 
 
 def test_cyclic_order_merges_wraparound_simultaneous_events_and_canonicalizes_rotation():
-    metrics = _load("leg_usage_metrics_cyclic_wrap", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_cyclic_wrap", "_leg_usage_metrics.py")
     common = np.arange(0.0, 2.0, 0.01)
     touchdowns = [
         np.asarray([99, 199]),
@@ -262,7 +262,7 @@ def test_cyclic_order_merges_wraparound_simultaneous_events_and_canonicalizes_ro
 
 
 def test_cyclic_order_agreement_aligns_unequal_traces_by_common_cycle():
-    metrics = _load("leg_usage_metrics_cyclic_alignment", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_cyclic_alignment", "_leg_usage_metrics.py")
     step_dt = 0.01
     common = np.arange(0.0, 4.0, step_dt)
     offsets = np.asarray(_gaits()[0]["phases"])
@@ -296,7 +296,7 @@ def test_cyclic_order_agreement_aligns_unequal_traces_by_common_cycle():
 
 
 def test_velocity_metrics_preserve_signed_bias_heading_and_path():
-    metrics = _load("leg_usage_metrics_velocity", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_velocity", "_leg_usage_metrics.py")
     count = 100
     commands = np.zeros((count, 3))
     commands[:, 0] = -1.0
@@ -331,7 +331,7 @@ def test_velocity_metrics_preserve_signed_bias_heading_and_path():
 
 
 def test_velocity_transient_fraction_uses_measurement_window_overlap():
-    metrics = _load("leg_usage_metrics_velocity_transient", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_velocity_transient", "_leg_usage_metrics.py")
     commands = np.zeros((6, 3))
     commands[:, 0] = 1.0
     velocity = np.zeros_like(commands)
@@ -354,7 +354,7 @@ def test_velocity_transient_fraction_uses_measurement_window_overlap():
 
 
 def test_load_metrics_report_concentration_worst_joint_and_sentinel_rejection():
-    metrics = _load("leg_usage_metrics_load", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_load", "_leg_usage_metrics.py")
     count = 20
     torque = np.tile(np.repeat([1.0, 2.0, 3.0, 4.0], 3), (count, 1))
     power = 2.0 * torque
@@ -508,7 +508,7 @@ def test_directional_pair_metric_uses_mean_velocity_equation_with_recorded_epsil
 
 
 def test_success_metrics_publish_independent_velocity_gait_and_joint_flags():
-    metrics = _load("leg_usage_metrics_success_domains", "leg_usage_metrics.py")
+    metrics = _load("leg_usage_metrics_success_domains", "_leg_usage_metrics.py")
     velocity = {
         "signed_directed_progress_m": 1.0,
         "vx_relative_rmse": 0.05,

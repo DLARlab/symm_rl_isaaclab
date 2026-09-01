@@ -1,0 +1,303 @@
+{
+  "comparison_launchers": {
+    "bash": {
+      "path": "scripts/symm_locomotion/comparison.sh",
+      "sha256": "f06d54c447f38d22dd1688550e49676744b0f955d7d13f4ddfaced4f8ea97d59"
+    },
+    "powershell": {
+      "path": "scripts/symm_locomotion/comparison.ps1",
+      "sha256": "b41accecd95d7f749197db3fcfcf9e6a7e9d4fe804df48ffa4c2e1c92a1b0637"
+    },
+    "python": {
+      "path": "scripts/symm_locomotion/comparison.py",
+      "sha256": "0c6d1e2a130e186427406fa5064f8352f9a9fb2bb357aa8521abde8243fb7902"
+    }
+  },
+  "comparison_script": {
+    "path": "scripts/symm_locomotion/comparison.py",
+    "sha256": "0c6d1e2a130e186427406fa5064f8352f9a9fb2bb357aa8521abde8243fb7902"
+  },
+  "evaluation_protocol_sha256": "07877a4c2a61e6622ec84ad6a04503696b52cd15b730592eb213f21faedc8849",
+  "generated_at_utc": "2026-09-01T14:10:45.746129+00:00",
+  "inputs": [
+    {
+      "abbreviation": "No TRS",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/model_19999.pt",
+      "checkpoint_sha256": "7cd84ae3efbb622129bba44ef0f05698f0f495303a1f663d98e543c96330d9d6",
+      "evaluation_analysis_record_sha256": "8175ba7c57f2c6141ae17c00fd765e9ae60c86cd0c3ba9a8b32804c3d4ad984a",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "71606547288f491f040fac085aad5f081d63bb5d981c3a4a0566162958794ff0"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "4bf4b2db7eda763967293649f1d241c25e85e6c03c445b379ec53a5fa763abcd"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "58d581c7273369188f2803c3427449a8e1d7d991647182b69389e724216e47c5"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "8c0a7117e7e154b568213e1b90c0cd1949e12076621d16643bff3b551f9928c2"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "b496a3c508c0c2b8e35f3204a2ac62f1556435ac58b3eb8124d5439d2038e346"
+        }
+      },
+      "event_sha256": "aa2f09b8fd54155bf57920d82f7ef4a32a114db4db477514038d9afffc13d833",
+      "iteration_zero_checkpoint_availability": "checksum_only",
+      "iteration_zero_checkpoint_sha256": "9da57201289d082c3fed9c94d0a5d0703f9406cd2abd60604e4b2519b8a2b4ca",
+      "legacy_initialization_checksum_record": {
+        "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/provenance/legacy_initialization.json",
+        "record_sha256": "29d45b1fafc5265af828f61e6fb1e3f55977b91fd440590a1c4e4eee75d2d186",
+        "sha256": "8af5cf8a172009e793ba0ca17d1c3fb2e6d636e0866a29d3e7a9c015dff48a6b"
+      },
+      "legacy_registry": {
+        "classification": "eligible_main",
+        "cohort_id": "x1_gait_v2_development_sweep",
+        "path": "scripts/symm_locomotion/study_registry/x1_gait_v2_development_sweep.json",
+        "run_id": "x1_no_trs",
+        "sha256": "6593a8a07fd955c8ec292b96875449f739022ea473d66cef02e1d5a8d1b6f6c8"
+      },
+      "run_id": "run_00",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/params/agent.yaml",
+            "sha256": "9a7844e03980e931bfffd7afe0aa5066658f057be25ab12e37b7ed2aa0237040"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/params/env.yaml",
+            "sha256": "f1da83823be6c32d1157536f7460ff06b2b712b6d0af2857556fedf9c5ef72fe"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/git/symm_rl_isaaclab.diff",
+            "sha256": "18f94301fef6dfd4735001434908c28a3a5d44067bb126ba4989782659baa5bd"
+          },
+          {
+            "path": "scripts/symm_locomotion/study_registry/x1_gait_v2_development_sweep.json",
+            "sha256": "6593a8a07fd955c8ec292b96875449f739022ea473d66cef02e1d5a8d1b6f6c8"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-26_x1_72d_no_trs_gait_trclosed_v2/provenance/legacy_initialization.json",
+            "sha256": "8af5cf8a172009e793ba0ca17d1c3fb2e6d636e0866a29d3e7a9c015dff48a6b"
+          }
+        ],
+        "source": "legacy_registered_run_snapshot_checksum_only"
+      }
+    },
+    {
+      "abbreviation": "TRS m0.1/v0.05",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/model_19999.pt",
+      "checkpoint_sha256": "16706ca26ed3edc69438520f8e6e48346bc6f016c052fd37155fca94a4625a08",
+      "evaluation_analysis_record_sha256": "5c06a4f7c067d882f272522bcbdfdef041c2824211c6c151f30305a84408798e",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "9bd9b6b636b10d0493a8eae8c337f41b6e41617ae4376621f1e3176af14d450c"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "0cd2db4776c29bd2bc844e306e10d262a4144741a713411631ad04605a2a0cd2"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "d5695aab2b79d76c548b3ca053fa45546724230188c8942f94362308ebee112b"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "e6372ef6305ba1afaba3b6e2b441645d76f708e558f00c00e73058814760d07e"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "3b048e090c3587a4e44741c3d7719d78217104b5519e13993f9cd2eff1957d68"
+        }
+      },
+      "event_sha256": "65c5562ea409f8680b910dc35dc042aa4b57aade22c66fb907dcf372d80a1afb",
+      "iteration_zero_checkpoint_availability": "checksum_only",
+      "iteration_zero_checkpoint_sha256": "9da57201289d082c3fed9c94d0a5d0703f9406cd2abd60604e4b2519b8a2b4ca",
+      "legacy_initialization_checksum_record": {
+        "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/provenance/legacy_initialization.json",
+        "record_sha256": "b95edffa58fada92f12ef93c19776774119f3e1eb84f216ed32ce7d7c67f8dde",
+        "sha256": "ef7836374a7260fa07d8d239d6d91a0cf69211ad3de16ecfcc4d050f55fb04fe"
+      },
+      "legacy_registry": {
+        "classification": "eligible_main",
+        "cohort_id": "x1_gait_v2_development_sweep",
+        "path": "scripts/symm_locomotion/study_registry/x1_gait_v2_development_sweep.json",
+        "run_id": "x1_trs_m0p1_v0p05_hard",
+        "sha256": "6593a8a07fd955c8ec292b96875449f739022ea473d66cef02e1d5a8d1b6f6c8"
+      },
+      "run_id": "run_01",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/params/agent.yaml",
+            "sha256": "e80d9d1b6d7674402c164f9bd2cd813ddd1e6ef55f38e5dea13be4e2009ab9f8"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/params/env.yaml",
+            "sha256": "14d7aff4e14522c641532d99bb9f4a26ce344f885a619026474ecea38eabcee6"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/git/symm_rl_isaaclab.diff",
+            "sha256": "18f94301fef6dfd4735001434908c28a3a5d44067bb126ba4989782659baa5bd"
+          },
+          {
+            "path": "scripts/symm_locomotion/study_registry/x1_gait_v2_development_sweep.json",
+            "sha256": "6593a8a07fd955c8ec292b96875449f739022ea473d66cef02e1d5a8d1b6f6c8"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_06-37-31_x1_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2/provenance/legacy_initialization.json",
+            "sha256": "ef7836374a7260fa07d8d239d6d91a0cf69211ad3de16ecfcc4d050f55fb04fe"
+          }
+        ],
+        "source": "legacy_registered_run_snapshot_checksum_only"
+      }
+    },
+    {
+      "abbreviation": "TRS m0.2/v0.1",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/model_19999.pt",
+      "checkpoint_sha256": "5bcb69a972c15aa17bdd9f11531a0628112627b95b24fd3eff60a97aeecba4e9",
+      "evaluation_analysis_record_sha256": "599d02871faba1d7e42dbc0008a442b10d09e5b304e36cfb40bb2ca971643584",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "7ad66653b369de23eef00f975005458f4f990145ec48184a1e8407cbf89f2ef4"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "9b376202f1daa0e8c90dfdf12d443003d0a915a339c9ec8ee700e1ff27f36fdb"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "f39ca3ea5418d460111a17fdbb49c6f687341534a9b5d914ab337707c732c4f0"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "481f5c818a9f4fc85ab73ba25cf41e0f9e294040d17b45350f8dd8eba97314a3"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "9941c12534e9cac6273a9bd644aefbe2411021c7597a579d9a7a0db2220dc448"
+        }
+      },
+      "event_sha256": "66c5edb1380799c6001cd81e79f71567858d88a9496eb290909ee5ef38ce48db",
+      "iteration_zero_checkpoint_availability": "checksum_only",
+      "iteration_zero_checkpoint_sha256": "9da57201289d082c3fed9c94d0a5d0703f9406cd2abd60604e4b2519b8a2b4ca",
+      "legacy_initialization_checksum_record": {
+        "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/provenance/legacy_initialization.json",
+        "record_sha256": "3d4c882374d8ffc1c5654e01144dfe69a5bee02d596ba95b05b40449227505b4",
+        "sha256": "0d59594fd4a36bb34ba85c23cf48a251ca1f90bc5fd3ae27d26006a6c0a53998"
+      },
+      "legacy_registry": {
+        "classification": "eligible_main",
+        "cohort_id": "x1_gait_v2_development_sweep",
+        "path": "scripts/symm_locomotion/study_registry/x1_gait_v2_development_sweep.json",
+        "run_id": "x1_trs_m0p2_v0p1_hard",
+        "sha256": "6593a8a07fd955c8ec292b96875449f739022ea473d66cef02e1d5a8d1b6f6c8"
+      },
+      "run_id": "run_02",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/params/agent.yaml",
+            "sha256": "73f6e1a2ee38150f4e54a68c5ad5e0b7d4646f4324acb7361f918de60837217b"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/params/env.yaml",
+            "sha256": "f5b034f15bdb5fcf3818fe5a58ac1906c335ec651d67470087d4b3d83929ac42"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/git/symm_rl_isaaclab.diff",
+            "sha256": "f32ce1a996c5cbda42db07fe4bdde4961816667bc58444a4be4a4ac54a5107f0"
+          },
+          {
+            "path": "scripts/symm_locomotion/study_registry/x1_gait_v2_development_sweep.json",
+            "sha256": "6593a8a07fd955c8ec292b96875449f739022ea473d66cef02e1d5a8d1b6f6c8"
+          },
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-05_x1_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2/provenance/legacy_initialization.json",
+            "sha256": "0d59594fd4a36bb34ba85c23cf48a251ca1f90bc5fd3ae27d26006a6c0a53998"
+          }
+        ],
+        "source": "legacy_registered_run_snapshot_checksum_only"
+      }
+    }
+  ],
+  "method_version": "gait_closure_comparison_v1",
+  "outputs": {
+    "REPORT.md": "870c8ce2f3168b6a784fc1ce9aa0de1bd02511550d9d5ff0abbbb63acfcbd3ae",
+    "evaluation_cells.csv": "a13b809a6c7d62d43e6df9a5cbb2afea056e36158e18900db2c4488f43319335",
+    "fig01_training_efficiency.png": "acd717671677a97f0c241791caf2336f9e136d5cb8ba8e2b990ece46ec63e6c9",
+    "fig01_training_efficiency.svg": "962515e39f5c2e9b0351bc6467dfbaa3d9b8033f6adec0dfa600c4c07adff280",
+    "fig02_velocity_tracking_overall_direction.png": "f58efe138d4ef53805b745b16382ab880ff42cef6fc2f65349dabb8f32ba14da",
+    "fig02_velocity_tracking_overall_direction.svg": "e35731cfcbd58a5e6cab60d49144bdb7fad8a69a6f398cd26c8310d555b566a7",
+    "fig03_01_velocity_tracking_by_family_all.png": "9e1043a4efa0f56eaa74c615c2bdb1b9f7c40643c022e546a46671ff620d1072",
+    "fig03_01_velocity_tracking_by_family_all.svg": "7c622e932d00cef791c11c2797af02bfa70ab800ea81eed6fded294b6d361f0c",
+    "fig03_02_velocity_tracking_by_family_negative.png": "6f5755ee98e711bc02b623cfab89f734f713237cc64a2353172fc8ca75846482",
+    "fig03_02_velocity_tracking_by_family_negative.svg": "2d3d389a8542e6d056855c6667ff3ddcfe039f330bf1df7ea912143b63d44f54",
+    "fig03_03_velocity_tracking_by_family_positive.png": "566a54cf4928c179ff29ffa7fa4f17426a7d7e946ff4ef7cf87be06eed0a7d1d",
+    "fig03_03_velocity_tracking_by_family_positive.svg": "c10a0302d1f138005fe0f589048f766ddc970a4eaf151643cf403c9554fc6f52",
+    "fig03_velocity_tracking_by_family_combined.png": "69e1f390c4cba5c00f61f15345b788a060ae238286d70cf344440ec7c987518c",
+    "fig03_velocity_tracking_by_family_combined.svg": "80e7a40856fe779e18ddd9496b07c59e4b8cff53526f7b61e629b7d65041a6b7",
+    "fig04_leg_usage_overall_direction.png": "00e8b34f4ac84d8e97210395c0798486058a7ef77457baa26e5743cbd4842ada",
+    "fig04_leg_usage_overall_direction.svg": "6071fb1b6d187da4247a5641c5a61aa1ba1c971a6e5e0d544dda35e2fac5904a",
+    "fig05_01_leg_usage_by_family_all.png": "27e4062a38cab2f82324097601db27e3b7fa7ab48596a747c8583fa9b3d3bfa1",
+    "fig05_01_leg_usage_by_family_all.svg": "0726dec3b935338b87ba7c9c3f6157f67dbc6da6d96560c4598a58b54fc3a524",
+    "fig05_02_leg_usage_by_family_negative.png": "093c1ef385a34b7342761407b1748471835e4f420b9a3f00ca91c280ea3cb075",
+    "fig05_02_leg_usage_by_family_negative.svg": "d384ff2d88e17ea32c526634d894c66b110f78232f529b9048679d911d16a0cc",
+    "fig05_03_leg_usage_by_family_positive.png": "ca7099a6e08c1551e8e0d3d897b75533a4e79684b763f346add7fe62a19eb6d8",
+    "fig05_03_leg_usage_by_family_positive.svg": "1142dae748644b865a2541879efbdf560910ee40b22c85151ba28933021885c4",
+    "fig05_leg_usage_by_family_combined.png": "dc00e3cbe39021927699186c75f346d97f5736676353a48947a41efdde955299",
+    "fig05_leg_usage_by_family_combined.svg": "d2cf48dd7203dd9fad3fee90b0eaa50dd8a958afad4185f8958c439fe065f013",
+    "fig06_gait_fidelity_overall_direction.png": "a98fc6f785d2d04accc59db51fb68d939346c5be5c14eacad5b805e76d265172",
+    "fig06_gait_fidelity_overall_direction.svg": "a9da591ef1d4d8baaca20bee7c6ebc2817b08d25ed16913c11b4ab01ddf8c7ff",
+    "fig07_01_gait_fidelity_by_family_all.png": "7a91982a384100b97aa43ae35d9bf3db051c0b746b0f893e0ceae2bdc062ca55",
+    "fig07_01_gait_fidelity_by_family_all.svg": "41df08ef225fa6c55c72d0ed6961ade99edda2e751633d06dc8814d490950029",
+    "fig07_02_gait_fidelity_by_family_negative.png": "f2a6981827deb52481ece9244c89e4d1703d1eb2a9b0f7e2bb0edd9c1ef2b4c8",
+    "fig07_02_gait_fidelity_by_family_negative.svg": "de4b63e0e16ad96afefddc80cf83e1f670b538bdfdda96349b73e6a29f2a3431",
+    "fig07_03_gait_fidelity_by_family_positive.png": "974489b0706b7c6a46d78bab73265ab0d43a1ab504513f81397df22e4edc6532",
+    "fig07_03_gait_fidelity_by_family_positive.svg": "ebfc7e1dd4834f9e8a50594ad398897d09d6d811b9484b390a32861af5f9c720",
+    "fig07_gait_fidelity_by_family_combined.png": "67884d7ae5a059bd7d843ed8e35e046be74f0d9110ec7492626f3821b4e77d7a",
+    "fig07_gait_fidelity_by_family_combined.svg": "b2fc930e632430e2e499bd55697ebef56c3938ca53d236c838725447d9e92449",
+    "figure_manifest.json": "cdeff3cdbe01f5ad4bccb30bf5553f52c36ee668a9f3cf889eeb975aa6e005a0",
+    "gait_fidelity_summary.csv": "676ffd065d8c13e2aa6165a63245f9e1d93287089e9fc8eeb95e7b82e957a759",
+    "learning_curve_points.csv": "cae56d3123b48ab9c58104ef915070312f98389085031af0b90fc3d5a93940c4",
+    "leg_usage_summary.csv": "61a0da7be257d53ff83be6717a6814942700b3e8858fb8b1cf3e7878030d074d",
+    "reproduce.py": "12913efb1024a37c53e63426be840b6fa8eb41b5eb949451e32b673a46b16f3d",
+    "source_manifest_snapshot.json": "31911e3e6332ef2fae4921d836733d01ec9bd9242b8fbf01087252fda54b3d84",
+    "study.json": "31911e3e6332ef2fae4921d836733d01ec9bd9242b8fbf01087252fda54b3d84",
+    "style.json": "26215d3ea08d56707fb928bfdb211d4697e1dafa1517ae89f42b3fdf5c81885a",
+    "summary.json": "fc16dbb537579be90abc362c3b41fa80af8a78411d23dfc83c2cb4f58f62c2f1",
+    "training_efficiency.csv": "cafc5352768f4fcf4cedbd34dbe35f492e9be50c0b53c4e692154c1a661db293",
+    "velocity_tracking_summary.csv": "7ff0ae183e042721f83d2836701411d83a98c6585ca685a138e2b871d416f99f"
+  },
+  "plot_script": {
+    "path": "scripts/symm_locomotion/comparison.py",
+    "sha256": "0c6d1e2a130e186427406fa5064f8352f9a9fb2bb357aa8521abde8243fb7902"
+  },
+  "record_sha256": "e010b869c96a23d5d12f5035f7bcd1b8d2c4e237ffdf65d14e6b84636850e2aa",
+  "schema_version": 1,
+  "source_manifest": {
+    "original_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/gait_family_v2_analysis/study.json",
+    "path": "source_manifest_snapshot.json",
+    "sha256": "31911e3e6332ef2fae4921d836733d01ec9bd9242b8fbf01087252fda54b3d84"
+  },
+  "study_sha256": "31911e3e6332ef2fae4921d836733d01ec9bd9242b8fbf01087252fda54b3d84",
+  "style_sha256": "26215d3ea08d56707fb928bfdb211d4697e1dafa1517ae89f42b3fdf5c81885a",
+  "tensorboard_scalar_parser": {
+    "path": "scripts/symm_locomotion/_tensorboard_scalars.py",
+    "sha256": "3cb2833b71bdb260e896903a5adbb6de49e2fb2f9649cf26fe91abdd26151d44"
+  },
+  "warnings": [
+    "Legacy checksum-only runs lack pre-first-rollout initialization provenance, and their archived `model_0.pt` bytes are unavailable under the terminal-checkpoint-only publication policy. The registry-bound checksum record is auditable, but the checkpoint bytes were not reverified and the pre-rollout model, optimizer, RNG, and runtime identity cannot be audited: No TRS, TRS m0.1/v0.05, TRS m0.2/v0.1.",
+    "Training source provenance differs across runs; baseline deltas are descriptive rather than a strict single-factor causal contrast."
+  ]
+}
