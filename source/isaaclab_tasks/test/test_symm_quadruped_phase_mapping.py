@@ -288,7 +288,9 @@ def test_duty_aware_phase_reflection_rejects_incompatible_shapes(
 def test_full_observation_time_reversal_is_an_involution_for_arbitrary_leading_dimensions():
     obs, _, _, _ = _make_valid_observations((2, 3), seed=3)
 
-    obs_tt = symm_quadruped.time_reverse_observations(symm_quadruped.time_reverse_observations(obs))
+    obs_tt = symm_quadruped.time_reverse_observations_framewise_approx(
+        symm_quadruped.time_reverse_observations_framewise_approx(obs)
+    )
 
     assert obs_tt.shape == (2, 3, _OBS_DIM)
     assert torch.allclose(obs_tt, obs, atol=1.0e-11, rtol=0.0)
@@ -297,7 +299,7 @@ def test_full_observation_time_reversal_is_an_involution_for_arbitrary_leading_d
 def test_full_observation_time_reversal_has_expected_channel_parity():
     obs, _, _, _ = _make_valid_observations((4,), seed=31)
 
-    obs_tr = symm_quadruped.time_reverse_observations(obs)
+    obs_tr = symm_quadruped.time_reverse_observations_framewise_approx(obs)
 
     for term_slice in (
         _LAYOUT.projected_gravity,
@@ -320,8 +322,8 @@ def test_instantaneous_time_reversal_math_is_device_and_dtype_stable(device, dty
     phase = phase_cpu.to(device=device)
     beta = beta_cpu.to(device=device)
 
-    obs_tr = symm_quadruped.time_reverse_observations(obs)
-    obs_tt = symm_quadruped.time_reverse_observations(obs_tr)
+    obs_tr = symm_quadruped.time_reverse_observations_framewise_approx(obs)
+    obs_tt = symm_quadruped.time_reverse_observations_framewise_approx(obs_tr)
     expected_phase = torch.remainder((1.0 - beta) - phase, 1.0)
     expected_sin, expected_cos = _encode_phase(expected_phase)
     atol = 2.0e-5 if dtype == torch.float32 else 1.0e-11
@@ -342,14 +344,14 @@ def test_term_major_history_time_reversal_is_framewise_involutive_without_reorde
     frames, _, _, _ = _make_valid_observations((3, 30), seed=32, dtype=dtype)
     packed = symm_quadruped.pack_term_major_policy_history(frames)
 
-    packed_tr = symm_quadruped.time_reverse_observations(packed)
-    packed_tt = symm_quadruped.time_reverse_observations(packed_tr)
+    packed_tr = symm_quadruped.time_reverse_observations_framewise_approx(packed)
+    packed_tt = symm_quadruped.time_reverse_observations_framewise_approx(packed_tr)
     frames_tr = symm_quadruped.unpack_term_major_policy_history(packed_tr)
 
     assert torch.allclose(packed_tt, packed, atol=2.0e-5 if dtype == torch.float32 else 1.0e-11, rtol=0.0)
     assert torch.allclose(
         frames_tr,
-        symm_quadruped.time_reverse_observations(frames),
+        symm_quadruped.time_reverse_observations_framewise_approx(frames),
         atol=1.0e-6 if dtype == torch.float32 else 1.0e-12,
         rtol=0.0,
     )
@@ -364,10 +366,10 @@ def test_history_time_reversal_math_is_device_and_dtype_stable(device, dtype):
     frames = frames_cpu.to(device=device)
     packed = symm_quadruped.pack_term_major_policy_history(frames)
 
-    packed_tr = symm_quadruped.time_reverse_observations(packed)
+    packed_tr = symm_quadruped.time_reverse_observations_framewise_approx(packed)
     transformed_frames = symm_quadruped.unpack_term_major_policy_history(packed_tr)
-    packed_tt = symm_quadruped.time_reverse_observations(packed_tr)
-    expected_frames = symm_quadruped.time_reverse_observations(frames)
+    packed_tt = symm_quadruped.time_reverse_observations_framewise_approx(packed_tr)
+    expected_frames = symm_quadruped.time_reverse_observations_framewise_approx(frames)
     atol = 2.0e-5 if dtype == torch.float32 else 1.0e-11
 
     assert packed_tr.device.type == device
@@ -395,7 +397,7 @@ def test_time_reversed_observation_uses_duty_aware_foot_phase_reflection():
     obs[..., _LAYOUT.foot_phase_sin], obs[..., _LAYOUT.foot_phase_cos] = _encode_phase(phase)
     obs[..., _LAYOUT.duty_factor] = beta
 
-    obs_tr = symm_quadruped.time_reverse_observations(obs)
+    obs_tr = symm_quadruped.time_reverse_observations_framewise_approx(obs)
     phase_tr = _decode_phase(
         obs_tr[..., _LAYOUT.foot_phase_sin],
         obs_tr[..., _LAYOUT.foot_phase_cos],
@@ -1013,8 +1015,8 @@ def test_zero_command_remains_zero_and_observation_transform_remains_involutive(
     obs, _, _, _ = _make_valid_observations((8,), seed=5)
     obs[..., _LAYOUT.velocity_command] = 0.0
 
-    obs_tr = symm_quadruped.time_reverse_observations(obs)
-    obs_tt = symm_quadruped.time_reverse_observations(obs_tr)
+    obs_tr = symm_quadruped.time_reverse_observations_framewise_approx(obs)
+    obs_tt = symm_quadruped.time_reverse_observations_framewise_approx(obs_tr)
 
     assert torch.count_nonzero(obs_tr[..., _LAYOUT.velocity_command]) == 0
     assert torch.allclose(obs_tt, obs, atol=1.0e-11, rtol=0.0)
@@ -1048,7 +1050,7 @@ def test_same_gait_backward_keeps_each_half_bound_row_while_physical_tr_exchange
     obs[..., _LAYOUT.foot_phase_sin], obs[..., _LAYOUT.foot_phase_cos] = _encode_phase(phases)
     obs[..., _LAYOUT.duty_factor] = beta
 
-    obs_tr = symm_quadruped.time_reverse_observations(obs)
+    obs_tr = symm_quadruped.time_reverse_observations_framewise_approx(obs)
     phase_tr = _decode_phase(
         obs_tr[..., _LAYOUT.foot_phase_sin],
         obs_tr[..., _LAYOUT.foot_phase_cos],

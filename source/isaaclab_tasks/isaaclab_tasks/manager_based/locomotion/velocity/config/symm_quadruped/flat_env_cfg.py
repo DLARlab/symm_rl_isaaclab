@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
+import torch
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sensors import ContactSensorCfg
@@ -27,6 +29,9 @@ from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import RewardsCfg
 from isaaclab_tasks.utils import PresetCfg
 
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedEnv
+
 SYMM_QUADRUPED_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(160.0, 160.0),
     border_width=0.0,
@@ -39,6 +44,27 @@ SYMM_QUADRUPED_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
 
 SYMM_QUADRUPED_GROUND_COLLISION_PATH = "/World/ground/terrain/mesh"
 """Collision-mesh path used to filter playback ground-reaction forces."""
+
+
+def push_by_setting_velocity_with_tr_generation(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> None:
+    """Apply a velocity push and mark its causal-sequence boundary.
+
+    Args:
+        env: Manager-based environment receiving the disturbance.
+        env_ids: Environment indices to disturb.
+        velocity_range: Per-axis root linear [m/s] and angular [rad/s]
+            velocity-increment ranges.
+        asset_cfg: Scene entity identifying the pushed robot.
+    """
+    base_mdp.push_by_setting_velocity(env, env_ids, velocity_range, asset_cfg)
+    marker = getattr(env, "mark_time_reversal_disturbance", None)
+    if callable(marker):
+        marker(env_ids)
 
 
 def _warn_morphological_symmetry_deprecation() -> None:
@@ -449,6 +475,7 @@ def configure_domain_randomization(env_cfg, *, base_body_name: str | None = None
         "yaw": (-0.5, 0.5),
     }
 
+    env_cfg.events.push_robot.func = push_by_setting_velocity_with_tr_generation
     env_cfg.events.push_robot.interval_range_s = (15.0, 15.0)
     env_cfg.events.push_robot.params["velocity_range"] = {"x": (-0.25, 0.25), "y": (-0.25, 0.25)}
 

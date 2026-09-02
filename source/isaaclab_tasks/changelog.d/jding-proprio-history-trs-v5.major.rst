@@ -1,9 +1,10 @@
 Added
 ^^^^^
 
-* Added native 30-frame proprioceptive observation history, history-aware
-  actor/value time-reversal consistency, and an optional time-reversal-orbit
-  command competence curriculum for symmetric quadruped tasks.
+* Added native 30-frame proprioceptive observation history, transition-aligned
+  causal-history actor/value time-reversal consistency, and an optional staged
+  time-reversal-orbit command competence curriculum for symmetric quadruped
+  tasks.
 
 Changed
 ^^^^^^^
@@ -14,5 +15,12 @@ Changed
   ``--history`` or ``--no-history`` settings; 72-dimensional checkpoints are
   rejected rather than adapted.
 * Changed the scalar straight-line motion reward to exclude absolute world
-  lateral-position and heading recovery. Use the simulator-only diagnostics
-  when those world-pose measurements are needed for analysis.
+  lateral-position and heading recovery in the active V5 configuration. Use
+  the retained ``pose_weight`` compatibility option or simulator-only
+  diagnostics when those world-pose measurements are needed for analysis.
+* **Breaking:** Changed the default history-aware time-reversal objective from
+  the same-order framewise feature heuristic to an exact causal sequence built
+  from ``H + 2`` transition records. Use
+  ``tr_consistency_mode="framewise_feature_approx"`` to reproduce the former
+  feature-level ablation; legacy checkpoints require explicit transfer or the
+  matching approximate mode rather than silently resuming under the new map.

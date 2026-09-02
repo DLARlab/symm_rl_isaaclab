@@ -261,9 +261,9 @@ def time_reversal_validity_mask(observations, cfg: Mapping, legacy_min_abs_comma
     """Build heuristic validity masks from the latest visible policy frame.
 
     Measured base velocity is intentionally absent from the hardware-oriented
-    policy contract. Consequently legacy ``command_tracking`` mask modes reduce
-    to the command gate; reward-side tracking diagnostics remain available in
-    the environment but are not leaked into the actor/critic input.
+    policy contract. Tracking-labelled modes are therefore rejected here. The
+    transition-aligned sequence buffer provides correctly aligned,
+    simulator-only tracking metadata without leaking it into policy inputs.
     """
     policy_obs = _policy_observation(observations)
     policy_frame = latest_policy_frame(policy_obs)
@@ -275,7 +275,7 @@ def time_reversal_validity_mask(observations, cfg: Mapping, legacy_min_abs_comma
     min_command = legacy_min_abs_command if min_command is None else float(min_command)
     command = torch.abs(command_velocity) >= min_command
 
-    tracking = torch.ones_like(command, dtype=torch.bool)
+    tracking = torch.zeros_like(command, dtype=torch.bool)
 
     gravity = policy_frame[:, layout.projected_gravity]
     gravity_scale = torch.as_tensor(scales.projected_gravity, device=policy_obs.device, dtype=policy_obs.dtype)
@@ -294,6 +294,11 @@ def time_reversal_validity_mask(observations, cfg: Mapping, legacy_min_abs_comma
     ).all(dim=-1)
 
     mode = cfg.get("mode", "command")
+    if "tracking" in mode:
+        raise ValueError(
+            "Tracking-labelled validity modes require aligned simulator metadata and are unavailable to the "
+            "framewise observation-only approximation."
+        )
     components = {
         "command": command,
         "command_tracking": command & tracking,

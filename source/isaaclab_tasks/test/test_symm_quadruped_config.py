@@ -1490,6 +1490,9 @@ def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost
         "yaw_rate_score",
         "roll_score",
         "straight_score",
+        "lateral_position_score",
+        "heading_score",
+        "pose_score",
         "posture_score",
         "support_loss",
         "reward",
@@ -1498,7 +1501,7 @@ def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost
     assert all(not value.requires_grad for value in env._straight_line_motion_diagnostics.values())
 
 
-def test_straight_line_motion_reward_ignores_world_lateral_position_and_heading():
+def test_straight_line_motion_reward_pose_weight_compatibility_and_active_zero_weight():
     scene = _Scene()
     scene.env_origins = torch.zeros(2, 3)
     scene["robot"] = SimpleNamespace(
@@ -1513,9 +1516,16 @@ def test_straight_line_motion_reward_ignores_world_lateral_position_and_heading(
     command = torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
     env = SimpleNamespace(scene=scene, command_manager=SimpleNamespace(get_command=lambda _: command))
 
-    reward = symm_quadruped.straight_line_motion_reward(env, command_name="base_velocity")
+    reward = symm_quadruped.straight_line_motion_reward(
+        env,
+        command_name="base_velocity",
+        pose_weight=0.0,
+    )
+    with pytest.warns(DeprecationWarning, match="legacy reward behavior is retained"):
+        legacy_reward = symm_quadruped.straight_line_motion_reward(env, command_name="base_velocity")
 
     assert torch.equal(reward[0], reward[1])
+    assert legacy_reward[0] > legacy_reward[1]
 
 
 def test_straight_line_motion_reward_components_are_bounded_and_reusable():
@@ -1550,6 +1560,9 @@ def test_straight_line_motion_reward_components_are_bounded_and_reusable():
         "yaw_rate_score",
         "roll_score",
         "straight_score",
+        "lateral_position_score",
+        "heading_score",
+        "pose_score",
         "posture_score",
         "support_loss",
     }

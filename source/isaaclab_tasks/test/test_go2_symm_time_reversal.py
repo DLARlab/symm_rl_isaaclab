@@ -31,8 +31,8 @@ def _make_valid_observations(batch_size: int) -> torch.Tensor:
 
 def test_time_reverse_observations_is_duty_aware_involution_with_expected_parities():
     obs = _make_valid_observations(3)
-    obs_tr = go2_symm.time_reverse_observations(obs)
-    obs_tt = go2_symm.time_reverse_observations(obs_tr)
+    obs_tr = go2_symm.time_reverse_observations_framewise_approx(obs)
+    obs_tt = go2_symm.time_reverse_observations_framewise_approx(obs_tr)
 
     assert torch.allclose(obs_tt, obs, atol=1.0e-6, rtol=0.0)
     for odd_slice in (
@@ -68,12 +68,17 @@ def test_time_reverse_term_major_history_transforms_every_frame_without_reorderi
     frames[:, 2, _LAYOUT.velocity_command] = 3.0
     packed = go2_symm.pack_term_major_policy_history(frames)
 
-    transformed = go2_symm.time_reverse_observations(packed)
+    transformed = go2_symm.time_reverse_observations_framewise_approx(packed)
     transformed_frames = go2_symm.unpack_term_major_policy_history(transformed)
 
     assert torch.equal(transformed_frames[..., _LAYOUT.velocity_command], -frames[..., _LAYOUT.velocity_command])
     assert torch.equal(transformed_frames[..., _LAYOUT.previous_action], frames[..., _LAYOUT.previous_action])
-    assert torch.allclose(go2_symm.time_reverse_observations(transformed), packed, atol=1.0e-6, rtol=0.0)
+    assert torch.allclose(
+        go2_symm.time_reverse_observations_framewise_approx(transformed),
+        packed,
+        atol=1.0e-6,
+        rtol=0.0,
+    )
 
 
 def test_time_reverse_actions_is_identity_involution():
@@ -96,6 +101,9 @@ def test_compute_time_reversal_states_augments_observations_and_actions():
     assert obs_aug.batch_size == torch.Size([2 * batch_size])
     assert actions_aug.shape == (2 * batch_size, 12)
     assert torch.allclose(obs_aug["policy"][:batch_size], obs["policy"])
-    assert torch.allclose(obs_aug["policy"][batch_size:], go2_symm.time_reverse_observations(obs["policy"]))
+    assert torch.allclose(
+        obs_aug["policy"][batch_size:],
+        go2_symm.time_reverse_observations_framewise_approx(obs["policy"]),
+    )
     assert torch.allclose(actions_aug[:batch_size], actions)
     assert torch.allclose(actions_aug[batch_size:], go2_symm.time_reverse_actions(actions))

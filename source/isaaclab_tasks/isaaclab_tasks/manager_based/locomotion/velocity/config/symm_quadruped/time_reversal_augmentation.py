@@ -1502,14 +1502,14 @@ class TimeReversalAugmentation:
                     rejection["termination_timeout"] += 1
                     if current:
                         segments.append(current)
-                        rejection["previous_action_unknown"] += 1
+                        rejection["previous_action_unknown"] += min(2, len(current))
                         current = []
                     continue
                 if not transition.task_continuity[environment_index]:
                     rejection["task_discontinuity"] += 1
                     if current:
                         segments.append(current)
-                        rejection["previous_action_unknown"] += 1
+                        rejection["previous_action_unknown"] += min(2, len(current))
                         current = []
                     continue
                 episode = int(transition.episode_id[environment_index])
@@ -1520,12 +1520,12 @@ class TimeReversalAugmentation:
                     previous_step = int(previous.rollout_step[environment_index])
                     if episode != previous_episode or step != previous_step + 1:
                         segments.append(current)
-                        rejection["previous_action_unknown"] += 1
+                        rejection["previous_action_unknown"] += min(2, len(current))
                         current = []
                 current.append((transition, environment_index))
             if current:
                 segments.append(current)
-                rejection["previous_action_unknown"] += 1
+                rejection["previous_action_unknown"] += min(2, len(current))
         return segments, rejection
 
     def _build_candidate_pool(self, diagnostics: dict[str, float]) -> TRAugmentationPool | None:

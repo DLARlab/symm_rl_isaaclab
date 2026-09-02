@@ -31,7 +31,12 @@ def configure_symm_quadruped_ppo(
     ramp_shape: str = "linear",
     history_enabled: bool = True,
     history_length: int = 30,
-    history_trs_mode: Literal["none", "framewise_feature"] = "framewise_feature",
+    tr_consistency_mode: Literal[
+        "transition_aligned_sequence",
+        "framewise_feature_approx",
+        "none",
+    ] = "transition_aligned_sequence",
+    history_trs_mode: Literal["none", "framewise_feature"] | None = None,
 ) -> None:
     """Apply the shared symmetric quadruped PPO/TRS defaults to a runner config.
 
@@ -49,7 +54,8 @@ def configure_symm_quadruped_ppo(
         ramp_shape: Shape of the TRS loss coefficient ramp.
         history_enabled: Whether native policy observation history is enabled.
         history_length: Number of policy frames, or zero when history is disabled.
-        history_trs_mode: Feature-level transform applied to policy history.
+        tr_consistency_mode: Causal-sequence, approximate-framewise, or disabled consistency mode.
+        history_trs_mode: Deprecated compatibility alias for the old history transform.
     """
     cfg.max_iterations = 20000
     cfg.save_interval = 1000
@@ -76,6 +82,7 @@ def configure_symm_quadruped_ppo(
         ramp_shape=ramp_shape,
         history_enabled=history_enabled,
         history_length=history_length,
+        tr_consistency_mode=tr_consistency_mode,
         history_trs_mode=history_trs_mode,
         # Deprecated RSL-RL aliases remain schema-derived during the compatibility window.
         command_observation_index=SYMM_QUADRUPED_POLICY_OBS_LAYOUT.velocity_command.start,

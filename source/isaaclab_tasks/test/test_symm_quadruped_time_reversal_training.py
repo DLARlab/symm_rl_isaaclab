@@ -358,7 +358,8 @@ def test_shared_agent_config_emits_project_local_symmetry_schema():
     assert serialized["tr_augmentation"]["filter_enabled"] is True
     assert serialized["history_enabled"] is True
     assert serialized["history_length"] == 30
-    assert serialized["history_trs_mode"] == "framewise_feature"
+    assert serialized["tr_consistency_mode"] == "transition_aligned_sequence"
+    assert serialized["history_trs_mode"] is None
     assert serialized["observation_contract_version"] == "hardware_proprio_history_64d_v1"
     assert serialized["instantaneous_frame_dim"] == SYMM_QUADRUPED_POLICY_OBS_DIM
     assert serialized["history_packing"] == "term_major_oldest_to_newest_flattened"
@@ -455,12 +456,10 @@ def _validity_observations() -> TensorDict:
     ("mode", "expected"),
     [
         ("command", [1.0, 1.0, 1.0, 1.0]),
-        ("command_tracking", [1.0, 1.0, 1.0, 1.0]),
         ("command_upright_phase", [1.0, 1.0, 0.0, 0.0]),
-        ("command_tracking_upright_phase", [1.0, 1.0, 0.0, 0.0]),
     ],
 )
-def test_historical_validity_modes_use_only_observation_fields(mode, expected):
+def test_framewise_validity_modes_use_only_observation_fields(mode, expected):
     mask = time_reversal_validity_mask(
         _validity_observations(),
         {
@@ -476,9 +475,16 @@ def test_historical_validity_modes_use_only_observation_fields(mode, expected):
 
     assert mask.combined.squeeze(-1).tolist() == expected
     diagnostics = time_reversal_mask_diagnostics(mask)
+    assert diagnostics["tr_mask/tracking_acceptance"] == 0.0
     assert "tr_mask/gait_family/trot" in diagnostics
     assert "tr_mask/command_sign/positive" in diagnostics
     assert all(f"tr_mask/command_speed_bin/{index}" in diagnostics for index in range(4))
+
+
+@pytest.mark.parametrize("mode", ["command_tracking", "command_tracking_upright_phase"])
+def test_framewise_validity_rejects_tracking_modes_without_aligned_metadata(mode):
+    with pytest.raises(ValueError, match="require aligned simulator metadata"):
+        time_reversal_validity_mask(_validity_observations(), {"mode": mode})
 
 
 def test_history_validity_mask_uses_latest_scaled_forward_command():
@@ -501,6 +507,7 @@ def test_legacy_instantaneous_ppo_augmentation_warns_and_retains_its_schedule():
     algorithm.symmetry = {
         "use_time_reversal_regularization": True,
         "use_data_augmentation": True,
+        "tr_consistency_mode": "framewise_feature_approx",
         "use_mirror_loss": False,
         "mirror_loss_coeff": 0.0,
         "value_loss_coeff": 0.0,

@@ -39,6 +39,10 @@ assert _PPO_MODULE_SPEC is not None and _PPO_MODULE_SPEC.loader is not None
 _PPO_MODULE = importlib.util.module_from_spec(_PPO_MODULE_SPEC)
 _PPO_MODULE_SPEC.loader.exec_module(_PPO_MODULE)
 TimeReversalPPO = _PPO_MODULE.TimeReversalPPO
+TransitionAlignedTRCandidateBatch = _PPO_MODULE.TransitionAlignedTRCandidateBatch
+TransitionAlignedTRBuffer = _PPO_MODULE.TransitionAlignedTRBuffer
+TransitionAlignedTRRecord = _PPO_MODULE.TransitionAlignedTRRecord
+TRSimulatorValidityMetadata = _PPO_MODULE.TRSimulatorValidityMetadata
 time_reversal_loss_scale = _PPO_MODULE.time_reversal_loss_scale
 time_reversal_weighted_losses = _PPO_MODULE.time_reversal_weighted_losses
 feasible_actor_mean_penalty = _PPO_MODULE.feasible_actor_mean_penalty
@@ -89,6 +93,73 @@ class _CountingCritic(torch.nn.Module):
         self.events.append("critic")
         self.forward_calls += 1
         return self.weight.expand(observations["policy"].shape[0], 1)
+
+
+class _SequenceActor(torch.nn.Module):
+    """Small actor exposing every forward input used by an exact-sequence update."""
+
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor(1.0))
+        self.distribution = SimpleNamespace(std_param=None)
+        self.is_recurrent = False
+        self.forward_observations = []
+        self.kl_batch_sizes = []
+
+    def forward(self, observations, **_kwargs):
+        policy = observations["policy"]
+        self.forward_observations.append(policy.detach().clone())
+        mean = (self.weight * policy[:, :1]).expand(-1, 12)
+        self.output_distribution_params = (mean,)
+        self.output_entropy = (self.weight * 0.0).expand(policy.shape[0])
+        return mean
+
+    def get_output_log_prob(self, actions):
+        return self.weight * actions[:, 0]
+
+    def get_kl_divergence(self, old_distribution_params, distribution_params):
+        old_batch_size = old_distribution_params[0].shape[0]
+        current_batch_size = distribution_params[0].shape[0]
+        self.kl_batch_sizes.append((old_batch_size, current_batch_size))
+        return torch.full((current_batch_size,), 0.01, device=distribution_params[0].device)
+
+
+class _SequenceCritic(torch.nn.Module):
+    """Small critic exposing every forward input used by an exact-sequence update."""
+
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor(1.0))
+        self.is_recurrent = False
+        self.forward_observations = []
+
+    def forward(self, observations, **_kwargs):
+        policy = observations["policy"]
+        self.forward_observations.append(policy.detach().clone())
+        return self.weight * policy[:, 1:2]
+
+
+class _SequenceCandidateBuffer:
+    """One-shot candidate source used to isolate the PPO auxiliary path."""
+
+    def __init__(self, candidate):
+        self.candidate = candidate
+        self.diagnostics = {"tr_sequence/test_diagnostic": 1.0}
+        self.pop_iterations = []
+
+    def pop_candidates(self, current_update):
+        self.pop_iterations.append(current_update)
+        return self.candidate
+
+
+class _SequenceContextEnvironment:
+    """Return deterministic pre/post sequence contexts in call order."""
+
+    def __init__(self, *contexts):
+        self.contexts = list(contexts)
+
+    def get_time_reversal_sequence_context(self):
+        return self.contexts.pop(0)
 
 
 class _LegacyRegressionActor(torch.nn.Module):
@@ -156,6 +227,173 @@ class _SingleBatchStorage:
         self.cleared = True
 
 
+def _sequence_candidates(
+    actor_source: torch.Tensor,
+    value_source: torch.Tensor,
+    reversed_observation: torch.Tensor,
+) -> TransitionAlignedTRCandidateBatch:
+    """Build a fully populated exact-sequence candidate batch."""
+    count = actor_source.shape[0]
+    assert value_source.shape == actor_source.shape
+    assert reversed_observation.shape == actor_source.shape
+    integer = torch.arange(count, dtype=torch.long, device=actor_source.device)
+    return TransitionAlignedTRCandidateBatch(
+        actor_source_observation=actor_source,
+        value_source_observation=value_source,
+        reversed_observation=reversed_observation,
+        weight=torch.ones(count, 1, dtype=actor_source.dtype, device=actor_source.device),
+        environment_id=integer,
+        episode_id=integer + 10,
+        command_segment_id=integer + 20,
+        gait_segment_id=integer + 30,
+        disturbance_generation_id=integer + 40,
+        oldest_collection_update_id=torch.zeros_like(integer),
+        newest_collection_update_id=torch.ones_like(integer),
+        policy_version_span=torch.ones_like(integer),
+        candidate_age_updates=torch.zeros_like(integer),
+    )
+
+
+def _sequence_context(**overrides) -> dict[str, torch.Tensor]:
+    """Build one complete single-environment causal-sequence context."""
+    context = {
+        "episode_id": torch.zeros(1, dtype=torch.long),
+        "command_segment_id": torch.zeros(1, dtype=torch.long),
+        "gait_segment_id": torch.zeros(1, dtype=torch.long),
+        "disturbance_generation_id": torch.zeros(1, dtype=torch.long),
+        "manual_reset_generation": torch.zeros(1, dtype=torch.long),
+        "episode_step": torch.zeros(1, dtype=torch.long),
+        "command_segment_age": torch.zeros(1, dtype=torch.long),
+        "gait_segment_age": torch.zeros(1, dtype=torch.long),
+        "disturbance_segment_age": torch.zeros(1, dtype=torch.long),
+        "gait_row": torch.zeros(1, dtype=torch.long),
+        "body_linear_velocity_b": torch.zeros(1, 3),
+        "body_yaw_rate": torch.zeros(1),
+        "projected_gravity": torch.tensor([[0.0, 0.0, -1.0]]),
+        "contact_impulse": torch.zeros(1),
+        "foot_slip": torch.zeros(1),
+        "reverse_dynamics_residual": torch.zeros(1),
+        "actuator_saturation": torch.zeros(1),
+    }
+    context.update(overrides)
+    return context
+
+
+def _finalized_sequence_record(index: int, history_length: int = 1) -> TransitionAlignedTRRecord:
+    """Build one valid decision record for buffer-reset tests."""
+    latest_frame = torch.zeros(1, SYMM_QUADRUPED_POLICY_OBS_DIM)
+    layout = go2_symm.SYMM_QUADRUPED_POLICY_OBS_LAYOUT
+    latest_frame[:, layout.velocity_command.start] = 1.0
+    latest_frame[:, layout.gait_period] = 1.5
+    latest_frame[:, layout.duty_factor] = 0.6
+    latest_frame[:, layout.foot_phase_cos] = 1.0
+    observation = go2_symm.pack_term_major_policy_history(latest_frame[:, None, :].repeat(1, history_length, 1))
+    integer = torch.zeros(1, dtype=torch.long)
+    boolean = torch.zeros(1, dtype=torch.bool)
+    return TransitionAlignedTRRecord(
+        policy_observation=observation,
+        latest_frame=latest_frame,
+        action=torch.full((1, 12), float(index)),
+        episode_id=integer.clone(),
+        command_segment_id=integer.clone(),
+        gait_segment_id=integer.clone(),
+        disturbance_generation_id=integer.clone(),
+        collection_update_id=integer.clone(),
+        transition_valid=torch.ones(1, dtype=torch.bool),
+        done=boolean.clone(),
+        timeout=boolean.clone(),
+        history_warmup_complete=torch.ones(1, dtype=torch.bool),
+        gait_row=integer.clone(),
+        simulator=TRSimulatorValidityMetadata.neutral(1, device="cpu", dtype=observation.dtype),
+    )
+
+
+def _exact_sequence_update_algorithm(
+    actor: _SequenceActor,
+    critic: _SequenceCritic,
+    candidate: TransitionAlignedTRCandidateBatch | None,
+    *,
+    batch_size: int = 4,
+    policy_coefficient: float = 1.0,
+    value_coefficient: float = 1.0,
+    adaptive_kl: bool = False,
+):
+    """Return a minimal feed-forward PPO fixture with exact causal candidates."""
+    policy_width = 2 * SYMM_QUADRUPED_POLICY_OBS_DIM
+    policy = torch.zeros(batch_size, policy_width)
+    policy[:, 0] = torch.linspace(-0.4, 0.4, batch_size)
+    policy[:, 1] = torch.linspace(0.3, -0.3, batch_size)
+    observations = TensorDict({"policy": policy}, batch_size=[batch_size])
+    actions = torch.zeros(batch_size, 12)
+    actions[:, 0] = torch.linspace(-0.2, 0.2, batch_size)
+    batch = SimpleNamespace(
+        observations=observations,
+        actions=actions,
+        old_actions_log_prob=torch.linspace(-0.3, 0.1, batch_size),
+        values=torch.linspace(-0.2, 0.2, batch_size).unsqueeze(-1),
+        advantages=torch.linspace(0.5, -0.5, batch_size).unsqueeze(-1),
+        returns=torch.linspace(0.1, 0.4, batch_size).unsqueeze(-1),
+        masks=None,
+        hidden_states=(None, None),
+        old_distribution_params=(torch.zeros(batch_size, 12),),
+    )
+    algorithm = _schedule_algorithm(1, rampup_iterations=0)
+    algorithm.symmetry.update(
+        tr_consistency_mode="transition_aligned_sequence",
+        history_enabled=True,
+        history_length=2,
+        use_tr_policy_consistency=policy_coefficient > 0.0,
+        use_tr_value_consistency=value_coefficient > 0.0,
+        tr_policy_schedule={
+            "enabled": policy_coefficient > 0.0,
+            "target_coeff": policy_coefficient,
+            "warmup_iterations": 0,
+            "rampup_iterations": 0,
+        },
+        tr_value_schedule={
+            "enabled": value_coefficient > 0.0,
+            "target_coeff": value_coefficient,
+            "warmup_iterations": 0,
+            "rampup_iterations": 0,
+        },
+        tr_gradient_diagnostics={"enabled": False},
+        tr_augmentation={
+            "enabled": False,
+            "coefficient": 0.0,
+            "schedule": {"enabled": False, "target_coeff": 0.0},
+        },
+        log_disabled_raw_consistency=False,
+        tr_policy_output_space="raw_action_mean",
+        _env=None,
+    )
+    storage = _SingleBatchStorage(batch, torch.zeros(batch_size, 12))
+    algorithm.actor = actor
+    algorithm.critic = critic
+    algorithm.storage = storage
+    algorithm.optimizer = torch.optim.SGD((*actor.parameters(), *critic.parameters()), lr=0.0)
+    algorithm.rnd = None
+    algorithm.rnd_optimizer = None
+    algorithm.num_mini_batches = 1
+    algorithm.num_learning_epochs = 1
+    algorithm.normalize_advantage_per_mini_batch = False
+    algorithm.desired_kl = 0.01 if adaptive_kl else None
+    algorithm.schedule = "adaptive" if adaptive_kl else "fixed"
+    algorithm.learning_rate = 0.0
+    algorithm.use_clipped_value_loss = False
+    algorithm.value_loss_coef = 1.0
+    algorithm.entropy_coef = 0.0
+    algorithm.clip_param = 0.2
+    algorithm.max_grad_norm = 100.0
+    algorithm.device = "cpu"
+    algorithm.is_multi_gpu = False
+    algorithm.gpu_global_rank = 0
+    algorithm._actor_mean_abort_count = 0
+    algorithm._tr_augmentation = None
+    algorithm._tr_sequence_pending = None
+    algorithm._tr_sequence_buffer = _SequenceCandidateBuffer(candidate)
+    return algorithm, batch, storage
+
+
 def _schedule_algorithm(
     iteration: int,
     *,
@@ -170,6 +408,9 @@ def _schedule_algorithm(
     algorithm.symmetry = {
         "use_time_reversal_regularization": enabled,
         "use_data_augmentation": False,
+        # Most fixtures below freeze the audited framewise compatibility path.
+        # Exact-sequence tests opt into the new primary mode explicitly.
+        "tr_consistency_mode": "framewise_feature_approx",
         "use_mirror_loss": True,
         "mirror_loss_coeff": 0.20,
         "value_loss_coeff": 0.10,
@@ -407,6 +648,317 @@ def test_history_actor_and_value_consistency_losses_are_finite_and_fully_transfo
     assert losses["instantaneous_frame_dim"] == 64.0
     assert losses["observation_contract_version/hardware_proprio_history_64d_v1"] == 1.0
     assert losses["history_trs_mode/framewise_feature"] == 1.0
+
+
+def test_exact_sequence_uses_edge_actor_source_and_next_state_value_source():
+    actor = _SequenceActor()
+    critic = _SequenceCritic()
+    width = 2 * SYMM_QUADRUPED_POLICY_OBS_DIM
+    actor_source = torch.full((2, width), -11.0)
+    value_source = torch.full((2, width), -22.0)
+    reversed_observation = torch.full((2, width), -33.0)
+    actor_source[:, 0] = torch.tensor([1.5, -2.0])
+    value_source[:, 1] = torch.tensor([0.75, -1.25])
+    reversed_observation[:, 0] = actor_source[:, 0]
+    reversed_observation[:, 1] = value_source[:, 1]
+    candidate = _sequence_candidates(actor_source, value_source, reversed_observation)
+    algorithm, _, _ = _exact_sequence_update_algorithm(actor, critic, candidate)
+
+    losses = algorithm.update()
+
+    assert len(actor.forward_observations) == 3
+    assert len(critic.forward_observations) == 3
+    torch.testing.assert_close(actor.forward_observations[1], actor_source)
+    torch.testing.assert_close(actor.forward_observations[2], reversed_observation)
+    torch.testing.assert_close(critic.forward_observations[1], value_source)
+    torch.testing.assert_close(critic.forward_observations[2], reversed_observation)
+    assert losses["tr_policy_consistency"] == pytest.approx(0.0, abs=1.0e-12)
+    assert losses["tr_value_consistency"] == pytest.approx(0.0, abs=1.0e-12)
+    assert losses["weighted_tr_total"] == pytest.approx(0.0, abs=1.0e-12)
+    assert losses["tr_sequence/candidate_pool_count"] == 2.0
+    assert losses["tr_sequence/test_diagnostic"] == 1.0
+    assert algorithm._tr_sequence_buffer.pop_iterations == [1]
+
+
+def test_sequence_finalization_uses_post_step_diagnostics_and_rejects_new_boundary():
+    pre_context = _sequence_context()
+    post_context = _sequence_context(
+        command_segment_id=torch.ones(1, dtype=torch.long),
+        contact_impulse=torch.tensor([7.0]),
+        foot_slip=torch.tensor([0.75]),
+    )
+    environment = _SequenceContextEnvironment(pre_context, post_context)
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(
+        tr_consistency_mode="transition_aligned_sequence",
+        _env=SimpleNamespace(unwrapped=environment),
+    )
+    algorithm.device = "cpu"
+    algorithm._tr_sequence_buffer = TransitionAlignedTRBuffer(1, 1, "cpu")
+    algorithm._tr_sequence_pending = None
+    algorithm._tr_sequence_manual_reset_generation = torch.zeros(1, dtype=torch.long)
+    observations = TensorDict(
+        {"policy": torch.zeros(1, SYMM_QUADRUPED_POLICY_OBS_DIM)},
+        batch_size=[1],
+    )
+
+    algorithm._capture_time_reversal_sequence_before_step(observations, torch.zeros(1, 12))
+    algorithm._finalize_time_reversal_sequence_step(torch.zeros(1, dtype=torch.bool), {})
+
+    record = algorithm._tr_sequence_buffer._records[-1]
+    assert not record.transition_valid.item()
+    assert record.simulator.contact_impulse.item() == 7.0
+    assert record.simulator.foot_slip.item() == 0.75
+
+
+def test_sequence_capture_clears_saved_candidates_after_manual_environment_reset():
+    buffer = TransitionAlignedTRBuffer(1, 1, "cpu")
+    for index in range(3):
+        buffer.append(_finalized_sequence_record(index))
+    assert buffer.candidate_count(0) == 1
+
+    environment = _SequenceContextEnvironment(
+        _sequence_context(manual_reset_generation=torch.ones(1, dtype=torch.long))
+    )
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(
+        tr_consistency_mode="transition_aligned_sequence",
+        _env=SimpleNamespace(unwrapped=environment),
+    )
+    algorithm.device = "cpu"
+    algorithm._tr_sequence_buffer = buffer
+    algorithm._tr_sequence_pending = None
+    algorithm._tr_sequence_manual_reset_generation = torch.zeros(1, dtype=torch.long)
+    observations = TensorDict(
+        {"policy": torch.zeros(1, SYMM_QUADRUPED_POLICY_OBS_DIM)},
+        batch_size=[1],
+    )
+
+    algorithm._capture_time_reversal_sequence_before_step(observations, torch.zeros(1, 12))
+
+    assert buffer.candidate_count(0) == 0
+    assert buffer._records_since_clear.item() == 0
+
+
+def test_sequence_update_polls_manual_reset_before_consuming_candidate():
+    history_length = 2
+    buffer = TransitionAlignedTRBuffer(1, history_length, "cpu")
+    for index in range(history_length + 2):
+        buffer.append(_finalized_sequence_record(index, history_length))
+    assert buffer.candidate_count(1) == 1
+
+    actor = _SequenceActor()
+    critic = _SequenceCritic()
+    algorithm, _, _ = _exact_sequence_update_algorithm(actor, critic, None)
+    algorithm._tr_sequence_buffer = buffer
+    algorithm._tr_sequence_manual_reset_generation = torch.zeros(1, dtype=torch.long)
+    algorithm.symmetry["_env"] = SimpleNamespace(
+        unwrapped=_SequenceContextEnvironment(
+            _sequence_context(manual_reset_generation=torch.ones(1, dtype=torch.long))
+        )
+    )
+
+    losses = algorithm.update()
+
+    assert losses["tr_sequence/candidate_pool_available"] == 0.0
+    assert len(actor.forward_observations) == 1
+    assert len(critic.forward_observations) == 1
+
+
+@pytest.mark.parametrize(
+    "young_segment",
+    ["command_segment_age", "gait_segment_age", "disturbance_segment_age"],
+)
+def test_sequence_history_warmup_requires_episode_and_task_segment_ages(young_segment):
+    history_length = 30
+    segment_ages = {
+        "command_segment_age": torch.full((1,), 100, dtype=torch.long),
+        "gait_segment_age": torch.full((1,), 100, dtype=torch.long),
+        "disturbance_segment_age": torch.full((1,), 100, dtype=torch.long),
+    }
+    segment_ages[young_segment] = torch.zeros(1, dtype=torch.long)
+    environment = _SequenceContextEnvironment(
+        _sequence_context(
+            episode_step=torch.full((1,), 100, dtype=torch.long),
+            **segment_ages,
+        )
+    )
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(
+        tr_consistency_mode="transition_aligned_sequence",
+        _env=SimpleNamespace(unwrapped=environment),
+    )
+    algorithm.device = "cpu"
+    algorithm._tr_sequence_buffer = TransitionAlignedTRBuffer(1, history_length, "cpu")
+    algorithm._tr_sequence_pending = None
+    algorithm._tr_sequence_manual_reset_generation = torch.zeros(1, dtype=torch.long)
+    observations = TensorDict(
+        {"policy": torch.zeros(1, history_length * SYMM_QUADRUPED_POLICY_OBS_DIM)},
+        batch_size=[1],
+    )
+
+    algorithm._capture_time_reversal_sequence_before_step(observations, torch.zeros(1, 12))
+
+    assert not algorithm._tr_sequence_pending.history_warmup_complete.item()
+
+
+def test_sequence_activation_matches_auxiliary_consumers_not_sidecar():
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(
+        tr_consistency_mode="transition_aligned_sequence",
+        use_mirror_loss=False,
+        use_tr_policy_consistency=True,
+        use_tr_value_consistency=False,
+        value_loss_coeff=0.0,
+        tr_policy_schedule={"enabled": True, "target_coeff": 0.0},
+        tr_value_schedule={"enabled": False, "target_coeff": 0.0},
+        tr_gradient_diagnostics={"enabled": True},
+        log_disabled_raw_consistency=False,
+        tr_augmentation={"enabled": False},
+    )
+    assert algorithm._sequence_consistency_enabled()
+
+    algorithm.symmetry.update(
+        tr_policy_schedule={"enabled": False, "target_coeff": 0.0},
+        use_tr_policy_consistency=False,
+        tr_gradient_diagnostics={"enabled": False},
+        tr_augmentation={"enabled": True},
+    )
+    assert algorithm._time_reversal_enabled()
+    assert not algorithm._sequence_consistency_enabled()
+
+
+def test_exact_sequence_rejects_wrapper_action_clipping_before_buffer_allocation():
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(
+        tr_consistency_mode="transition_aligned_sequence",
+        use_tr_policy_consistency=True,
+        tr_policy_schedule={"enabled": True, "target_coeff": 0.1},
+        history_enabled=False,
+        history_length=1,
+        _env=SimpleNamespace(clip_actions=1.0),
+    )
+    algorithm.device = "cpu"
+    algorithm._tr_sequence_buffer = None
+    algorithm._tr_sequence_manual_reset_generation = None
+
+    with pytest.raises(ValueError, match="clip_actions=None"):
+        algorithm._initialize_time_reversal_sequence_buffer()
+
+
+def test_exact_sequence_targets_are_stop_gradient_but_reversed_branch_is_differentiable():
+    actor = _SequenceActor()
+    critic = _SequenceCritic()
+    width = 2 * SYMM_QUADRUPED_POLICY_OBS_DIM
+    actor_source = torch.zeros(2, width)
+    value_source = torch.zeros(2, width)
+    reversed_observation = torch.zeros(2, width)
+    actor_source[:, 0] = torch.tensor([1.0, -1.0])
+    value_source[:, 1] = torch.tensor([2.0, -2.0])
+    reversed_observation[:, 0] = torch.tensor([3.0, -3.0])
+    reversed_observation[:, 1] = torch.tensor([5.0, -5.0])
+    actor_source.requires_grad_()
+    value_source.requires_grad_()
+    reversed_observation.requires_grad_()
+    candidate = _sequence_candidates(actor_source, value_source, reversed_observation)
+    algorithm, _, _ = _exact_sequence_update_algorithm(actor, critic, candidate)
+
+    losses = algorithm.update()
+
+    assert losses["tr_policy_consistency"] > 0.0
+    assert losses["tr_value_consistency"] > 0.0
+    assert actor_source.grad is None
+    assert value_source.grad is None
+    assert reversed_observation.grad is not None
+    assert torch.count_nonzero(reversed_observation.grad[:, 0]).item() == 2
+    assert torch.count_nonzero(reversed_observation.grad[:, 1]).item() == 2
+
+
+@pytest.mark.parametrize(
+    ("policy_coefficient", "value_coefficient", "actor_forwards", "critic_forwards"),
+    [(0.0, 1.0, 1, 3), (1.0, 0.0, 3, 1)],
+)
+def test_exact_sequence_zero_coefficient_skips_that_network_auxiliary_forwards(
+    policy_coefficient,
+    value_coefficient,
+    actor_forwards,
+    critic_forwards,
+):
+    actor = _SequenceActor()
+    critic = _SequenceCritic()
+    width = 2 * SYMM_QUADRUPED_POLICY_OBS_DIM
+    candidate = _sequence_candidates(
+        torch.zeros(2, width),
+        torch.zeros(2, width),
+        torch.ones(2, width),
+    )
+    algorithm, _, _ = _exact_sequence_update_algorithm(
+        actor,
+        critic,
+        candidate,
+        policy_coefficient=policy_coefficient,
+        value_coefficient=value_coefficient,
+    )
+
+    losses = algorithm.update()
+
+    assert len(actor.forward_observations) == actor_forwards
+    assert len(critic.forward_observations) == critic_forwards
+    if policy_coefficient == 0.0:
+        assert losses["tr_policy_consistency"] == 0.0
+    if value_coefficient == 0.0:
+        assert losses["tr_value_consistency"] == 0.0
+
+
+def test_exact_sequence_without_candidate_has_zero_losses_and_no_auxiliary_forwards():
+    actor = _SequenceActor()
+    critic = _SequenceCritic()
+    algorithm, _, _ = _exact_sequence_update_algorithm(actor, critic, None)
+
+    losses = algorithm.update()
+
+    assert len(actor.forward_observations) == 1
+    assert len(critic.forward_observations) == 1
+    assert losses["tr_policy_consistency"] == 0.0
+    assert losses["tr_value_consistency"] == 0.0
+    assert losses["weighted_tr_total"] == 0.0
+    assert losses["tr_sequence/candidate_pool_available"] == 0.0
+    assert losses["tr_sequence/candidate_pool_count"] == 0.0
+    assert algorithm._tr_sequence_buffer.pop_iterations == [1]
+
+
+def test_exact_candidates_do_not_change_ppo_samples_or_adaptive_kl_batch_size():
+    actor = _SequenceActor()
+    critic = _SequenceCritic()
+    width = 2 * SYMM_QUADRUPED_POLICY_OBS_DIM
+    candidate = _sequence_candidates(
+        torch.zeros(2, width),
+        torch.zeros(2, width),
+        torch.ones(2, width),
+    )
+    algorithm, batch, storage = _exact_sequence_update_algorithm(
+        actor,
+        critic,
+        candidate,
+        batch_size=5,
+        adaptive_kl=True,
+    )
+    frozen_ppo_fields = {
+        name: getattr(batch, name).detach().clone()
+        for name in ("old_actions_log_prob", "advantages", "returns", "values")
+    }
+    frozen_old_distribution = batch.old_distribution_params[0].detach().clone()
+
+    algorithm.update()
+
+    for name, expected in frozen_ppo_fields.items():
+        torch.testing.assert_close(getattr(batch, name), expected)
+    torch.testing.assert_close(batch.old_distribution_params[0], frozen_old_distribution)
+    assert actor.kl_batch_sizes == [(5, 5)]
+    assert [observations.shape[0] for observations in actor.forward_observations] == [5, 2, 2]
+    assert [observations.shape[0] for observations in critic.forward_observations] == [5, 2, 2]
+    assert storage.actions.shape[0] == 5
+    assert storage.distribution_params[0].shape[0] == 5
 
 
 def test_deprecated_data_augmentation_still_duplicates_ppo_minibatches():
@@ -804,7 +1356,11 @@ def test_load_immediate_save_and_reload_preserves_same_pending_update(monkeypatc
 def test_command_curriculum_state_round_trips_through_algorithm_checkpoint(monkeypatch):
     monkeypatch.setattr(PPO, "save", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: True)
-    saved_curriculum = {"weights": torch.tensor([[1.0, 2.0]]), "rng_state": torch.arange(4)}
+    saved_curriculum = {
+        "training_iteration": 0,
+        "weights": torch.tensor([[1.0, 2.0]]),
+        "rng_state": torch.arange(4),
+    }
     restored_states = []
     environment = SimpleNamespace(
         get_command_curriculum_state=lambda: copy.deepcopy(saved_curriculum),
@@ -822,6 +1378,33 @@ def test_command_curriculum_state_round_trips_through_algorithm_checkpoint(monke
     assert len(restored_states) == 1
     assert torch.equal(restored_states[0]["weights"], saved_curriculum["weights"])
     assert torch.equal(restored_states[0]["rng_state"], saved_curriculum["rng_state"])
+
+
+def test_command_curriculum_iteration_mismatch_is_rejected_before_upstream_load(monkeypatch):
+    restored_states = []
+    environment = SimpleNamespace(
+        get_command_curriculum_state=lambda: {"training_iteration": 0},
+        validate_command_curriculum_state=lambda _state: None,
+        load_command_curriculum_state=restored_states.append,
+    )
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry["_env"] = SimpleNamespace(unwrapped=environment)
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=41)
+    checkpoint["command_curriculum_state"] = {"training_iteration": 41}
+    upstream_load_called = False
+
+    def upstream_load(*_args, **_kwargs):
+        nonlocal upstream_load_called
+        upstream_load_called = True
+        return True
+
+    monkeypatch.setattr(PPO, "load", upstream_load)
+
+    with pytest.raises(ValueError, match="training_iteration.*expected 42, received 41"):
+        algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert upstream_load_called is False
+    assert restored_states == []
 
 
 def test_enabled_command_curriculum_rejects_checkpoint_without_state(monkeypatch):
@@ -922,6 +1505,56 @@ def test_checkpoint_schema_rejects_mismatch_before_upstream_load(monkeypatch, mu
     assert not upstream_load_called
 
 
+def test_rejected_augmentation_checkpoint_does_not_mutate_upstream_state(monkeypatch):
+    class RejectingAugmentation:
+        def __init__(self):
+            self.value = torch.tensor(3.0)
+
+        def state_dict(self):
+            return {"accepted": True, "value": self.value.clone()}
+
+        def load_state_dict(self, state):
+            self.value.copy_(state["value"])
+            if not state["accepted"]:
+                raise ValueError("invalid augmentation checkpoint")
+
+    algorithm = _schedule_algorithm(0)
+    algorithm.actor = torch.nn.Linear(2, 2)
+    algorithm.critic = torch.nn.Linear(2, 1)
+    algorithm.optimizer = torch.optim.SGD((*algorithm.actor.parameters(), *algorithm.critic.parameters()), lr=0.1)
+    algorithm._tr_augmentation = RejectingAugmentation()
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=0)
+    checkpoint["time_reversal_augmentation_state"] = {
+        "accepted": False,
+        "value": torch.tensor(9.0),
+        "schedule_iteration": 1,
+    }
+    actor_before = copy.deepcopy(algorithm.actor.state_dict())
+    critic_before = copy.deepcopy(algorithm.critic.state_dict())
+    optimizer_before = copy.deepcopy(algorithm.optimizer.state_dict())
+    upstream_load_called = False
+
+    def mutating_upstream_load(target, *_args, **_kwargs):
+        nonlocal upstream_load_called
+        upstream_load_called = True
+        with torch.no_grad():
+            for parameter in (*target.actor.parameters(), *target.critic.parameters()):
+                parameter.fill_(42.0)
+        target.optimizer.param_groups[0]["lr"] = 42.0
+        return True
+
+    monkeypatch.setattr(PPO, "load", mutating_upstream_load)
+
+    with pytest.raises(ValueError, match="invalid augmentation checkpoint"):
+        algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert upstream_load_called is False
+    assert all(torch.equal(value, actor_before[name]) for name, value in algorithm.actor.state_dict().items())
+    assert all(torch.equal(value, critic_before[name]) for name, value in algorithm.critic.state_dict().items())
+    assert algorithm.optimizer.state_dict() == optimizer_before
+    assert algorithm._tr_augmentation.value.item() == 3.0
+
+
 def test_checkpoint_without_time_reversal_state_retains_legacy_iteration_fallback(monkeypatch):
     algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
     checkpoint = {"iter": 499}
@@ -949,6 +1582,26 @@ def test_legacy_72d_checkpoint_is_rejected_before_upstream_load(monkeypatch):
     monkeypatch.setattr(PPO, "load", upstream_load)
 
     with pytest.raises(ValueError, match="expected 64, received 72.*not migrated"):
+        algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert upstream_load_called is False
+
+
+def test_declared_policy_contract_does_not_mask_serialized_actor_width_mismatch(monkeypatch):
+    algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=499)
+    assert checkpoint["time_reversal_state"]["policy_contract"]["policy_input_dim"] == 64
+    checkpoint["actor_state_dict"] = {"architecture.0.weight": torch.zeros(12, 72)}
+    upstream_load_called = False
+
+    def upstream_load(*_args, **_kwargs):
+        nonlocal upstream_load_called
+        upstream_load_called = True
+        return True
+
+    monkeypatch.setattr(PPO, "load", upstream_load)
+
+    with pytest.raises(ValueError, match="declared policy contract.*expected 64, received 72"):
         algorithm.load(checkpoint, load_cfg=None, strict=True)
 
     assert upstream_load_called is False
@@ -1066,12 +1719,12 @@ def test_algorithm_runtime_validation_rejects_invalid_overrides(field, value):
         algorithm._validate_time_reversal_configuration()
 
 
-def test_history_time_reversal_mode_rejects_untransformed_active_history():
+def test_none_consistency_mode_disables_history_auxiliary_losses():
     algorithm = _schedule_algorithm(0)
-    algorithm.symmetry.update(history_enabled=True, history_length=30, history_trs_mode="none")
+    algorithm.symmetry.update(history_enabled=True, history_length=30, tr_consistency_mode="none")
 
-    with pytest.raises(ValueError, match="history_trs_mode='none'.*framewise_feature"):
-        algorithm._validate_time_reversal_configuration()
+    algorithm._validate_time_reversal_configuration()
+    assert algorithm._effective_time_reversal_coefficients() == (0.0, 0.0, 0.0)
 
 
 def test_history_and_model_sidecar_are_rejected_before_allocation():
@@ -1085,6 +1738,25 @@ def test_history_and_model_sidecar_are_rejected_before_allocation():
 
     with pytest.raises(ValueError, match="future samples.*--no-history"):
         algorithm._validate_time_reversal_configuration()
+
+
+def test_distributed_ppo_rejects_active_command_curriculum(monkeypatch):
+    environment = SimpleNamespace(get_command_curriculum_state=lambda: {"training_iteration": 0})
+
+    def initialize_base(algorithm, *_args, **_kwargs):
+        algorithm.symmetry = {
+            "_env": SimpleNamespace(unwrapped=environment),
+            "tr_augmentation": {"enabled": False},
+        }
+        algorithm.is_multi_gpu = True
+        algorithm.device = "cpu"
+        algorithm.actor = _DummyActor()
+
+    monkeypatch.setattr(PPO, "__init__", initialize_base)
+    monkeypatch.setattr(TimeReversalPPO, "_validate_time_reversal_configuration", lambda _algorithm: None)
+
+    with pytest.raises(ValueError, match="TR-orbit command curriculum.*distributed PPO"):
+        TimeReversalPPO()
 
 
 def test_policy_observation_width_reports_required_history_flags():

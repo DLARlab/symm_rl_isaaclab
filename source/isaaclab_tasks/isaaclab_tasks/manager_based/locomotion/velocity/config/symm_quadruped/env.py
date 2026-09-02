@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
-from isaaclab.envs.common import VecEnvStepReturn
+from isaaclab.envs.common import VecEnvObs, VecEnvStepReturn
 
 
 def _broadcast_action_parameter(
@@ -27,6 +30,40 @@ def _broadcast_action_parameter(
         raise ValueError(
             f"{name} must broadcast to action shape {tuple(reference.shape)}; received {tuple(tensor.shape)}."
         ) from exc
+
+
+def _maximum_stance_foot_slip(
+    horizontal_foot_velocity: torch.Tensor,
+    foot_contact_force: torch.Tensor,
+    contact_force_threshold: float = 1.0,
+) -> torch.Tensor:
+    """Return maximum horizontal speed among feet carrying contact force.
+
+    Args:
+        horizontal_foot_velocity: Per-foot horizontal velocity [m/s], shape
+            ``(num_envs, num_feet, 2)``.
+        foot_contact_force: Per-foot contact-force magnitude [N], shape
+            ``(num_envs, num_feet)``.
+        contact_force_threshold: Minimum force [N] for a foot to count as in contact.
+
+    Returns:
+        Maximum stance-foot slip speed [m/s] per environment.
+    """
+    if horizontal_foot_velocity.ndim != 3 or horizontal_foot_velocity.shape[-1] != 2:
+        raise ValueError(
+            "horizontal_foot_velocity must have shape (num_envs, num_feet, 2); "
+            f"received {tuple(horizontal_foot_velocity.shape)}."
+        )
+    if foot_contact_force.shape != horizontal_foot_velocity.shape[:-1]:
+        raise ValueError(
+            "foot_contact_force must match the environment/foot axes of horizontal_foot_velocity; "
+            f"received {tuple(foot_contact_force.shape)} and {tuple(horizontal_foot_velocity.shape)}."
+        )
+    if contact_force_threshold < 0.0:
+        raise ValueError(f"contact_force_threshold must be nonnegative; received {contact_force_threshold}.")
+    foot_speeds = torch.linalg.vector_norm(horizontal_foot_velocity, dim=-1)
+    stance = foot_contact_force > contact_force_threshold
+    return torch.where(stance, foot_speeds, torch.zeros_like(foot_speeds)).amax(dim=-1)
 
 
 def compute_requested_joint_position_targets(
@@ -195,6 +232,69 @@ def _soft_joint_limit_diagnostics(
 class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
     """Manager-based RL environment with symmetric locomotion update ordering."""
 
+    def reset(
+        self,
+        seed: int | None = None,
+        env_ids: Sequence[int] | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[VecEnvObs, dict]:
+        """Reset environments and invalidate their transient causal TR state.
+
+        Args:
+            seed: Optional environment randomization seed.
+            env_ids: Environments to reset, or ``None`` for every environment.
+            options: Optional Gymnasium reset options.
+
+        Returns:
+            Fresh observations and reset extras.
+        """
+        reset_ids = (
+            torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
+        observations, extras = super().reset(seed=seed, env_ids=env_ids, options=options)
+        self._mark_time_reversal_manual_reset(reset_ids)
+        return observations, extras
+
+    def reset_to(
+        self,
+        state: dict[str, dict[str, dict[str, torch.Tensor]]],
+        env_ids: Sequence[int] | None,
+        seed: int | None = None,
+        is_relative: bool = False,
+    ) -> tuple[VecEnvObs, dict]:
+        """Reset to supplied simulator state and invalidate transient causal TR state.
+
+        Args:
+            state: Scene-entity state accepted by the interactive scene.
+            env_ids: Environments to reset, or ``None`` for every environment.
+            seed: Optional environment randomization seed.
+            is_relative: Whether positions in :paramref:`state` are relative to environment origins.
+
+        Returns:
+            Fresh observations and reset extras.
+        """
+        reset_ids = (
+            torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
+        observations, extras = super().reset_to(
+            state,
+            env_ids,
+            seed=seed,
+            is_relative=is_relative,
+        )
+        self._mark_time_reversal_manual_reset(reset_ids)
+        return observations, extras
+
+    def _mark_time_reversal_manual_reset(self, env_ids: torch.Tensor) -> None:
+        """Advance episode and manual-reset generations for selected environments."""
+        self._ensure_time_reversal_generations()
+        self._tr_episode_generation[env_ids] += 1
+        self._tr_manual_reset_generation[env_ids] += 1
+
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         """Execute one RL step using the symmetric quadruped update ordering."""
         action = action.to(self.device)
@@ -252,6 +352,8 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
             self.recorder_manager.record_pre_reset(reset_env_ids)
 
             self._reset_idx(reset_env_ids)
+            self._ensure_time_reversal_generations()
+            self._tr_episode_generation[reset_env_ids] += 1
 
             if self.render_enabled and is_rendering and self.has_rtx_sensors and self.cfg.num_rerenders_on_reset > 0:
                 for _ in range(self.cfg.num_rerenders_on_reset):
@@ -266,6 +368,161 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         self.extras.setdefault("log", {}).update(step_diagnostics)
 
         return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
+
+    def _ensure_time_reversal_generations(self) -> None:
+        """Lazily allocate task-local sequence-boundary generations."""
+        if not hasattr(self, "_tr_episode_generation"):
+            self._tr_episode_generation = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_disturbance_generation"):
+            self._tr_disturbance_generation = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_manual_reset_generation"):
+            self._tr_manual_reset_generation = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_segment_episode_seen"):
+            self._tr_segment_episode_seen = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_command_segment_seen"):
+            self._tr_command_segment_seen = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_gait_segment_seen"):
+            self._tr_gait_segment_seen = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_disturbance_segment_seen"):
+            self._tr_disturbance_segment_seen = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_command_segment_start_step"):
+            self._tr_command_segment_start_step = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_gait_segment_start_step"):
+            self._tr_gait_segment_start_step = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if not hasattr(self, "_tr_disturbance_segment_start_step"):
+            self._tr_disturbance_segment_start_step = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+
+    def _time_reversal_segment_ages(
+        self,
+        command_segment_id: torch.Tensor,
+        gait_segment_id: torch.Tensor,
+        disturbance_segment_id: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return decision-step ages for current command, gait, and disturbance segments."""
+        self._ensure_time_reversal_generations()
+        current_step = int(self.common_step_counter)
+        episode_changed = self._tr_segment_episode_seen != self._tr_episode_generation
+        command_changed = episode_changed | (self._tr_command_segment_seen != command_segment_id)
+        gait_changed = episode_changed | (self._tr_gait_segment_seen != gait_segment_id)
+        disturbance_changed = episode_changed | (self._tr_disturbance_segment_seen != disturbance_segment_id)
+        self._tr_command_segment_start_step[command_changed] = current_step
+        self._tr_gait_segment_start_step[gait_changed] = current_step
+        self._tr_disturbance_segment_start_step[disturbance_changed] = current_step
+        self._tr_segment_episode_seen.copy_(self._tr_episode_generation)
+        self._tr_command_segment_seen.copy_(command_segment_id)
+        self._tr_gait_segment_seen.copy_(gait_segment_id)
+        self._tr_disturbance_segment_seen.copy_(disturbance_segment_id)
+        command_age = current_step - self._tr_command_segment_start_step
+        gait_age = current_step - self._tr_gait_segment_start_step
+        disturbance_age = current_step - self._tr_disturbance_segment_start_step
+        return command_age, gait_age, disturbance_age
+
+    def mark_time_reversal_disturbance(self, env_ids: torch.Tensor | None = None) -> None:
+        """Mark environments whose causal TR window crossed an external disturbance.
+
+        Args:
+            env_ids: Environment indices affected by the disturbance. ``None``
+                marks every environment.
+        """
+        self._ensure_time_reversal_generations()
+        if env_ids is None:
+            self._tr_disturbance_generation += 1
+            return
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        self._tr_disturbance_generation[ids] += 1
+
+    def get_time_reversal_sequence_context(self) -> dict[str, torch.Tensor]:
+        """Capture simulator-only context for transition-aligned TR validity.
+
+        The returned tensors are detached diagnostics. They are retained by the
+        task-local sequence buffer and never concatenated to actor or critic
+        observations.
+
+        Returns:
+            Per-environment episode/task identifiers and physical diagnostics.
+        """
+        self._ensure_time_reversal_generations()
+        robot = self.scene["robot"]
+        command_term = self.command_manager.get_term("base_velocity")
+        contact_impulse = torch.zeros(self.num_envs, device=self.device)
+        for sensor in getattr(self.scene, "sensors", {}).values():
+            force_history = getattr(sensor.data, "net_forces_w_history", None)
+            if force_history is None:
+                continue
+            force = force_history.torch
+            if force.ndim < 4:
+                continue
+            impulse = torch.linalg.vector_norm(force, dim=-1).mean(dim=1) * float(self.step_dt)
+            contact_impulse = torch.maximum(contact_impulse, impulse.amax(dim=-1))
+
+        foot_slip = torch.zeros_like(contact_impulse)
+        try:
+            foot_phase_cfg = self.reward_manager.get_term_cfg("foot_phase")
+            feet_cfg = foot_phase_cfg.params.get("feet_cfg")
+            foot_sensor_names = foot_phase_cfg.params.get("foot_sensor_names")
+            if feet_cfg is not None and feet_cfg.body_ids is not None and foot_sensor_names:
+                foot_velocity = robot.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :2]
+                foot_speeds = torch.linalg.vector_norm(foot_velocity, dim=-1)
+                contact_forces = []
+                for sensor_name in foot_sensor_names:
+                    sensor = self.scene.sensors[sensor_name]
+                    force = sensor.data.net_forces_w_history.torch
+                    force_norm = torch.linalg.vector_norm(force, dim=-1).amax(dim=1)
+                    contact_forces.append(force_norm[:, 0])
+                stacked_contact_forces = torch.stack(contact_forces, dim=-1)
+                if stacked_contact_forces.shape != foot_speeds.shape:
+                    raise RuntimeError(
+                        "Foot contact sensors and foot bodies must use the same ordered layout; "
+                        f"received {tuple(stacked_contact_forces.shape)} and {tuple(foot_speeds.shape)}."
+                    )
+                foot_slip = _maximum_stance_foot_slip(foot_velocity, stacked_contact_forces)
+        except (KeyError, AttributeError):
+            # Some compatibility/test configurations intentionally omit the
+            # foot-phase reward. A neutral detached diagnostic keeps capture
+            # available without changing the policy contract.
+            pass
+
+        requested = getattr(self, "_requested_joint_position_targets", None)
+        executed = getattr(self, "_executed_joint_position_targets", None)
+        if requested is None or executed is None or requested.shape != executed.shape:
+            actuator_saturation = torch.zeros_like(contact_impulse)
+        else:
+            actuator_saturation = (requested != executed).to(dtype=contact_impulse.dtype).mean(dim=-1)
+
+        command_counter = getattr(command_term, "command_counter", None)
+        if command_counter is None:
+            command_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        gait_counter = getattr(command_term, "gait_counter", None)
+        if gait_counter is None:
+            gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        gait_row = getattr(command_term, "gait_row_indices", None)
+        if gait_row is None:
+            gait_row = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
+        command_segment_age, gait_segment_age, disturbance_segment_age = self._time_reversal_segment_ages(
+            command_counter,
+            gait_counter,
+            self._tr_disturbance_generation,
+        )
+
+        return {
+            "episode_id": self._tr_episode_generation.detach().clone(),
+            "command_segment_id": command_counter.detach().clone(),
+            "gait_segment_id": gait_counter.detach().clone(),
+            "disturbance_generation_id": self._tr_disturbance_generation.detach().clone(),
+            "manual_reset_generation": self._tr_manual_reset_generation.detach().clone(),
+            "episode_step": self.episode_length_buf.detach().clone(),
+            "command_segment_age": command_segment_age.detach().clone(),
+            "gait_segment_age": gait_segment_age.detach().clone(),
+            "disturbance_segment_age": disturbance_segment_age.detach().clone(),
+            "gait_row": gait_row.detach().clone(),
+            "body_linear_velocity_b": robot.data.root_lin_vel_b.torch.detach().clone(),
+            "body_yaw_rate": robot.data.root_ang_vel_b.torch[:, 2].detach().clone(),
+            "projected_gravity": robot.data.projected_gravity_b.torch.detach().clone(),
+            "contact_impulse": contact_impulse.detach(),
+            "foot_slip": foot_slip.detach(),
+            "reverse_dynamics_residual": torch.zeros_like(contact_impulse),
+            "actuator_saturation": actuator_saturation.detach(),
+        }
 
     def _clamp_processed_joint_position_targets(self) -> None:
         """Clamp the processed joint-position action term to the robot soft limits."""
@@ -344,13 +601,13 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         command_term.set_training_iteration(iteration)
 
     def get_command_curriculum_state(self, command_name: str = "base_velocity") -> dict | None:
-        """Return checkpoint state for an enabled task-local command curriculum.
+        """Return persistent state for an enabled task-local command curriculum.
 
         Args:
             command_name: Name of the gait command term.
 
         Returns:
-            Exact command-curriculum state, or ``None`` when the optional
+            Global command-curriculum state, or ``None`` when the optional
             stateful curriculum is disabled.
         """
         command_term = self.command_manager.get_term(command_name)
@@ -358,7 +615,7 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         return getter() if callable(getter) else None
 
     def load_command_curriculum_state(self, state: dict, command_name: str = "base_velocity") -> None:
-        """Restore exact state for an enabled task-local command curriculum.
+        """Restore global state for an enabled task-local command curriculum.
 
         Args:
             state: State produced by :meth:`get_command_curriculum_state`.
@@ -369,6 +626,19 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         if not callable(loader):
             raise TypeError(f"Command term {command_name!r} does not support stateful curriculum restore.")
         loader(state)
+
+    def validate_command_curriculum_state(self, state: dict, command_name: str = "base_velocity") -> None:
+        """Validate global curriculum state without mutating the environment.
+
+        Args:
+            state: State produced by :meth:`get_command_curriculum_state`.
+            command_name: Name of the gait command term.
+        """
+        command_term = self.command_manager.get_term(command_name)
+        validator = getattr(command_term, "validate_command_curriculum_state", None)
+        if not callable(validator):
+            raise TypeError(f"Command term {command_name!r} does not support curriculum-state validation.")
+        validator(state)
 
     def _compute_step_diagnostics(
         self,

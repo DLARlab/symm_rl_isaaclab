@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import math
+import warnings
+from collections.abc import Mapping
 from numbers import Integral, Real
 from typing import Literal
 
@@ -22,6 +24,43 @@ from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import 
     SYMM_QUADRUPED_POLICY_OBS_DIM,
     SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT,
 )
+
+TR_CONSISTENCY_MAPPING_VERSION = "transition_aligned_causal_sequence_v1"
+"""Immutable causal-history time-reversal mapping identifier."""
+
+TR_CONSISTENCY_MODES = frozenset({"transition_aligned_sequence", "framewise_feature_approx", "none"})
+"""Maintained actor/value time-reversal consistency modes."""
+
+
+def resolve_tr_consistency_mode(symmetry: Mapping, *, warn_legacy: bool = True) -> str:
+    """Resolve the canonical consistency mode and its deprecated alias.
+
+    Args:
+        symmetry: Resolved symmetry configuration mapping.
+        warn_legacy: Whether use of ``history_trs_mode`` emits a warning.
+
+    Returns:
+        One of :data:`TR_CONSISTENCY_MODES`.
+    """
+    legacy_mode = symmetry.get("history_trs_mode")
+    if legacy_mode is not None:
+        legacy_modes = {"framewise_feature": "framewise_feature_approx", "none": "none"}
+        if legacy_mode not in legacy_modes:
+            raise ValueError(
+                "history_trs_mode is a deprecated compatibility alias and must be 'framewise_feature', 'none', "
+                f"or None; received {legacy_mode!r}."
+            )
+        if warn_legacy:
+            warnings.warn(
+                "history_trs_mode is deprecated; use tr_consistency_mode='framewise_feature_approx' or 'none'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return legacy_modes[str(legacy_mode)]
+    mode = symmetry.get("tr_consistency_mode", "transition_aligned_sequence")
+    if mode not in TR_CONSISTENCY_MODES:
+        raise ValueError(f"tr_consistency_mode must be one of {sorted(TR_CONSISTENCY_MODES)!r}; received {mode!r}.")
+    return str(mode)
 
 
 def _validate_optional_nonnegative_integer(name: str, value: int | None) -> None:
@@ -106,16 +145,34 @@ class TimeReversalValidityMaskCfg:
     """Minimum command magnitude [m/s], or ``None`` to inherit the legacy field."""
 
     tracking_abs_tolerance: float = 0.25
-    """Reserved reward-side tracking tolerance [m/s]; unavailable from the 64D policy frame."""
+    """Absolute planar-velocity tracking tolerance [m/s]."""
 
     tracking_rel_tolerance: float = 0.25
-    """Reserved relative tracking tolerance; unavailable from the 64D policy frame."""
+    """Relative planar-velocity tracking tolerance."""
+
+    tracking_abs_yaw_tolerance: float = 0.25
+    """Absolute yaw-rate tracking tolerance [rad/s]."""
+
+    tracking_rel_yaw_tolerance: float = 0.25
+    """Relative yaw-rate tracking tolerance."""
 
     projected_gravity_tolerance: float = 0.35
     """Maximum horizontal projected-gravity norm."""
 
     phase_boundary_margin: float = 0.03
     """Minimum circular phase distance from touchdown or liftoff [cycles]."""
+
+    maximum_contact_impulse: float = math.inf
+    """Optional maximum control-interval contact impulse [N s]."""
+
+    maximum_foot_slip: float = math.inf
+    """Optional maximum detached foot-slip diagnostic [m/s]."""
+
+    maximum_reverse_dynamics_residual: float = math.inf
+    """Optional maximum detached reverse-dynamics residual."""
+
+    maximum_actuator_saturation: float = math.inf
+    """Optional maximum detached actuator-saturation fraction."""
 
     command_speed_bin_edges: tuple[float, ...] = (0.5, 1.0, 1.5)
     """Absolute command-speed bin edges [m/s] used only for diagnostics."""
@@ -134,12 +191,23 @@ class TimeReversalValidityMaskCfg:
             ("validity_mask.min_abs_command_velocity", self.min_abs_command_velocity),
             ("validity_mask.tracking_abs_tolerance", self.tracking_abs_tolerance),
             ("validity_mask.tracking_rel_tolerance", self.tracking_rel_tolerance),
+            ("validity_mask.tracking_abs_yaw_tolerance", self.tracking_abs_yaw_tolerance),
+            ("validity_mask.tracking_rel_yaw_tolerance", self.tracking_rel_yaw_tolerance),
             ("validity_mask.projected_gravity_tolerance", self.projected_gravity_tolerance),
             ("validity_mask.phase_boundary_margin", self.phase_boundary_margin),
         ):
             _validate_optional_nonnegative_real(name, value)
         if self.phase_boundary_margin > 0.5:
             raise ValueError("validity_mask.phase_boundary_margin must not exceed 0.5 cycles.")
+        for name in (
+            "maximum_contact_impulse",
+            "maximum_foot_slip",
+            "maximum_reverse_dynamics_residual",
+            "maximum_actuator_saturation",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Real) or math.isnan(float(value)) or value <= 0.0:
+                raise ValueError(f"validity_mask.{name} must be positive or infinity; received {value!r}.")
         previous = -math.inf
         for edge in self.command_speed_bin_edges:
             _validate_optional_nonnegative_real("validity_mask.command_speed_bin_edges", edge)
@@ -345,13 +413,38 @@ class TimeReversalSymmetryCfg(RslRlSymmetryCfg):
     history_length: int = 30
     """Number of oldest-to-newest policy frames, or zero when history is disabled."""
 
-    history_trs_mode: Literal["none", "framewise_feature"] = "framewise_feature"
-    """Time-reversal operator applied to flattened policy history.
+    tr_consistency_mode: Literal[
+        "transition_aligned_sequence",
+        "framewise_feature_approx",
+        "none",
+    ] = "transition_aligned_sequence"
+    """Actor/value time-reversal consistency construction.
+
+    ``"transition_aligned_sequence"`` reconstructs the two causal action lags
+    from future executed actions and reverses the physical-frame time axis.
+    ``"framewise_feature_approx"`` is the legacy same-order feature ablation.
+    ``"none"`` disables actor/value time-reversal consistency.
+    """
+
+    history_trs_mode: Literal["none", "framewise_feature"] | None = None
+    """Deprecated compatibility alias for :attr:`tr_consistency_mode`.
 
     ``"framewise_feature"`` transforms every visible frame independently while
     preserving oldest-to-newest time order. It is an involutive feature-level
     prior, not a causal history sampled from a physically reversed rollout.
     """
+
+    tr_consistency_mapping_version: str = TR_CONSISTENCY_MAPPING_VERSION
+    """Immutable transition-aligned causal-sequence mapping identifier."""
+
+    action_history_length: int = 2
+    """Immutable number of causal action-lag fields in each policy frame."""
+
+    candidate_max_age_updates: int = 1
+    """Maximum PPO-update age of a sequence-consistency candidate."""
+
+    allowed_policy_version_span: int = 1
+    """Maximum collection-policy update span within one candidate."""
 
     observation_contract_version: str = SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION
     """Immutable hardware-oriented policy observation contract identifier."""
@@ -405,27 +498,42 @@ class TimeReversalSymmetryCfg(RslRlSymmetryCfg):
             raise ValueError("history_length must be positive when history_enabled=True.")
         if not self.history_enabled and self.history_length != 0:
             raise ValueError("history_length must be zero when history_enabled=False.")
-        if self.history_trs_mode not in {"none", "framewise_feature"}:
-            raise ValueError(
-                f"history_trs_mode must be 'none' or 'framewise_feature'; received {self.history_trs_mode!r}."
-            )
+        resolved_mode = resolve_tr_consistency_mode(
+            {
+                "tr_consistency_mode": self.tr_consistency_mode,
+                "history_trs_mode": self.history_trs_mode,
+            }
+        )
         policy_enabled = self.use_tr_policy_consistency
         if policy_enabled is None:
             policy_enabled = self.use_time_reversal_regularization and self.use_mirror_loss
         value_enabled = self.use_tr_value_consistency
         if value_enabled is None:
             value_enabled = self.use_time_reversal_regularization and self.value_loss_coeff > 0.0
-        if self.history_enabled and self.history_trs_mode == "none" and (policy_enabled or value_enabled):
+        if resolved_mode == "none":
+            policy_enabled = False
+            value_enabled = False
+        if self.tr_consistency_mapping_version != TR_CONSISTENCY_MAPPING_VERSION:
             raise ValueError(
-                "history_trs_mode='none' is invalid when history is enabled and actor/value time-reversal "
-                "consistency is active. Use history_trs_mode='framewise_feature'."
+                "tr_consistency_mapping_version is immutable: expected "
+                f"{TR_CONSISTENCY_MAPPING_VERSION!r}, received {self.tr_consistency_mapping_version!r}."
             )
+        if isinstance(self.action_history_length, bool) or self.action_history_length != 2:
+            raise ValueError(
+                f"action_history_length is immutable and must equal 2; received {self.action_history_length!r}."
+            )
+        for name in ("candidate_max_age_updates", "allowed_policy_version_span"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
+                raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
         immutable_metadata = {
             "observation_contract_version": SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION,
             "instantaneous_frame_dim": SYMM_QUADRUPED_POLICY_OBS_DIM,
             "history_packing": SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT.history_packing,
             "gait_phase_mapping_version": SYMM_QUADRUPED_PHASE_MAPPING_VERSION,
             "gait_library_version": SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION,
+            "tr_consistency_mapping_version": TR_CONSISTENCY_MAPPING_VERSION,
+            "action_history_length": 2,
         }
         for name, expected in immutable_metadata.items():
             received = getattr(self, name)
