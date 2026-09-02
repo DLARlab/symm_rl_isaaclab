@@ -49,15 +49,11 @@ def _make_valid_observations(
     phase = torch.rand((*leading_shape, 4), generator=generator, dtype=dtype)
     theta = torch.rand((*leading_shape, 4), generator=generator, dtype=dtype)
     beta = 0.2 + 0.6 * torch.rand((*leading_shape, 1), generator=generator, dtype=dtype)
-    swing_ratio = 1.0 - beta
 
     phase_sin, phase_cos = _encode_phase(phase)
-    theta_sin, theta_cos = _encode_phase(theta)
     obs[..., _LAYOUT.foot_phase_sin] = phase_sin
     obs[..., _LAYOUT.foot_phase_cos] = phase_cos
-    obs[..., _LAYOUT.foot_theta_sin] = theta_sin
-    obs[..., _LAYOUT.foot_theta_cos] = theta_cos
-    obs[..., _LAYOUT.phase_ratios] = torch.cat((swing_ratio, beta), dim=-1)
+    obs[..., _LAYOUT.duty_factor] = beta
     return obs, phase, theta, beta
 
 
@@ -163,37 +159,31 @@ def _leg_permutation_penalty(
     )
 
 
-def test_policy_observation_layout_remains_72d_and_in_original_order():
-    assert _OBS_DIM == 72
+def test_policy_observation_layout_is_hardware_oriented_64d():
+    assert _OBS_DIM == 64
     assert (
-        _LAYOUT.measured_base_twist,
         _LAYOUT.projected_gravity,
-        _LAYOUT.desired_base_twist,
+        _LAYOUT.velocity_command,
         _LAYOUT.joint_position,
         _LAYOUT.joint_velocity,
         _LAYOUT.previous_action,
+        _LAYOUT.second_previous_action,
+        _LAYOUT.gait_period,
+        _LAYOUT.duty_factor,
         _LAYOUT.foot_phase_sin,
         _LAYOUT.foot_phase_cos,
-        _LAYOUT.foot_theta_sin,
-        _LAYOUT.foot_theta_cos,
-        _LAYOUT.phase_ratios,
-        _LAYOUT.sagittal_plane_state,
     ) == (
-        slice(0, 6),
-        slice(6, 9),
-        slice(9, 15),
-        slice(15, 27),
-        slice(27, 39),
-        slice(39, 51),
-        slice(51, 55),
-        slice(55, 59),
-        slice(59, 63),
-        slice(63, 67),
-        slice(67, 69),
-        slice(69, 72),
+        slice(0, 3),
+        slice(3, 6),
+        slice(6, 18),
+        slice(18, 30),
+        slice(30, 42),
+        slice(42, 54),
+        slice(54, 55),
+        slice(55, 56),
+        slice(56, 60),
+        slice(60, 64),
     )
-    assert _LAYOUT.swing_ratio == slice(67, 68)
-    assert _LAYOUT.stance_ratio == slice(68, 69)
 
 
 def test_duty_aware_phase_reflection_is_an_involution():
@@ -304,7 +294,97 @@ def test_full_observation_time_reversal_is_an_involution_for_arbitrary_leading_d
     assert torch.allclose(obs_tt, obs, atol=1.0e-11, rtol=0.0)
 
 
-def test_time_reversed_observation_closes_on_one_common_transformed_gait_clock():
+def test_full_observation_time_reversal_has_expected_channel_parity():
+    obs, _, _, _ = _make_valid_observations((4,), seed=31)
+
+    obs_tr = symm_quadruped.time_reverse_observations(obs)
+
+    for term_slice in (
+        _LAYOUT.projected_gravity,
+        _LAYOUT.joint_position,
+        _LAYOUT.previous_action,
+        _LAYOUT.second_previous_action,
+        _LAYOUT.gait_period,
+        _LAYOUT.duty_factor,
+    ):
+        assert torch.equal(obs_tr[..., term_slice], obs[..., term_slice])
+    for term_slice in (_LAYOUT.velocity_command, _LAYOUT.joint_velocity):
+        assert torch.equal(obs_tr[..., term_slice], -obs[..., term_slice])
+
+
+@pytest.mark.parametrize("device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else []))
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_instantaneous_time_reversal_math_is_device_and_dtype_stable(device, dtype):
+    obs_cpu, phase_cpu, _, beta_cpu = _make_valid_observations((2, 3), seed=113, dtype=dtype)
+    obs = obs_cpu.to(device=device)
+    phase = phase_cpu.to(device=device)
+    beta = beta_cpu.to(device=device)
+
+    obs_tr = symm_quadruped.time_reverse_observations(obs)
+    obs_tt = symm_quadruped.time_reverse_observations(obs_tr)
+    expected_phase = torch.remainder((1.0 - beta) - phase, 1.0)
+    expected_sin, expected_cos = _encode_phase(expected_phase)
+    atol = 2.0e-5 if dtype == torch.float32 else 1.0e-11
+
+    assert obs_tr.device.type == device
+    assert obs_tr.dtype == dtype
+    assert torch.equal(obs_tr[..., _LAYOUT.velocity_command], -obs[..., _LAYOUT.velocity_command])
+    assert torch.equal(obs_tr[..., _LAYOUT.joint_velocity], -obs[..., _LAYOUT.joint_velocity])
+    assert torch.equal(obs_tr[..., _LAYOUT.previous_action], obs[..., _LAYOUT.previous_action])
+    assert torch.equal(obs_tr[..., _LAYOUT.second_previous_action], obs[..., _LAYOUT.second_previous_action])
+    assert torch.allclose(obs_tr[..., _LAYOUT.foot_phase_sin], expected_sin, atol=atol, rtol=0.0)
+    assert torch.allclose(obs_tr[..., _LAYOUT.foot_phase_cos], expected_cos, atol=atol, rtol=0.0)
+    assert torch.allclose(obs_tt, obs, atol=atol, rtol=0.0)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_term_major_history_time_reversal_is_framewise_involutive_without_reordering(dtype):
+    frames, _, _, _ = _make_valid_observations((3, 30), seed=32, dtype=dtype)
+    packed = symm_quadruped.pack_term_major_policy_history(frames)
+
+    packed_tr = symm_quadruped.time_reverse_observations(packed)
+    packed_tt = symm_quadruped.time_reverse_observations(packed_tr)
+    frames_tr = symm_quadruped.unpack_term_major_policy_history(packed_tr)
+
+    assert torch.allclose(packed_tt, packed, atol=2.0e-5 if dtype == torch.float32 else 1.0e-11, rtol=0.0)
+    assert torch.allclose(
+        frames_tr,
+        symm_quadruped.time_reverse_observations(frames),
+        atol=1.0e-6 if dtype == torch.float32 else 1.0e-12,
+        rtol=0.0,
+    )
+    assert torch.equal(frames_tr[..., 0, _LAYOUT.gait_period], frames[..., 0, _LAYOUT.gait_period])
+    assert torch.equal(frames_tr[..., -1, _LAYOUT.gait_period], frames[..., -1, _LAYOUT.gait_period])
+
+
+@pytest.mark.parametrize("device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else []))
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_history_time_reversal_math_is_device_and_dtype_stable(device, dtype):
+    frames_cpu, _, _, _ = _make_valid_observations((2, 7), seed=127, dtype=dtype)
+    frames = frames_cpu.to(device=device)
+    packed = symm_quadruped.pack_term_major_policy_history(frames)
+
+    packed_tr = symm_quadruped.time_reverse_observations(packed)
+    transformed_frames = symm_quadruped.unpack_term_major_policy_history(packed_tr)
+    packed_tt = symm_quadruped.time_reverse_observations(packed_tr)
+    expected_frames = symm_quadruped.time_reverse_observations(frames)
+    atol = 2.0e-5 if dtype == torch.float32 else 1.0e-11
+
+    assert packed_tr.device.type == device
+    assert packed_tr.dtype == dtype
+    assert torch.allclose(transformed_frames, expected_frames, atol=atol, rtol=0.0)
+    assert torch.allclose(packed_tt, packed, atol=atol, rtol=0.0)
+    assert torch.equal(
+        transformed_frames[..., 0, _LAYOUT.gait_period],
+        frames[..., 0, _LAYOUT.gait_period],
+    )
+    assert torch.equal(
+        transformed_frames[..., -1, _LAYOUT.gait_period],
+        frames[..., -1, _LAYOUT.gait_period],
+    )
+
+
+def test_time_reversed_observation_uses_duty_aware_foot_phase_reflection():
     generator = torch.Generator().manual_seed(4)
     phi = torch.rand((16, 1), generator=generator, dtype=torch.float64)
     theta = torch.rand((16, 4), generator=generator, dtype=torch.float64)
@@ -313,23 +393,14 @@ def test_time_reversed_observation_closes_on_one_common_transformed_gait_clock()
     phase = _wrap(phi + theta)
     obs = torch.zeros((16, _OBS_DIM), dtype=torch.float64)
     obs[..., _LAYOUT.foot_phase_sin], obs[..., _LAYOUT.foot_phase_cos] = _encode_phase(phase)
-    obs[..., _LAYOUT.foot_theta_sin], obs[..., _LAYOUT.foot_theta_cos] = _encode_phase(theta)
-    obs[..., _LAYOUT.phase_ratios] = torch.cat((swing_ratio, beta), dim=-1)
+    obs[..., _LAYOUT.duty_factor] = beta
 
     obs_tr = symm_quadruped.time_reverse_observations(obs)
     phase_tr = _decode_phase(
         obs_tr[..., _LAYOUT.foot_phase_sin],
         obs_tr[..., _LAYOUT.foot_phase_cos],
     )
-    theta_tr = _decode_phase(
-        obs_tr[..., _LAYOUT.foot_theta_sin],
-        obs_tr[..., _LAYOUT.foot_theta_cos],
-    )
-
     _assert_phases_close(phase_tr, _wrap(swing_ratio - phase))
-    _assert_phases_close(theta_tr, _wrap(-theta))
-    common_phase_tr = _wrap(phase_tr - theta_tr)
-    _assert_phases_close(common_phase_tr, _wrap(swing_ratio - phi).expand_as(common_phase_tr))
 
 
 def test_same_gait_phase_helper_is_independent_of_command_sign_and_preserves_tensor_properties():
@@ -940,12 +1011,12 @@ def test_play_sequence_uses_one_shot_velocity_before_shared_gait_boundary():
 
 def test_zero_command_remains_zero_and_observation_transform_remains_involutive():
     obs, _, _, _ = _make_valid_observations((8,), seed=5)
-    obs[..., _LAYOUT.desired_base_twist] = 0.0
+    obs[..., _LAYOUT.velocity_command] = 0.0
 
     obs_tr = symm_quadruped.time_reverse_observations(obs)
     obs_tt = symm_quadruped.time_reverse_observations(obs_tr)
 
-    assert torch.count_nonzero(obs_tr[..., _LAYOUT.desired_base_twist]) == 0
+    assert torch.count_nonzero(obs_tr[..., _LAYOUT.velocity_command]) == 0
     assert torch.allclose(obs_tt, obs, atol=1.0e-11, rtol=0.0)
 
 
@@ -975,21 +1046,15 @@ def test_same_gait_backward_keeps_each_half_bound_row_while_physical_tr_exchange
     swing_ratio = 1.0 - beta
     obs = torch.zeros((2, _OBS_DIM), dtype=torch.float64)
     obs[..., _LAYOUT.foot_phase_sin], obs[..., _LAYOUT.foot_phase_cos] = _encode_phase(phases)
-    obs[..., _LAYOUT.foot_theta_sin], obs[..., _LAYOUT.foot_theta_cos] = _encode_phase(half_bounds)
-    obs[..., _LAYOUT.phase_ratios] = torch.cat((swing_ratio, beta), dim=-1)
+    obs[..., _LAYOUT.duty_factor] = beta
 
     obs_tr = symm_quadruped.time_reverse_observations(obs)
     phase_tr = _decode_phase(
         obs_tr[..., _LAYOUT.foot_phase_sin],
         obs_tr[..., _LAYOUT.foot_phase_cos],
     )
-    theta_tr = _decode_phase(
-        obs_tr[..., _LAYOUT.foot_theta_sin],
-        obs_tr[..., _LAYOUT.foot_theta_cos],
-    )
     phi_tr = _wrap(swing_ratio - phi)
     _assert_phases_close(phase_tr, _wrap(phi_tr + half_bounds.flip(0)))
-    _assert_phases_close(theta_tr, _wrap(half_bounds.flip(0)))
 
 
 def test_half_bound_touchdown_order_reverses_between_partner_rows():

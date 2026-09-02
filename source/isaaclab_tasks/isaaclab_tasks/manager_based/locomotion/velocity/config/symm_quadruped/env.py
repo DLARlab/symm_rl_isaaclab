@@ -343,6 +343,33 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
             raise TypeError(f"Command term {command_name!r} does not support an iteration-based curriculum.")
         command_term.set_training_iteration(iteration)
 
+    def get_command_curriculum_state(self, command_name: str = "base_velocity") -> dict | None:
+        """Return checkpoint state for an enabled task-local command curriculum.
+
+        Args:
+            command_name: Name of the gait command term.
+
+        Returns:
+            Exact command-curriculum state, or ``None`` when the optional
+            stateful curriculum is disabled.
+        """
+        command_term = self.command_manager.get_term(command_name)
+        getter = getattr(command_term, "get_command_curriculum_state", None)
+        return getter() if callable(getter) else None
+
+    def load_command_curriculum_state(self, state: dict, command_name: str = "base_velocity") -> None:
+        """Restore exact state for an enabled task-local command curriculum.
+
+        Args:
+            state: State produced by :meth:`get_command_curriculum_state`.
+            command_name: Name of the gait command term.
+        """
+        command_term = self.command_manager.get_term(command_name)
+        loader = getattr(command_term, "load_command_curriculum_state", None)
+        if not callable(loader):
+            raise TypeError(f"Command term {command_name!r} does not support stateful curriculum restore.")
+        loader(state)
+
     def _compute_step_diagnostics(
         self,
         action: torch.Tensor,

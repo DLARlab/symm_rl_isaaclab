@@ -30,6 +30,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import 
     SYMM_QUADRUPED_POLICY_OBS_DIM,
     SYMM_QUADRUPED_POLICY_OBS_LAYOUT,
     SYMM_QUADRUPED_POLICY_OBS_SCALE,
+    compute_dimensionless_gait_period,
 )
 
 _EPS = 1.0e-8
@@ -87,6 +88,7 @@ class TRDynamicsFeatureLayout:
     rotation: slice
     actuator_target: slice
     previous_action: slice
+    second_previous_action: slice
     common_phase_sin: int
     common_phase_cos: int
     foot_phase_sin: slice
@@ -198,6 +200,7 @@ class TRDynamicsState:
     joint_velocity: torch.Tensor
     actuator_target: torch.Tensor
     previous_action: torch.Tensor
+    second_previous_action: torch.Tensor
     velocity_command: torch.Tensor
     common_gait_phase: torch.Tensor
     foot_phase_offsets: torch.Tensor
@@ -263,7 +266,8 @@ class TRDynamicsState:
         actuator_target = slice(cursor, cursor + width(self.actuator_target))
         cursor = actuator_target.stop
         previous_action = slice(cursor, cursor + width(self.previous_action))
-        cursor = previous_action.stop + width(self.velocity_command)
+        second_previous_action = slice(previous_action.stop, previous_action.stop + width(self.second_previous_action))
+        cursor = second_previous_action.stop + width(self.velocity_command)
         common_phase_sin = cursor
         common_phase_cos = cursor + 1
         cursor += 2
@@ -275,6 +279,7 @@ class TRDynamicsState:
             rotation=rotation,
             actuator_target=actuator_target,
             previous_action=previous_action,
+            second_previous_action=second_previous_action,
             common_phase_sin=common_phase_sin,
             common_phase_cos=common_phase_cos,
             foot_phase_sin=foot_phase_sin,
@@ -305,6 +310,7 @@ class TRDynamicsState:
                 self.joint_velocity,
                 self.actuator_target,
                 self.previous_action,
+                self.second_previous_action,
                 self.velocity_command,
                 torch.sin(phase_angle).unsqueeze(-1),
                 torch.cos(phase_angle).unsqueeze(-1),
@@ -341,6 +347,7 @@ def time_reverse_dynamics_state(state: TRDynamicsState) -> TRDynamicsState:
         joint_velocity=-state.joint_velocity,
         actuator_target=state.actuator_target.clone(),
         previous_action=state.previous_action.clone(),
+        second_previous_action=state.second_previous_action.clone(),
         velocity_command=-state.velocity_command,
         common_gait_phase=torch.remainder(state.swing_ratio - state.common_gait_phase, 1.0),
         foot_phase_offsets=-state.foot_phase_offsets,
@@ -374,15 +381,20 @@ def build_time_reversal_observation(
     state: TRDynamicsState,
     *,
     previous_action: torch.Tensor,
-    lateral_position_scale: float = 0.5,
+    second_previous_action: torch.Tensor,
+    base_height_range: tuple[float, float],
 ) -> torch.Tensor:
-    """Build the 72D policy observation from a reversed state and action history.
+    """Build the 64D policy observation from a reversed state and action history.
 
     Unlike applying ``T_O`` to an isolated stored observation, this builder
     receives the action that actually precedes the state in the constructed
     reversed sequence.
     """
-    if state.joint_position.shape[-1] != 12 or previous_action.shape[-1] != 12:
+    if (
+        state.joint_position.shape[-1] != 12
+        or previous_action.shape[-1] != 12
+        or second_previous_action.shape[-1] != 12
+    ):
         raise ValueError("The shared symmetric quadruped observation requires 12 joints and 12 actions.")
     layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
     scales = SYMM_QUADRUPED_POLICY_OBS_SCALE
@@ -392,44 +404,39 @@ def build_time_reversal_observation(
         dtype=state.root_position.dtype,
         device=state.root_position.device,
     )
-    measured_twist = torch.cat((state.root_linear_velocity, state.root_angular_velocity), dim=-1)
-    measured_scale = torch.as_tensor(scales.measured_base_twist, dtype=observation.dtype, device=observation.device)
-    observation[:, layout.measured_base_twist] = measured_twist * measured_scale
-
     rotation = rotation_6d_to_matrix(state.root_rotation_6d)
     gravity_world = torch.tensor((0.0, 0.0, -1.0), dtype=observation.dtype, device=observation.device)
     projected_gravity = torch.matmul(rotation.transpose(-1, -2), gravity_world)
     gravity_scale = torch.as_tensor(scales.projected_gravity, dtype=observation.dtype, device=observation.device)
     observation[:, layout.projected_gravity] = projected_gravity * gravity_scale
 
-    desired_twist = torch.zeros(state.batch_size, 6, dtype=observation.dtype, device=observation.device)
-    desired_twist[:, :2] = state.velocity_command[:, :2]
-    desired_twist[:, 5] = state.velocity_command[:, 2]
-    desired_scale = torch.as_tensor(scales.desired_base_twist, dtype=observation.dtype, device=observation.device)
-    observation[:, layout.desired_base_twist] = desired_twist * desired_scale
-    observation[:, layout.joint_position] = state.joint_position
-    observation[:, layout.joint_velocity] = state.joint_velocity * scales.joint_velocity[0]
-    observation[:, layout.previous_action] = previous_action
+    command_scale = torch.as_tensor(scales.velocity_command, dtype=observation.dtype, device=observation.device)
+    observation[:, layout.velocity_command] = state.velocity_command * command_scale
+    joint_position_scale = torch.as_tensor(scales.joint_position, dtype=observation.dtype, device=observation.device)
+    joint_velocity_scale = torch.as_tensor(scales.joint_velocity, dtype=observation.dtype, device=observation.device)
+    previous_action_scale = torch.as_tensor(scales.previous_action, dtype=observation.dtype, device=observation.device)
+    second_previous_action_scale = torch.as_tensor(
+        scales.second_previous_action, dtype=observation.dtype, device=observation.device
+    )
+    observation[:, layout.joint_position] = state.joint_position * joint_position_scale
+    observation[:, layout.joint_velocity] = state.joint_velocity * joint_velocity_scale
+    observation[:, layout.previous_action] = previous_action * previous_action_scale
+    observation[:, layout.second_previous_action] = second_previous_action * second_previous_action_scale
+    dimensionless_period = compute_dimensionless_gait_period(state.gait_period, base_height_range)
+    observation[:, layout.gait_period] = dimensionless_period.unsqueeze(-1) * scales.gait_period[0]
+    observation[:, layout.duty_factor] = state.stance_ratio.unsqueeze(-1) * scales.duty_factor[0]
 
     foot_phase = torch.remainder(state.common_gait_phase.unsqueeze(-1) + state.foot_phase_offsets, 1.0)
-    observation[:, layout.foot_phase_sin] = torch.sin(2.0 * torch.pi * foot_phase)
-    observation[:, layout.foot_phase_cos] = torch.cos(2.0 * torch.pi * foot_phase)
-    observation[:, layout.foot_theta_sin] = torch.sin(2.0 * torch.pi * state.foot_phase_offsets)
-    observation[:, layout.foot_theta_cos] = torch.cos(2.0 * torch.pi * state.foot_phase_offsets)
-    observation[:, layout.swing_ratio] = state.swing_ratio.unsqueeze(-1)
-    observation[:, layout.stance_ratio] = state.stance_ratio.unsqueeze(-1)
-
-    lateral_position = (state.root_position[:, 1] / lateral_position_scale).clamp(-1.0, 1.0)
-    heading = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])
-    observation[:, layout.sagittal_plane_state] = torch.stack(
-        (lateral_position, torch.sin(heading), torch.cos(heading)), dim=-1
-    )
+    phase_sin_scale = torch.as_tensor(scales.foot_phase_sin, dtype=observation.dtype, device=observation.device)
+    phase_cos_scale = torch.as_tensor(scales.foot_phase_cos, dtype=observation.dtype, device=observation.device)
+    observation[:, layout.foot_phase_sin] = torch.sin(2.0 * torch.pi * foot_phase) * phase_sin_scale
+    observation[:, layout.foot_phase_cos] = torch.cos(2.0 * torch.pi * foot_phase) * phase_cos_scale
     return observation
 
 
 @dataclass(frozen=True)
 class TRReversedSequence:
-    """Complete reversed sequence after dropping its unknown-history first transition."""
+    """Complete reversed sequence after dropping two unknown-history transitions."""
 
     observations: torch.Tensor
     actions: torch.Tensor
@@ -443,6 +450,7 @@ def build_reversed_sequence_segment(
     *,
     reversed_actions: list[torch.Tensor] | None = None,
     reversed_actuator_targets: list[torch.Tensor] | None = None,
+    base_height_range: tuple[float, float],
 ) -> TRReversedSequence:
     """Reverse a constant-task state/action sequence with correct action history.
 
@@ -456,13 +464,13 @@ def build_reversed_sequence_segment(
             targets from the chronological successor states.
 
     Returns:
-        Reversed supervision pairs. The transition starting at ``T_X(x_H)``
-        is dropped because its prior reversed action is not reconstructable.
+        Reversed supervision pairs. The first two transitions are dropped
+        because their complete two-action reversed history is not reconstructable.
     """
     if len(states) != len(actions) + 1:
         raise ValueError("A complete segment must contain exactly one more state than action.")
-    if len(actions) < 2:
-        raise ValueError("At least two transitions are required after dropping unknown reversed action history.")
+    if len(actions) < 3:
+        raise ValueError("At least three transitions are required after dropping unknown reversed action history.")
     if reversed_actions is None:
         reversed_actions = [time_reverse_actions(action) for action in actions]
     if reversed_actuator_targets is None:
@@ -473,8 +481,9 @@ def build_reversed_sequence_segment(
     supervision_actions: list[torch.Tensor] = []
     current_states: list[TRDynamicsState] = []
     successor_states: list[TRDynamicsState] = []
-    for index in range(len(actions) - 2, -1, -1):
+    for index in range(len(actions) - 3, -1, -1):
         previous_action = reversed_actions[index + 1]
+        second_previous_action = reversed_actions[index + 2]
         reversed_action = reversed_actions[index]
         # The stored state fields describe chronological action history. A
         # valid reversed Markov state instead carries the preceding reversed
@@ -482,14 +491,23 @@ def build_reversed_sequence_segment(
         current = replace(
             time_reverse_dynamics_state(states[index + 1]),
             previous_action=previous_action,
+            second_previous_action=second_previous_action,
             actuator_target=reversed_actuator_targets[index + 1],
         )
         successor = replace(
             time_reverse_dynamics_state(states[index]),
             previous_action=reversed_action,
+            second_previous_action=previous_action,
             actuator_target=reversed_actuator_targets[index],
         )
-        observations.append(build_time_reversal_observation(current, previous_action=previous_action))
+        observations.append(
+            build_time_reversal_observation(
+                current,
+                previous_action=previous_action,
+                second_previous_action=second_previous_action,
+                base_height_range=base_height_range,
+            )
+        )
         supervision_actions.append(reversed_action)
         current_states.append(current)
         successor_states.append(successor)
@@ -608,8 +626,11 @@ def capture_tr_dynamics_state(env_wrapper) -> TRDynamicsState:
     joint_position, joint_velocity, actuator_target = _ordered_joint_state(environment)
     gait_command = _gait_command_term(environment)
     previous_action = environment.action_manager.action
-    if actuator_target.shape != previous_action.shape:
-        raise RuntimeError("Processed actuator targets and policy actions must have identical shapes.")
+    second_previous_action = environment.action_manager.prev_action
+    if actuator_target.shape != previous_action.shape or second_previous_action.shape != previous_action.shape:
+        raise RuntimeError(
+            "Processed actuator targets and both policy action-history tensors must have identical shapes."
+        )
     num_envs = root_position.shape[0]
     body_mass, material_properties = _capture_even_dynamics_parameters(
         robot,
@@ -626,6 +647,7 @@ def capture_tr_dynamics_state(env_wrapper) -> TRDynamicsState:
         joint_velocity=joint_velocity.detach().clone(),
         actuator_target=actuator_target.detach().clone(),
         previous_action=previous_action.detach().clone(),
+        second_previous_action=second_previous_action.detach().clone(),
         velocity_command=gait_command.command.detach().clone(),
         common_gait_phase=torch.remainder(gait_command.common_gait_phases(), 1.0).detach().clone(),
         foot_phase_offsets=gait_command.foot_thetas.detach().clone(),
@@ -689,6 +711,7 @@ class TRSidecarTransition:
     duty_factor: torch.Tensor
     gait_period: torch.Tensor
     previous_action: torch.Tensor
+    second_previous_action: torch.Tensor
     contact_impulse: torch.Tensor
     contact_mode: torch.Tensor
     environment_id: torch.Tensor
@@ -734,6 +757,12 @@ class TRSidecarBuffer:
         """Capture ``x_t`` immediately before the environment step."""
         if self.pending is not None:
             raise RuntimeError("The time-reversal sidecar already has an unmatched pre-step state.")
+        if observation["policy"].shape[-1] != SYMM_QUADRUPED_POLICY_OBS_DIM:
+            raise RuntimeError(
+                "Time-reversal sidecar augmentation supports only one instantaneous policy frame; received "
+                f"width {observation['policy'].shape[-1]}. Historical reversed context would require future "
+                "samples from the authentic rollout and is not fabricated. Disable history or the sidecar."
+            )
         self.pending = _PendingTransition(
             observation=observation["policy"].detach().clone(),
             state=state.clone(),
@@ -755,6 +784,11 @@ class TRSidecarBuffer:
         """Pair authentic nonterminal successors and reject auto-reset successors."""
         if self.pending is None:
             raise RuntimeError("The time-reversal sidecar received a successor without a pre-step state.")
+        if observation["policy"].shape[-1] != SYMM_QUADRUPED_POLICY_OBS_DIM:
+            raise RuntimeError(
+                "Time-reversal sidecar augmentation received a historical successor observation. Disable history "
+                "or the sidecar; current-frame-only reconstruction is intentionally unsupported."
+            )
         pending = self.pending
         done = dones.to(dtype=torch.bool)
         timeout = extras.get("time_outs", torch.zeros_like(done)).to(device=done.device, dtype=torch.bool)
@@ -800,6 +834,7 @@ class TRSidecarBuffer:
                 duty_factor=pending.state.stance_ratio.clone(),
                 gait_period=pending.state.gait_period.clone(),
                 previous_action=pending.state.previous_action.clone(),
+                second_previous_action=pending.state.second_previous_action.clone(),
                 contact_impulse=contact_impulse.detach().clone(),
                 contact_mode=contact_mode.detach().clone(),
                 environment_id=environment_id,
@@ -1072,7 +1107,7 @@ def time_reversal_phase_event_crossing(
 class TimeReversalAugmentation:
     """Dynamics-filtered reverse-action supervision controller."""
 
-    _CHECKPOINT_SCHEMA_VERSION = 2
+    _CHECKPOINT_SCHEMA_VERSION = 3
     _SEMANTIC_DEFAULTS = {
         "enabled": True,
         "mode": "dynamics_filtered_reverse_action_supervision",
@@ -1117,6 +1152,10 @@ class TimeReversalAugmentation:
         if template_state.additional_actuator_state.shape[-1] != 0:
             raise RuntimeError("Nonempty actuator hidden state requires an explicit temporal parity transform.")
         environment = env_wrapper.unwrapped if hasattr(env_wrapper, "unwrapped") else env_wrapper
+        command_cfg = _gait_command_term(environment).cfg
+        self.base_height_range = tuple(command_cfg.base_height_range)
+        # Validate the shared characteristic-length convention immediately.
+        compute_dimensionless_gait_period(template_state.gait_period, self.base_height_range)
         action_dim = int(environment.action_manager.total_action_dim)
         self.action_term = environment.action_manager.get_term(environment.action_manager.active_terms[0])
         if self.cfg.get("action_source", "analytic") == "learned_inverse" and not all(
@@ -1134,6 +1173,8 @@ class TimeReversalAugmentation:
             - self.feature_layout.actuator_target.start
             + self.feature_layout.previous_action.stop
             - self.feature_layout.previous_action.start
+            + self.feature_layout.second_previous_action.stop
+            - self.feature_layout.second_previous_action.start
         )
         inverse_state_dim = state_dim - excluded_inverse_width
         dynamics_hidden = tuple(self.cfg.get("dynamics_hidden_dims", (256, 256)))
@@ -1171,6 +1212,7 @@ class TimeReversalAugmentation:
         for name, default in self._SEMANTIC_DEFAULTS.items():
             value = self.cfg.get(name, default)
             semantics[name] = tuple(value) if name.endswith("hidden_dims") else value
+        semantics["base_height_range"] = self.base_height_range
         return semantics
 
     def _action_parameter_for_environment(self, value, environment_index: int):
@@ -1205,7 +1247,7 @@ class TimeReversalAugmentation:
         return torch.cat(
             (
                 normalized_state_features[..., : layout.actuator_target.start],
-                normalized_state_features[..., layout.previous_action.stop :],
+                normalized_state_features[..., layout.second_previous_action.stop :],
             ),
             dim=-1,
         )
@@ -1242,6 +1284,7 @@ class TimeReversalAugmentation:
             analytic_actions,
             reversed_actions=learned_actions,
             reversed_actuator_targets=actuator_targets,
+            base_height_range=self.base_height_range,
         )
 
     def _dynamics_residual(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -1500,7 +1543,7 @@ class TimeReversalAugmentation:
         rollout_steps: list[torch.Tensor] = []
         action_source = self.cfg.get("action_source", "analytic")
         for segment in segments:
-            if len(segment) < 2:
+            if len(segment) < 3:
                 continue
             environment_index = segment[0][1]
             selection = slice(environment_index, environment_index + 1)
@@ -1514,12 +1557,16 @@ class TimeReversalAugmentation:
                     environment_index,
                 )
             else:
-                reversed_segment = build_reversed_sequence_segment(segment_states, segment_actions)
+                reversed_segment = build_reversed_sequence_segment(
+                    segment_states,
+                    segment_actions,
+                    base_height_range=self.base_height_range,
+                )
             observations.append(reversed_segment.observations)
             actions.append(reversed_segment.actions)
             current_states.append(reversed_segment.current_state)
             next_states.append(reversed_segment.successor_state)
-            for transition, _ in reversed(segment[:-1]):
+            for transition, _ in reversed(segment[:-2]):
                 impulses.append(transition.contact_impulse[selection])
                 contact_modes.append(transition.contact_mode[selection])
                 environment_ids.append(transition.environment_id[selection])
@@ -1579,6 +1626,8 @@ class TimeReversalAugmentation:
         successor_observation = build_time_reversal_observation(
             next_state,
             previous_action=next_state.previous_action,
+            second_previous_action=next_state.second_previous_action,
+            base_height_range=self.base_height_range,
         )
         learned_threshold = torch.as_tensor(
             self.filter_beta,

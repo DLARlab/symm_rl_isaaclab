@@ -19,6 +19,11 @@ from rsl_rl.algorithms import PPO
 from rsl_rl.runners import OnPolicyRunner
 from tensordict import TensorDict
 
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp import go2_symm
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import (
+    SYMM_QUADRUPED_POLICY_OBS_DIM,
+)
+
 _PPO_MODULE_PATH = (
     Path(__file__).parents[1]
     / "isaaclab_tasks"
@@ -264,7 +269,9 @@ def test_zero_scale_computes_schedule_once_and_skips_extra_time_reversal_forward
 
     batch_size = 2
     batch = SimpleNamespace(
-        observations=TensorDict({"policy": torch.zeros(batch_size, 72)}, batch_size=[batch_size]),
+        observations=TensorDict(
+            {"policy": torch.zeros(batch_size, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[batch_size]
+        ),
         actions=torch.zeros(batch_size, 12),
         old_actions_log_prob=torch.zeros(batch_size),
         values=torch.zeros(batch_size, 1),
@@ -341,12 +348,75 @@ def test_zero_scale_has_exactly_zero_weighted_auxiliary_objective():
     assert weighted == (0.0, 0.0, 0.0)
 
 
+def test_history_actor_and_value_consistency_losses_are_finite_and_fully_transformed():
+    events = []
+    actor = _CountingActor(events)
+    critic = _CountingCritic(events)
+    batch_size = 2
+    policy_width = 30 * SYMM_QUADRUPED_POLICY_OBS_DIM
+    observations = TensorDict({"policy": torch.zeros(batch_size, policy_width)}, batch_size=[batch_size])
+    batch = SimpleNamespace(
+        observations=observations,
+        actions=torch.zeros(batch_size, 12),
+        old_actions_log_prob=torch.zeros(batch_size),
+        values=torch.zeros(batch_size, 1),
+        advantages=torch.ones(batch_size, 1),
+        returns=torch.zeros(batch_size, 1),
+        masks=None,
+        hidden_states=(None, None),
+        old_distribution_params=(),
+    )
+    algorithm = _schedule_algorithm(2000)
+    algorithm.symmetry.update(
+        history_enabled=True,
+        history_length=30,
+        history_trs_mode="framewise_feature",
+        data_augmentation_func=go2_symm.compute_time_reversal_states,
+        _env=None,
+    )
+    algorithm.actor = actor
+    algorithm.critic = critic
+    algorithm.storage = _SingleBatchStorage(batch, torch.zeros(batch_size, 12))
+    algorithm.optimizer = torch.optim.SGD((*actor.parameters(), *critic.parameters()), lr=0.01)
+    algorithm.rnd = None
+    algorithm.rnd_optimizer = None
+    algorithm.num_mini_batches = 1
+    algorithm.num_learning_epochs = 1
+    algorithm.normalize_advantage_per_mini_batch = False
+    algorithm.desired_kl = None
+    algorithm.schedule = "fixed"
+    algorithm.use_clipped_value_loss = False
+    algorithm.value_loss_coef = 1.0
+    algorithm.entropy_coef = 0.0
+    algorithm.clip_param = 0.2
+    algorithm.max_grad_norm = 1.0
+    algorithm.device = "cpu"
+    algorithm.is_multi_gpu = False
+    algorithm._actor_mean_abort_count = 0
+    algorithm._tr_augmentation = None
+
+    losses = algorithm.update()
+
+    assert actor.forward_calls == 2
+    assert critic.forward_calls == 2
+    assert math.isfinite(losses["raw_tr_policy_residual"])
+    assert math.isfinite(losses["raw_tr_value_residual"])
+    assert losses["history_enabled"] == 1.0
+    assert losses["history_length"] == 30.0
+    assert losses["policy_input_dim"] == 1920.0
+    assert losses["instantaneous_frame_dim"] == 64.0
+    assert losses["observation_contract_version/hardware_proprio_history_64d_v1"] == 1.0
+    assert losses["history_trs_mode/framewise_feature"] == 1.0
+
+
 def test_deprecated_data_augmentation_still_duplicates_ppo_minibatches():
     events = []
     actor = _CountingActor(events)
     critic = _CountingCritic(events)
     batch_size = 2
-    observations = TensorDict({"policy": torch.zeros(batch_size, 72)}, batch_size=[batch_size])
+    observations = TensorDict(
+        {"policy": torch.zeros(batch_size, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[batch_size]
+    )
     batch = SimpleNamespace(
         observations=observations,
         actions=torch.zeros(batch_size, 12),
@@ -443,7 +513,7 @@ def test_all_additive_options_disabled_preserve_frozen_legacy_ppo_update():
     """Freeze audited-base PPO losses, gradients, and optimizer behavior."""
     actor = _LegacyRegressionActor()
     critic = _LegacyRegressionCritic()
-    observations = torch.zeros(4, 72)
+    observations = torch.zeros(4, SYMM_QUADRUPED_POLICY_OBS_DIM)
     observations[:, 0] = torch.tensor([-1.0, 0.0, 1.0, 2.0])
     observations[:, 1] = torch.tensor([0.5, -1.0, 2.0, -0.5])
     observations = TensorDict({"policy": observations}, batch_size=[4])
@@ -569,7 +639,9 @@ def test_augmentation_gradient_diagnostics_have_independent_low_frequency_cadenc
         critic = _CountingCritic(events)
         batch_size = 2
         batch = SimpleNamespace(
-            observations=TensorDict({"policy": torch.zeros(batch_size, 72)}, batch_size=[batch_size]),
+            observations=TensorDict(
+                {"policy": torch.zeros(batch_size, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[batch_size]
+            ),
             actions=torch.zeros(batch_size, 12),
             old_actions_log_prob=torch.zeros(batch_size),
             values=torch.zeros(batch_size, 1),
@@ -692,6 +764,7 @@ def _time_reversal_checkpoint(algorithm, completed_iteration):
             "policy_schedule": vars(policy_schedule),
             "value_schedule": vars(value_schedule),
             "augmentation_schedule": vars(algorithm._resolved_time_reversal_augmentation_schedule()),
+            "policy_contract": algorithm._policy_contract_metadata(),
         },
     }
 
@@ -726,6 +799,98 @@ def test_load_immediate_save_and_reload_preserves_same_pending_update(monkeypatc
     assert immediate_resave["iter"] == 500
     assert restored.current_learning_iteration == 500
     assert restored._effective_time_reversal_coefficients() == (1.0, 0.20, 0.10)
+
+
+def test_command_curriculum_state_round_trips_through_algorithm_checkpoint(monkeypatch):
+    monkeypatch.setattr(PPO, "save", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: True)
+    saved_curriculum = {"weights": torch.tensor([[1.0, 2.0]]), "rng_state": torch.arange(4)}
+    restored_states = []
+    environment = SimpleNamespace(
+        get_command_curriculum_state=lambda: copy.deepcopy(saved_curriculum),
+        load_command_curriculum_state=restored_states.append,
+    )
+    source = _schedule_algorithm(0)
+    source.symmetry["_env"] = SimpleNamespace(unwrapped=environment)
+    checkpoint = source.save()
+    checkpoint["iter"] = 0
+
+    target = _schedule_algorithm(0)
+    target.symmetry["_env"] = SimpleNamespace(unwrapped=environment)
+    target.load(checkpoint, load_cfg=None, strict=True)
+
+    assert len(restored_states) == 1
+    assert torch.equal(restored_states[0]["weights"], saved_curriculum["weights"])
+    assert torch.equal(restored_states[0]["rng_state"], saved_curriculum["rng_state"])
+
+
+def test_enabled_command_curriculum_rejects_checkpoint_without_state(monkeypatch):
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry["_env"] = SimpleNamespace(
+        unwrapped=SimpleNamespace(
+            get_command_curriculum_state=lambda: {"weights": torch.ones(1)},
+            load_command_curriculum_state=lambda _state: None,
+        )
+    )
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=0)
+    upstream_load_called = False
+
+    def upstream_load(*_args, **_kwargs):
+        nonlocal upstream_load_called
+        upstream_load_called = True
+        return True
+
+    monkeypatch.setattr(PPO, "load", upstream_load)
+
+    with pytest.raises(ValueError, match="command_curriculum_state.*silently restart"):
+        algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert upstream_load_called is False
+
+
+def test_disabled_command_curriculum_rejects_full_resume_with_saved_state(monkeypatch):
+    algorithm = _schedule_algorithm(0)
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=0)
+    checkpoint["command_curriculum_state"] = {"weights": torch.ones(1)}
+    upstream_load_called = False
+
+    def upstream_load(*_args, **_kwargs):
+        nonlocal upstream_load_called
+        upstream_load_called = True
+        return True
+
+    monkeypatch.setattr(PPO, "load", upstream_load)
+
+    with pytest.raises(ValueError, match="contains command_curriculum_state.*disabled"):
+        algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert upstream_load_called is False
+
+
+def test_actor_only_inference_does_not_restore_or_require_curriculum_runtime(monkeypatch):
+    restored_states = []
+    received_environment_iterations = []
+    algorithm = _schedule_algorithm(9)
+    algorithm.symmetry["_env"] = SimpleNamespace(
+        unwrapped=SimpleNamespace(
+            get_command_curriculum_state=lambda: {"active_num_envs": 1},
+            load_command_curriculum_state=restored_states.append,
+            set_training_iteration=received_environment_iterations.append,
+        )
+    )
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=41)
+    checkpoint["command_curriculum_state"] = {"saved_num_envs": 4096}
+    monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: False)
+
+    loaded_iteration = algorithm.load(
+        checkpoint,
+        load_cfg={"actor": True, "iteration": False, "environment_iteration": True},
+        strict=True,
+    )
+
+    assert loaded_iteration is False
+    assert restored_states == []
+    assert received_environment_iterations == [42]
 
 
 @pytest.mark.parametrize(
@@ -766,6 +931,27 @@ def test_checkpoint_without_time_reversal_state_retains_legacy_iteration_fallbac
 
     assert checkpoint["iter"] == 500
     assert algorithm.current_learning_iteration == 500
+
+
+def test_legacy_72d_checkpoint_is_rejected_before_upstream_load(monkeypatch):
+    algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
+    checkpoint = {
+        "iter": 499,
+        "actor_state_dict": {"architecture.0.weight": torch.zeros(12, 72)},
+    }
+    upstream_load_called = False
+
+    def upstream_load(*_args, **_kwargs):
+        nonlocal upstream_load_called
+        upstream_load_called = True
+        return True
+
+    monkeypatch.setattr(PPO, "load", upstream_load)
+
+    with pytest.raises(ValueError, match="expected 64, received 72.*not migrated"):
+        algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert upstream_load_called is False
 
 
 def test_partial_checkpoint_load_does_not_advance_schedule_counter(monkeypatch):
@@ -880,6 +1066,36 @@ def test_algorithm_runtime_validation_rejects_invalid_overrides(field, value):
         algorithm._validate_time_reversal_configuration()
 
 
+def test_history_time_reversal_mode_rejects_untransformed_active_history():
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(history_enabled=True, history_length=30, history_trs_mode="none")
+
+    with pytest.raises(ValueError, match="history_trs_mode='none'.*framewise_feature"):
+        algorithm._validate_time_reversal_configuration()
+
+
+def test_history_and_model_sidecar_are_rejected_before_allocation():
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(
+        history_enabled=True,
+        history_length=30,
+        history_trs_mode="framewise_feature",
+        tr_augmentation={"enabled": True, "mode": "dynamics_filtered_reverse_action_supervision"},
+    )
+
+    with pytest.raises(ValueError, match="future samples.*--no-history"):
+        algorithm._validate_time_reversal_configuration()
+
+
+def test_policy_observation_width_reports_required_history_flags():
+    algorithm = _schedule_algorithm(0)
+    algorithm.symmetry.update(history_enabled=True, history_length=30, history_trs_mode="framewise_feature")
+    algorithm._policy_observation_width_validated = False
+
+    with pytest.raises(ValueError, match="expected 1920, received 64.*--history --history-length 30"):
+        algorithm._validate_policy_observation_width(torch.zeros(2, SYMM_QUADRUPED_POLICY_OBS_DIM))
+
+
 def test_zeroed_no_trs_configuration_disables_time_reversal_update_path():
     algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
     algorithm.symmetry = {
@@ -978,11 +1194,9 @@ def test_actor_mean_safety_aborts_sustained_divergence_and_recovers_after_safe_u
 def test_time_reversal_mask_includes_zero_velocity_commands():
     algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
     algorithm.symmetry = {
-        "command_observation_index": 9,
-        "command_observation_scale": 2.0,
         "min_abs_command_velocity": 0.0,
     }
-    observations = {"policy": torch.zeros(3, 72)}
+    observations = {"policy": torch.zeros(3, SYMM_QUADRUPED_POLICY_OBS_DIM)}
 
     mask = algorithm._time_reversal_mask(observations)
 

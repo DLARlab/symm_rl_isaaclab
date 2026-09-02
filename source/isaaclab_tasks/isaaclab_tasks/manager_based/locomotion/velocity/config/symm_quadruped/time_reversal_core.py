@@ -20,15 +20,21 @@ from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import 
     SYMM_QUADRUPED_POLICY_OBS_DIM,
     SYMM_QUADRUPED_POLICY_OBS_LAYOUT,
     SYMM_QUADRUPED_POLICY_OBS_SCALE,
+    latest_policy_frame,
 )
 
 _RAMP_SHAPES = frozenset({"linear", "half_cosine"})
 
 
 def validate_legacy_observation_metadata(symmetry: Mapping) -> None:
-    """Validate legacy command-index aliases against centralized 72D metadata."""
-    expected_index = SYMM_QUADRUPED_POLICY_OBS_LAYOUT.desired_base_twist.start
-    expected_scale = SYMM_QUADRUPED_POLICY_OBS_SCALE.desired_base_twist[0]
+    """Validate deprecated command-index aliases against the centralized contract.
+
+    The aliases are retained only for checkpoint/config compatibility. Runtime
+    masking uses :func:`latest_policy_frame` and never indexes flattened history
+    with either value.
+    """
+    expected_index = SYMM_QUADRUPED_POLICY_OBS_LAYOUT.velocity_command.start
+    expected_scale = SYMM_QUADRUPED_POLICY_OBS_SCALE.velocity_command[0]
     configured_index = symmetry.get("command_observation_index", expected_index)
     configured_scale = symmetry.get("command_observation_scale", expected_scale)
     if configured_index != expected_index:
@@ -196,7 +202,7 @@ def resolve_time_reversal_schedule(symmetry: Mapping, term: str) -> ResolvedTime
 
 @dataclass(frozen=True)
 class TimeReversalValidityMask:
-    """Combined and component masks derived from historical policy observations."""
+    """Combined and component masks derived from the latest policy frame."""
 
     combined: torch.Tensor
     command: torch.Tensor
@@ -212,9 +218,10 @@ class TimeReversalValidityMask:
 
 def _policy_observation(observations) -> torch.Tensor:
     policy_obs = observations["policy"]
-    if policy_obs.ndim != 2 or policy_obs.shape[-1] != SYMM_QUADRUPED_POLICY_OBS_DIM:
+    if policy_obs.ndim != 2 or policy_obs.shape[-1] % SYMM_QUADRUPED_POLICY_OBS_DIM != 0:
         raise ValueError(
-            f"Expected historical policy observations with shape (batch, {SYMM_QUADRUPED_POLICY_OBS_DIM}), "
+            "Expected policy observations with shape "
+            f"(batch, H * {SYMM_QUADRUPED_POLICY_OBS_DIM}), "
             f"got {tuple(policy_obs.shape)}."
         )
     return policy_obs
@@ -224,55 +231,62 @@ def _circular_distance(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return torch.abs(torch.remainder(a - b + 0.5, 1.0) - 0.5)
 
 
-def _gait_family_indices(policy_obs: torch.Tensor) -> torch.Tensor:
+def _gait_family_indices(policy_frame: torch.Tensor) -> torch.Tensor:
     layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
-    theta = torch.remainder(
-        torch.atan2(policy_obs[:, layout.foot_theta_sin], policy_obs[:, layout.foot_theta_cos]) / (2.0 * torch.pi),
+    phase = torch.remainder(
+        torch.atan2(policy_frame[:, layout.foot_phase_sin], policy_frame[:, layout.foot_phase_cos]) / (2.0 * torch.pi),
         1.0,
     )
+    # Common phase is not part of the 64D hardware contract. Subtracting the
+    # first foot recovers relative gait offsets without requiring theta fields.
+    relative_phase = torch.remainder(phase - phase[:, :1], 1.0)
     rows = torch.as_tensor(
         SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS,
-        device=policy_obs.device,
-        dtype=policy_obs.dtype,
+        device=policy_frame.device,
+        dtype=policy_frame.dtype,
     )
-    row_distance = _circular_distance(theta[:, None, :], rows[None, :, :]).mean(dim=-1)
+    relative_rows = torch.remainder(rows - rows[:, :1], 1.0)
+    row_distance = _circular_distance(relative_phase[:, None, :], relative_rows[None, :, :]).mean(dim=-1)
     row_index = row_distance.argmin(dim=-1)
     family_names = tuple(dict.fromkeys(SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES))
     family_by_row = torch.tensor(
         [family_names.index(name) for name in SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES],
-        device=policy_obs.device,
+        device=policy_frame.device,
         dtype=torch.long,
     )
     return family_by_row[row_index]
 
 
 def time_reversal_validity_mask(observations, cfg: Mapping, legacy_min_abs_command: float = 0.0):
-    """Build heuristic validity masks solely from a historical minibatch observation."""
+    """Build heuristic validity masks from the latest visible policy frame.
+
+    Measured base velocity is intentionally absent from the hardware-oriented
+    policy contract. Consequently legacy ``command_tracking`` mask modes reduce
+    to the command gate; reward-side tracking diagnostics remain available in
+    the environment but are not leaked into the actor/critic input.
+    """
     policy_obs = _policy_observation(observations)
+    policy_frame = latest_policy_frame(policy_obs)
     layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
     scales = SYMM_QUADRUPED_POLICY_OBS_SCALE
 
-    command_velocity = policy_obs[:, layout.desired_base_twist.start] / scales.desired_base_twist[0]
-    measured_velocity = policy_obs[:, layout.measured_base_twist.start] / scales.measured_base_twist[0]
+    command_velocity = policy_frame[:, layout.velocity_command.start] / scales.velocity_command[0]
     min_command = cfg.get("min_abs_command_velocity")
     min_command = legacy_min_abs_command if min_command is None else float(min_command)
     command = torch.abs(command_velocity) >= min_command
 
-    tracking_limit = float(cfg.get("tracking_abs_tolerance", 0.25)) + float(
-        cfg.get("tracking_rel_tolerance", 0.25)
-    ) * torch.abs(command_velocity)
-    tracking = torch.abs(measured_velocity - command_velocity) <= tracking_limit
+    tracking = torch.ones_like(command, dtype=torch.bool)
 
-    gravity = policy_obs[:, layout.projected_gravity]
+    gravity = policy_frame[:, layout.projected_gravity]
     gravity_scale = torch.as_tensor(scales.projected_gravity, device=policy_obs.device, dtype=policy_obs.dtype)
     gravity = gravity / gravity_scale
     upright = torch.linalg.vector_norm(gravity[:, :2], dim=-1) <= float(cfg.get("projected_gravity_tolerance", 0.35))
 
     phase_values = torch.remainder(
-        torch.atan2(policy_obs[:, layout.foot_phase_sin], policy_obs[:, layout.foot_phase_cos]) / (2.0 * torch.pi),
+        torch.atan2(policy_frame[:, layout.foot_phase_sin], policy_frame[:, layout.foot_phase_cos]) / (2.0 * torch.pi),
         1.0,
     )
-    swing_ratio = policy_obs[:, layout.swing_ratio]
+    swing_ratio = 1.0 - policy_frame[:, layout.duty_factor]
     margin = float(cfg.get("phase_boundary_margin", 0.03))
     phase = (
         (_circular_distance(phase_values, torch.zeros_like(phase_values)) >= margin)
@@ -306,7 +320,7 @@ def time_reversal_validity_mask(observations, cfg: Mapping, legacy_min_abs_comma
         command_velocity=command_velocity,
         command_sign=command_sign,
         command_speed_bin=speed_bin,
-        gait_family=_gait_family_indices(policy_obs),
+        gait_family=_gait_family_indices(policy_frame),
         num_command_speed_bins=len(edges) + 1,
     )
 

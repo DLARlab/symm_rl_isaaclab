@@ -15,6 +15,14 @@ from isaaclab.utils.configclass import configclass
 
 from isaaclab_rl.rsl_rl import RslRlSymmetryCfg
 
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import (
+    SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION,
+    SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION,
+    SYMM_QUADRUPED_PHASE_MAPPING_VERSION,
+    SYMM_QUADRUPED_POLICY_OBS_DIM,
+    SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT,
+)
+
 
 def _validate_optional_nonnegative_integer(name: str, value: int | None) -> None:
     if value is not None and (isinstance(value, bool) or not isinstance(value, Integral) or value < 0):
@@ -84,7 +92,7 @@ class TimeReversalScheduleCfg:
 
 @configclass
 class TimeReversalValidityMaskCfg:
-    """Historical-observation validity mask for time-reversal consistency losses."""
+    """Latest-frame validity mask for instantaneous or history-aware consistency losses."""
 
     mode: Literal[
         "command",
@@ -98,10 +106,10 @@ class TimeReversalValidityMaskCfg:
     """Minimum command magnitude [m/s], or ``None`` to inherit the legacy field."""
 
     tracking_abs_tolerance: float = 0.25
-    """Absolute forward-velocity tracking tolerance [m/s]."""
+    """Reserved reward-side tracking tolerance [m/s]; unavailable from the 64D policy frame."""
 
     tracking_rel_tolerance: float = 0.25
-    """Relative forward-velocity tracking tolerance."""
+    """Reserved relative tracking tolerance; unavailable from the 64D policy frame."""
 
     projected_gravity_tolerance: float = 0.35
     """Maximum horizontal projected-gravity norm."""
@@ -331,6 +339,35 @@ class TimeReversalSymmetryCfg(RslRlSymmetryCfg):
     log_disabled_raw_consistency: bool = False
     """Whether to compute raw consistency losses for explicitly disabled terms."""
 
+    history_enabled: bool = True
+    """Whether the policy observation uses native flattened observation history."""
+
+    history_length: int = 30
+    """Number of oldest-to-newest policy frames, or zero when history is disabled."""
+
+    history_trs_mode: Literal["none", "framewise_feature"] = "framewise_feature"
+    """Time-reversal operator applied to flattened policy history.
+
+    ``"framewise_feature"`` transforms every visible frame independently while
+    preserving oldest-to-newest time order. It is an involutive feature-level
+    prior, not a causal history sampled from a physically reversed rollout.
+    """
+
+    observation_contract_version: str = SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION
+    """Immutable hardware-oriented policy observation contract identifier."""
+
+    instantaneous_frame_dim: int = SYMM_QUADRUPED_POLICY_OBS_DIM
+    """Immutable dimension of one unflattened policy frame."""
+
+    history_packing: str = SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT.history_packing
+    """Immutable native flattened-history packing identifier."""
+
+    gait_phase_mapping_version: str = SYMM_QUADRUPED_PHASE_MAPPING_VERSION
+    """Immutable gait-clock and phase-mapping identifier."""
+
+    gait_library_version: str = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION
+    """Immutable training gait-library identifier."""
+
     tr_policy_output_space: Literal["raw_action_mean", "normalized_requested_joint_target"] = "raw_action_mean"
     """Policy output space used by the optimized time-reversal consistency loss.
 
@@ -360,6 +397,40 @@ class TimeReversalSymmetryCfg(RslRlSymmetryCfg):
                 raise ValueError(f"{name} must be boolean or None; received {value!r}.")
         if not isinstance(self.log_disabled_raw_consistency, bool):
             raise ValueError("log_disabled_raw_consistency must be boolean.")
+        if not isinstance(self.history_enabled, bool):
+            raise ValueError(f"history_enabled must be boolean; received {self.history_enabled!r}.")
+        if isinstance(self.history_length, bool) or not isinstance(self.history_length, Integral):
+            raise ValueError(f"history_length must be an integer; received {self.history_length!r}.")
+        if self.history_enabled and self.history_length <= 0:
+            raise ValueError("history_length must be positive when history_enabled=True.")
+        if not self.history_enabled and self.history_length != 0:
+            raise ValueError("history_length must be zero when history_enabled=False.")
+        if self.history_trs_mode not in {"none", "framewise_feature"}:
+            raise ValueError(
+                f"history_trs_mode must be 'none' or 'framewise_feature'; received {self.history_trs_mode!r}."
+            )
+        policy_enabled = self.use_tr_policy_consistency
+        if policy_enabled is None:
+            policy_enabled = self.use_time_reversal_regularization and self.use_mirror_loss
+        value_enabled = self.use_tr_value_consistency
+        if value_enabled is None:
+            value_enabled = self.use_time_reversal_regularization and self.value_loss_coeff > 0.0
+        if self.history_enabled and self.history_trs_mode == "none" and (policy_enabled or value_enabled):
+            raise ValueError(
+                "history_trs_mode='none' is invalid when history is enabled and actor/value time-reversal "
+                "consistency is active. Use history_trs_mode='framewise_feature'."
+            )
+        immutable_metadata = {
+            "observation_contract_version": SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION,
+            "instantaneous_frame_dim": SYMM_QUADRUPED_POLICY_OBS_DIM,
+            "history_packing": SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT.history_packing,
+            "gait_phase_mapping_version": SYMM_QUADRUPED_PHASE_MAPPING_VERSION,
+            "gait_library_version": SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION,
+        }
+        for name, expected in immutable_metadata.items():
+            received = getattr(self, name)
+            if type(received) is not type(expected) or received != expected:
+                raise ValueError(f"{name} is immutable: expected {expected!r}, received {received!r}.")
         if self.tr_policy_output_space not in {"raw_action_mean", "normalized_requested_joint_target"}:
             raise ValueError(
                 "tr_policy_output_space must be 'raw_action_mean' or "

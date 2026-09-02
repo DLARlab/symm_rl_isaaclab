@@ -32,6 +32,14 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time
     time_reversal_validity_mask,
     validate_legacy_observation_metadata,
 )
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import (
+    SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION,
+    SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION,
+    SYMM_QUADRUPED_PHASE_MAPPING_VERSION,
+    SYMM_QUADRUPED_POLICY_OBS_DIM,
+    SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT,
+    infer_policy_history_length,
+)
 
 
 def time_reversal_loss_scale(
@@ -104,7 +112,7 @@ class TimeReversalPPO(PPO):
     _ACTOR_MEAN_BOUND_LOSS_COEFF = 1.0e-2
     _ACTOR_MEAN_ABORT_BOUND = 50.0
     _ACTOR_MEAN_ABORT_PATIENCE = 25
-    _TIME_REVERSAL_STATE_SCHEMA_VERSION = 2
+    _TIME_REVERSAL_STATE_SCHEMA_VERSION = 3
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -113,6 +121,7 @@ class TimeReversalPPO(PPO):
         self.current_learning_iteration = 0
         self._time_reversal_update_count = 0
         self._actor_mean_abort_count = 0
+        self._policy_observation_width_validated = False
         self._tr_augmentation: TimeReversalAugmentation | None = None
         augmentation_cfg = self.symmetry.get("tr_augmentation", {}) if self.symmetry else {}
         if augmentation_cfg.get("enabled", False):
@@ -127,6 +136,7 @@ class TimeReversalPPO(PPO):
 
     def act(self, obs: TensorDict) -> torch.Tensor:
         """Sample actions after ensuring the scalar action std is valid."""
+        self._validate_policy_observation_width(obs["policy"])
         self._clamp_actor_std()
         actions = super().act(obs)
         augmentation = getattr(self, "_tr_augmentation", None)
@@ -530,6 +540,16 @@ class TimeReversalPPO(PPO):
             "tr_augmentation_nll": mean_tr_augmentation_loss,
             "effective_tr_augmentation_coeff": effective_tr_augmentation_coeff,
             "weighted_tr_augmentation": effective_tr_augmentation_coeff * mean_tr_augmentation_loss,
+            "history_enabled": float(self._history_enabled()),
+            "history_length": float(self._configured_history_length()),
+            "policy_input_dim": float(self._expected_policy_input_dim()),
+            "instantaneous_frame_dim": float(SYMM_QUADRUPED_POLICY_OBS_DIM),
+            "raw_tr_policy_residual": mean_symmetry_loss or 0.0,
+            "weighted_tr_policy_contribution": weighted_symmetry,
+            "raw_tr_value_residual": mean_tr_value_loss or 0.0,
+            "weighted_tr_value_contribution": weighted_tr_value,
+            f"observation_contract_version/{SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION}": 1.0,
+            f"history_trs_mode/{self._history_trs_mode()}": 1.0,
             # Deprecated TensorBoard aliases retained for archived analyses.
             "effective_mirror_coeff": effective_tr_policy_coeff,
             "weighted_symmetry": weighted_symmetry,
@@ -549,8 +569,152 @@ class TimeReversalPPO(PPO):
 
         return loss_dict
 
+    def _history_enabled(self) -> bool:
+        """Return the policy-history switch from the resolved symmetry config."""
+        return bool(self.symmetry and self.symmetry.get("history_enabled", False))
+
+    def _configured_history_length(self) -> int:
+        """Return the configured native history length, using zero for one-frame input."""
+        if not self._history_enabled():
+            return 0
+        return int(self.symmetry.get("history_length", 30))
+
+    def _history_trs_mode(self) -> str:
+        """Return the configured feature-level time-reversal history mode."""
+        return str(self.symmetry.get("history_trs_mode", "framewise_feature")) if self.symmetry else "framewise_feature"
+
+    def _expected_policy_input_dim(self) -> int:
+        """Return the flattened actor/critic policy input width."""
+        history_frames = self._configured_history_length() if self._history_enabled() else 1
+        return history_frames * SYMM_QUADRUPED_POLICY_OBS_DIM
+
+    def _policy_contract_metadata(self) -> dict[str, object]:
+        """Return deterministic metadata required to interpret a policy checkpoint."""
+        return {
+            "observation_contract_version": SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION,
+            "instantaneous_frame_dim": SYMM_QUADRUPED_POLICY_OBS_DIM,
+            "history_enabled": self._history_enabled(),
+            "history_length": self._configured_history_length(),
+            "history_packing": SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT.history_packing,
+            "history_trs_mode": self._history_trs_mode(),
+            "policy_input_dim": self._expected_policy_input_dim(),
+            "gait_phase_mapping_version": SYMM_QUADRUPED_PHASE_MAPPING_VERSION,
+            "gait_library_version": SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION,
+        }
+
+    def _validate_policy_observation_width(self, policy_obs: torch.Tensor) -> None:
+        """Fail before rollout when active observations do not match the policy contract."""
+        if getattr(self, "_policy_observation_width_validated", False):
+            return
+        width = policy_obs.shape[-1]
+        received_history_length = infer_policy_history_length(policy_obs)
+        expected_width = self._expected_policy_input_dim()
+        expected_history_length = self._configured_history_length() if self._history_enabled() else 1
+        if width != expected_width or received_history_length != expected_history_length:
+            required_flag = (
+                f"--history --history-length {expected_history_length}" if self._history_enabled() else "--no-history"
+            )
+            raise ValueError(
+                "Policy observation width is incompatible with the active checkpoint/config contract: "
+                f"expected {expected_width}, received {width}; observation_contract_version="
+                f"{SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION!r}. Use {required_flag}."
+            )
+        self._policy_observation_width_validated = True
+
+    def _validate_saved_policy_contract(self, saved_contract: object) -> None:
+        """Validate checkpoint policy metadata without padding or projecting inputs."""
+        expected = self._policy_contract_metadata()
+        if not isinstance(saved_contract, Mapping):
+            raise ValueError("Checkpoint policy_contract must be a mapping.")
+        required = set(expected)
+        if set(saved_contract) != required:
+            missing = sorted(required - set(saved_contract))
+            unexpected = sorted(set(saved_contract) - required)
+            raise ValueError(
+                f"Checkpoint policy_contract schema fields do not match: missing={missing}, unexpected={unexpected}."
+            )
+        saved_width = saved_contract["policy_input_dim"]
+        if saved_width != expected["policy_input_dim"] or isinstance(saved_width, bool):
+            required_flag = (
+                f"--history --history-length {self._configured_history_length()}"
+                if self._history_enabled()
+                else "--no-history"
+            )
+            raise ValueError(
+                "Checkpoint actor input width is incompatible with the active policy observation: "
+                f"expected {expected['policy_input_dim']}, received {saved_width}; saved observation-contract "
+                f"version={saved_contract.get('observation_contract_version')!r}. Use {required_flag}."
+            )
+        exact_match = all(
+            type(saved_contract[name]) is type(expected[name]) and saved_contract[name] == expected[name]
+            for name in expected
+        )
+        if not exact_match:
+            raise ValueError(
+                "Checkpoint policy_contract does not exactly match the active policy configuration: "
+                f"expected {expected!r}, received {dict(saved_contract)!r}."
+            )
+
+    @staticmethod
+    def _checkpoint_actor_input_width(loaded_dict: Mapping) -> int | None:
+        """Best-effort extraction of a legacy checkpoint actor's first linear width."""
+        for state_name in ("actor_state_dict", "model_state_dict"):
+            state = loaded_dict.get(state_name)
+            if not isinstance(state, Mapping):
+                continue
+            candidates: list[tuple[str, torch.Tensor]] = []
+            for name, value in state.items():
+                if not isinstance(value, torch.Tensor) or value.ndim != 2 or not name.endswith("weight"):
+                    continue
+                if state_name == "actor_state_dict" or "actor" in name.lower():
+                    candidates.append((str(name), value))
+            if candidates:
+                _, first_weight = min(candidates, key=lambda item: item[0])
+                return int(first_weight.shape[1])
+        return None
+
+    def _validate_checkpoint_policy_width(self, loaded_dict: Mapping) -> None:
+        """Reject incompatible V5 and legacy actor widths before upstream loading."""
+        state = loaded_dict.get("time_reversal_state")
+        if isinstance(state, Mapping) and "policy_contract" in state:
+            self._validate_saved_policy_contract(state["policy_contract"])
+            return
+        saved_width = self._checkpoint_actor_input_width(loaded_dict)
+        if saved_width is None:
+            return
+        expected_width = self._expected_policy_input_dim()
+        if saved_width != expected_width:
+            required_flag = (
+                f"--history --history-length {self._configured_history_length()}"
+                if self._history_enabled()
+                else "--no-history"
+            )
+            raise ValueError(
+                "Legacy checkpoint actor input width is incompatible with the active policy observation: "
+                f"expected {expected_width}, received {saved_width}; saved observation-contract version is "
+                f"unavailable. Use {required_flag}. 72D checkpoints are not migrated automatically."
+            )
+
+    def _command_curriculum_state(self):
+        """Return optional task-local command-curriculum checkpoint state."""
+        symmetry = getattr(self, "symmetry", None)
+        environment = symmetry.get("_env") if symmetry else None
+        unwrapped = getattr(environment, "unwrapped", environment)
+        getter = getattr(unwrapped, "get_command_curriculum_state", None)
+        return getter() if callable(getter) else None
+
+    def _restore_command_curriculum_state(self, state) -> None:
+        """Restore optional task-local command-curriculum checkpoint state."""
+        symmetry = getattr(self, "symmetry", None)
+        environment = symmetry.get("_env") if symmetry else None
+        unwrapped = getattr(environment, "unwrapped", environment)
+        loader = getattr(unwrapped, "load_command_curriculum_state", None)
+        if not callable(loader):
+            raise ValueError("Enabled command curriculum does not expose load_command_curriculum_state().")
+        loader(state)
+
     def save(self) -> dict:
-        """Save PPO state with backward-compatible absolute schedule metadata."""
+        """Save PPO state with absolute schedules and the policy input contract."""
         saved_dict = super().save()
         policy_schedule, value_schedule = self._resolved_time_reversal_schedules()
         augmentation_schedule = self._resolved_time_reversal_augmentation_schedule()
@@ -561,12 +725,16 @@ class TimeReversalPPO(PPO):
             "policy_schedule": vars(policy_schedule),
             "value_schedule": vars(value_schedule),
             "augmentation_schedule": vars(augmentation_schedule),
+            "policy_contract": self._policy_contract_metadata(),
         }
         augmentation = getattr(self, "_tr_augmentation", None)
         if augmentation is not None:
             augmentation_state = augmentation.state_dict()
             augmentation_state["schedule_iteration"] = self.current_learning_iteration
             saved_dict["time_reversal_augmentation_state"] = augmentation_state
+        curriculum_state = self._command_curriculum_state()
+        if curriculum_state is not None:
+            saved_dict["command_curriculum_state"] = curriculum_state
         return saved_dict
 
     def _validate_time_reversal_checkpoint_state(
@@ -583,7 +751,7 @@ class TimeReversalPPO(PPO):
         state = loaded_dict["time_reversal_state"]
         if not isinstance(state, Mapping):
             raise ValueError("Checkpoint time_reversal_state must be a mapping.")
-        required = {
+        common_required = {
             "schema_version",
             "last_completed_update",
             "next_absolute_update",
@@ -591,6 +759,16 @@ class TimeReversalPPO(PPO):
             "value_schedule",
             "augmentation_schedule",
         }
+        schema_version = state.get("schema_version")
+        if schema_version == 2 and not isinstance(schema_version, bool):
+            required = common_required
+        elif schema_version == self._TIME_REVERSAL_STATE_SCHEMA_VERSION and not isinstance(schema_version, bool):
+            required = common_required | {"policy_contract"}
+        else:
+            raise ValueError(
+                "Unsupported time_reversal_state schema_version: expected legacy 2 or "
+                f"{self._TIME_REVERSAL_STATE_SCHEMA_VERSION}, received {schema_version!r}."
+            )
         if set(state) != required:
             missing = sorted(required - set(state))
             unexpected = sorted(set(state) - required)
@@ -598,16 +776,8 @@ class TimeReversalPPO(PPO):
                 "Checkpoint time_reversal_state schema fields do not match: "
                 f"missing={missing}, unexpected={unexpected}."
             )
-        schema_version = state["schema_version"]
-        if (
-            isinstance(schema_version, bool)
-            or not isinstance(schema_version, Integral)
-            or schema_version != self._TIME_REVERSAL_STATE_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "Unsupported time_reversal_state schema_version: "
-                f"expected {self._TIME_REVERSAL_STATE_SCHEMA_VERSION}, received {schema_version!r}."
-            )
+        if schema_version == self._TIME_REVERSAL_STATE_SCHEMA_VERSION:
+            self._validate_saved_policy_contract(state["policy_contract"])
         if "iter" not in loaded_dict:
             raise ValueError("A checkpoint with time_reversal_state must also contain the runner iter field.")
         runner_iteration = loaded_dict["iter"]
@@ -685,9 +855,30 @@ class TimeReversalPPO(PPO):
         restores its counter. This keeps the runner, TensorBoard step, and
         auxiliary schedule aligned to the next absolute update.
         """
+        self._validate_checkpoint_policy_width(loaded_dict)
         load_iteration_requested = load_cfg is None or bool(load_cfg.get("iteration", False))
         restore_environment_iteration = load_cfg is not None and bool(load_cfg.get("environment_iteration", False))
         load_augmentation = load_cfg is None or bool(load_cfg.get("augmentation", load_cfg.get("iteration", False)))
+        active_curriculum_state = self._command_curriculum_state()
+        # ``environment_iteration`` is also requested by actor-only playback so
+        # gait schedules match the checkpoint iteration.  It is not a training
+        # resume and must not restore or require per-environment curriculum
+        # runtime, whose shape commonly differs between train and inference.
+        full_resume_requested = load_iteration_requested
+        checkpoint_has_curriculum = "command_curriculum_state" in loaded_dict
+        restore_curriculum = active_curriculum_state is not None and full_resume_requested
+        if full_resume_requested:
+            if active_curriculum_state is not None and not checkpoint_has_curriculum:
+                raise ValueError(
+                    "The active command curriculum has no command_curriculum_state in this checkpoint. "
+                    "Refusing to silently restart curriculum competence state."
+                )
+            if active_curriculum_state is None and checkpoint_has_curriculum:
+                raise ValueError(
+                    "The checkpoint contains command_curriculum_state, but the active command curriculum is "
+                    "disabled. Enable the saved curriculum mode for a full resume, or request weights-only "
+                    "transfer without iteration/environment state."
+                )
         augmentation = getattr(self, "_tr_augmentation", None)
         require_schedule_match = load_iteration_requested or (augmentation is not None and load_augmentation)
         checkpoint_next_iteration = None
@@ -715,6 +906,8 @@ class TimeReversalPPO(PPO):
                         f"expected {expected_iteration}, received {saved_iteration!r}."
                     )
             augmentation.load_state_dict(augmentation_state)
+        if restore_curriculum:
+            self._restore_command_curriculum_state(loaded_dict["command_curriculum_state"])
         if load_iteration and "iter" in loaded_dict:
             next_iteration = checkpoint_next_iteration
             assert next_iteration is not None
@@ -769,9 +962,54 @@ class TimeReversalPPO(PPO):
 
         validate_legacy_observation_metadata(self.symmetry)
 
-        for term in ("policy", "value", "augmentation"):
-            schedule = resolve_time_reversal_schedule(self.symmetry, term)
+        history_enabled = self.symmetry.get("history_enabled", False)
+        history_length = self.symmetry.get("history_length", 30 if history_enabled else 0)
+        history_trs_mode = self.symmetry.get("history_trs_mode", "framewise_feature")
+        if not isinstance(history_enabled, bool):
+            raise ValueError(f"history_enabled must be boolean; received {history_enabled!r}.")
+        if isinstance(history_length, bool) or not isinstance(history_length, Integral):
+            raise ValueError(f"history_length must be an integer; received {history_length!r}.")
+        if history_enabled and history_length <= 0:
+            raise ValueError("history_length must be positive when history_enabled=True.")
+        if not history_enabled and history_length != 0:
+            raise ValueError("history_length must be zero when history_enabled=False.")
+        if history_trs_mode not in {"none", "framewise_feature"}:
+            raise ValueError(f"history_trs_mode must be 'none' or 'framewise_feature'; received {history_trs_mode!r}.")
+
+        resolved_schedules = {
+            term: resolve_time_reversal_schedule(self.symmetry, term) for term in ("policy", "value", "augmentation")
+        }
+        for schedule in resolved_schedules.values():
             schedule.scale(0)
+        actor_or_value_tr_active = any(
+            resolved_schedules[term].enabled and resolved_schedules[term].target_coeff > 0.0
+            for term in ("policy", "value")
+        )
+        if history_enabled and history_trs_mode == "none" and actor_or_value_tr_active:
+            raise ValueError(
+                "history_trs_mode='none' is invalid when history is enabled and actor/value time-reversal "
+                "consistency is active. Use history_trs_mode='framewise_feature'."
+            )
+        if history_enabled and augmentation_cfg.get("enabled", False):
+            raise ValueError(
+                "tr_augmentation with observation history is unsupported: reversed rollouts do not provide the "
+                "future samples needed to reconstruct complete causal historical context. Use --no-history for "
+                "the experimental sidecar, or disable tr_augmentation for the primary history-aware method."
+            )
+
+        immutable_metadata = self._policy_contract_metadata()
+        for name in (
+            "observation_contract_version",
+            "instantaneous_frame_dim",
+            "history_packing",
+            "gait_phase_mapping_version",
+            "gait_library_version",
+        ):
+            if name in self.symmetry:
+                expected = immutable_metadata[name]
+                received = self.symmetry[name]
+                if type(received) is not type(expected) or received != expected:
+                    raise ValueError(f"{name} is immutable: expected {expected!r}, received {received!r}.")
 
         if augmentation_cfg.get("enabled", False):
             if augmentation_cfg.get("mode") != "dynamics_filtered_reverse_action_supervision":

@@ -6,9 +6,14 @@
 """Shared RSL-RL PPO setup for symmetric quadruped locomotion tasks."""
 
 from collections.abc import Callable
+from typing import Literal
 
 from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_cfg import (
     TimeReversalSymmetryCfg,
+)
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import (
+    SYMM_QUADRUPED_POLICY_OBS_LAYOUT,
+    SYMM_QUADRUPED_POLICY_OBS_SCALE,
 )
 
 
@@ -24,6 +29,9 @@ def configure_symm_quadruped_ppo(
     warmup_iterations: int = 500,
     rampup_iterations: int = 0,
     ramp_shape: str = "linear",
+    history_enabled: bool = True,
+    history_length: int = 30,
+    history_trs_mode: Literal["none", "framewise_feature"] = "framewise_feature",
 ) -> None:
     """Apply the shared symmetric quadruped PPO/TRS defaults to a runner config.
 
@@ -39,6 +47,9 @@ def configure_symm_quadruped_ppo(
         warmup_iterations: Number of fully unregularized PPO updates before applying TRS losses.
         rampup_iterations: Number of PPO updates used to ramp the TRS loss coefficients.
         ramp_shape: Shape of the TRS loss coefficient ramp.
+        history_enabled: Whether native policy observation history is enabled.
+        history_length: Number of policy frames, or zero when history is disabled.
+        history_trs_mode: Feature-level transform applied to policy history.
     """
     cfg.max_iterations = 20000
     cfg.save_interval = 1000
@@ -63,6 +74,10 @@ def configure_symm_quadruped_ppo(
         warmup_iterations=warmup_iterations,
         rampup_iterations=rampup_iterations,
         ramp_shape=ramp_shape,
-        command_observation_index=9,
-        command_observation_scale=2.0,
+        history_enabled=history_enabled,
+        history_length=history_length,
+        history_trs_mode=history_trs_mode,
+        # Deprecated RSL-RL aliases remain schema-derived during the compatibility window.
+        command_observation_index=SYMM_QUADRUPED_POLICY_OBS_LAYOUT.velocity_command.start,
+        command_observation_scale=SYMM_QUADRUPED_POLICY_OBS_SCALE.velocity_command[0],
     )

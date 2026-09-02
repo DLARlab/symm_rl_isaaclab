@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, dataclass
 from typing import TYPE_CHECKING
 
@@ -22,6 +22,8 @@ from isaaclab.managers import CommandTerm, CommandTermCfg, ManagerTermBase, Scen
 from isaaclab.managers.manager_term_cfg import RewardTermCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.math import euler_xyz_from_quat
+
+from .tr_orbit_curriculum import TR_ORBIT_COMMAND_CURRICULUM_MODE, TimeReversalOrbitCurriculum
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -208,81 +210,232 @@ def resolve_gait_sampling_profile_weights(
     return tuple(float(weight) for weight in weights)
 
 
-SYMM_QUADRUPED_POLICY_OBS_DIM = 72
-"""Dimension of the shared symmetric quadruped policy observation."""
+SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION = "hardware_proprio_history_64d_v1"
+"""Audit identifier for the hardware-oriented proprioceptive observation contract."""
+
+# Short compatibility alias used by task-local checkpoint metadata helpers.
+OBSERVATION_CONTRACT_VERSION = SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION
+
+SYMM_QUADRUPED_POLICY_HISTORY_PACKING = "term_major_oldest_to_newest_flattened"
+"""Native Isaac Lab packing used for flattened policy-observation history."""
+
+SYMM_QUADRUPED_POLICY_OBS_DIM = 64
+"""Dimension of one shared symmetric quadruped policy-observation frame."""
 
 
 @dataclass(frozen=True)
 class _SymmQuadrupedPolicyObservationLayout:
     """Slices for the shared symmetric quadruped policy observation."""
 
-    measured_base_twist: slice
     projected_gravity: slice
-    desired_base_twist: slice
+    velocity_command: slice
     joint_position: slice
     joint_velocity: slice
     previous_action: slice
+    second_previous_action: slice
+    gait_period: slice
+    duty_factor: slice
     foot_phase_sin: slice
     foot_phase_cos: slice
-    foot_theta_sin: slice
-    foot_theta_cos: slice
-    phase_ratios: slice
-    swing_ratio: slice
-    stance_ratio: slice
-    sagittal_plane_state: slice
+
+
+@dataclass(frozen=True)
+class _SymmQuadrupedPolicyObservationDimensions:
+    """Dimensions for terms in the shared policy-observation frame."""
+
+    projected_gravity: int
+    velocity_command: int
+    joint_position: int
+    joint_velocity: int
+    previous_action: int
+    second_previous_action: int
+    gait_period: int
+    duty_factor: int
+    foot_phase_sin: int
+    foot_phase_cos: int
 
 
 @dataclass(frozen=True)
 class _SymmQuadrupedPolicyObservationScale:
     """Per-component scales for the shared symmetric quadruped policy observation."""
 
-    measured_base_twist: tuple[float, ...]
     projected_gravity: tuple[float, ...]
-    desired_base_twist: tuple[float, ...]
+    velocity_command: tuple[float, ...]
     joint_position: tuple[float, ...]
     joint_velocity: tuple[float, ...]
     previous_action: tuple[float, ...]
+    second_previous_action: tuple[float, ...]
+    gait_period: tuple[float, ...]
+    duty_factor: tuple[float, ...]
     foot_phase_sin: tuple[float, ...]
     foot_phase_cos: tuple[float, ...]
-    foot_theta_sin: tuple[float, ...]
-    foot_theta_cos: tuple[float, ...]
-    phase_ratios: tuple[float, ...]
-    sagittal_plane_state: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class _SymmQuadrupedPolicyObservationTimeReversal:
+    """Feature-level time-reversal rule for each observation term."""
+
+    projected_gravity: str
+    velocity_command: str
+    joint_position: str
+    joint_velocity: str
+    previous_action: str
+    second_previous_action: str
+    gait_period: str
+    duty_factor: str
+    foot_phase_sin: str
+    foot_phase_cos: str
+
+
+@dataclass(frozen=True)
+class SymmQuadrupedPolicyObservationContract:
+    """Authoritative schema for shared symmetric-quadruped policy observations."""
+
+    version: str
+    instantaneous_frame_dim: int
+    term_order: tuple[str, ...]
+    dimensions: _SymmQuadrupedPolicyObservationDimensions
+    slices: _SymmQuadrupedPolicyObservationLayout
+    scales: _SymmQuadrupedPolicyObservationScale
+    time_reversal: _SymmQuadrupedPolicyObservationTimeReversal
+    history_packing: str
 
 
 SYMM_QUADRUPED_POLICY_OBS_LAYOUT = _SymmQuadrupedPolicyObservationLayout(
-    measured_base_twist=slice(0, 6),
-    projected_gravity=slice(6, 9),
-    desired_base_twist=slice(9, 15),
-    joint_position=slice(15, 27),
-    joint_velocity=slice(27, 39),
-    previous_action=slice(39, 51),
-    foot_phase_sin=slice(51, 55),
-    foot_phase_cos=slice(55, 59),
-    foot_theta_sin=slice(59, 63),
-    foot_theta_cos=slice(63, 67),
-    phase_ratios=slice(67, 69),
-    swing_ratio=slice(67, 68),
-    stance_ratio=slice(68, 69),
-    sagittal_plane_state=slice(69, SYMM_QUADRUPED_POLICY_OBS_DIM),
+    projected_gravity=slice(0, 3),
+    velocity_command=slice(3, 6),
+    joint_position=slice(6, 18),
+    joint_velocity=slice(18, 30),
+    previous_action=slice(30, 42),
+    second_previous_action=slice(42, 54),
+    gait_period=slice(54, 55),
+    duty_factor=slice(55, 56),
+    foot_phase_sin=slice(56, 60),
+    foot_phase_cos=slice(60, SYMM_QUADRUPED_POLICY_OBS_DIM),
 )
 """Named layout for the shared symmetric quadruped policy observation."""
 
+SYMM_QUADRUPED_POLICY_OBS_DIMENSIONS = _SymmQuadrupedPolicyObservationDimensions(
+    projected_gravity=3,
+    velocity_command=3,
+    joint_position=12,
+    joint_velocity=12,
+    previous_action=12,
+    second_previous_action=12,
+    gait_period=1,
+    duty_factor=1,
+    foot_phase_sin=4,
+    foot_phase_cos=4,
+)
+"""Per-term dimensions for one policy-observation frame."""
+
 SYMM_QUADRUPED_POLICY_OBS_SCALE = _SymmQuadrupedPolicyObservationScale(
-    measured_base_twist=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
     projected_gravity=(1.0, 1.0, 1.0),
-    desired_base_twist=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
+    velocity_command=(2.0, 2.0, 0.25),
     joint_position=(1.0,) * 12,
     joint_velocity=(0.05,) * 12,
     previous_action=(1.0,) * 12,
+    second_previous_action=(1.0,) * 12,
+    gait_period=(1.0,),
+    duty_factor=(1.0,),
     foot_phase_sin=(1.0,) * 4,
     foot_phase_cos=(1.0,) * 4,
-    foot_theta_sin=(1.0,) * 4,
-    foot_theta_cos=(1.0,) * 4,
-    phase_ratios=(1.0, 1.0),
-    sagittal_plane_state=(1.0, 1.0, 1.0),
 )
 """Central scale metadata for the shared symmetric quadruped policy observation."""
+
+SYMM_QUADRUPED_POLICY_OBS_TIME_REVERSAL = _SymmQuadrupedPolicyObservationTimeReversal(
+    projected_gravity="even",
+    velocity_command="odd",
+    joint_position="even",
+    joint_velocity="odd",
+    previous_action="even",
+    second_previous_action="even",
+    gait_period="even",
+    duty_factor="even",
+    foot_phase_sin="duty_aware_reflection",
+    foot_phase_cos="duty_aware_reflection",
+)
+"""Time-reversal parity/mapping metadata for all policy-observation terms."""
+
+SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT = SymmQuadrupedPolicyObservationContract(
+    version=SYMM_QUADRUPED_OBSERVATION_CONTRACT_VERSION,
+    instantaneous_frame_dim=SYMM_QUADRUPED_POLICY_OBS_DIM,
+    term_order=(
+        "projected_gravity",
+        "velocity_command",
+        "joint_position",
+        "joint_velocity",
+        "previous_action",
+        "second_previous_action",
+        "gait_period",
+        "duty_factor",
+        "foot_phase_sin",
+        "foot_phase_cos",
+    ),
+    dimensions=SYMM_QUADRUPED_POLICY_OBS_DIMENSIONS,
+    slices=SYMM_QUADRUPED_POLICY_OBS_LAYOUT,
+    scales=SYMM_QUADRUPED_POLICY_OBS_SCALE,
+    time_reversal=SYMM_QUADRUPED_POLICY_OBS_TIME_REVERSAL,
+    history_packing=SYMM_QUADRUPED_POLICY_HISTORY_PACKING,
+)
+"""Authoritative hardware-oriented 64D policy-observation contract."""
+
+# Concise compatibility alias for downstream task-local extensions.
+SYMM_QUADRUPED_POLICY_OBS_CONTRACT = SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT
+
+
+def _gait_characteristic_length_and_gravity(
+    reference: torch.Tensor, base_height_range: tuple[float, float]
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return characteristic length [m] and gravity [m/s^2] in a tensor's dtype/device."""
+    if len(base_height_range) != 2:
+        raise ValueError(f"base_height_range must contain exactly two bounds; received {base_height_range!r}.")
+    lower_bound, upper_bound = base_height_range
+    if (
+        not math.isfinite(lower_bound)
+        or not math.isfinite(upper_bound)
+        or lower_bound <= 0.0
+        or upper_bound <= 0.0
+        or lower_bound > upper_bound
+    ):
+        raise ValueError(
+            "base_height_range must contain finite, positive, ordered characteristic lengths; "
+            f"received {base_height_range!r}."
+        )
+    length = reference.new_tensor((lower_bound + upper_bound) * 0.5)
+    gravity = reference.new_tensor(9.81)
+    return length, gravity
+
+
+def compute_dimensionless_gait_period(
+    gait_period: torch.Tensor, base_height_range: tuple[float, float]
+) -> torch.Tensor:
+    """Normalize gait period using the task's characteristic leg-length convention.
+
+    The dimensionless period is ``T* = T * sqrt(g / L)``, where ``T`` is the
+    gait period [s], ``g`` is 9.81 [m/s^2], and ``L`` is the midpoint of
+    ``base_height_range`` [m].
+
+    Args:
+        gait_period: Positive finite gait periods [s].
+        base_height_range: Lower and upper characteristic lengths [m].
+
+    Returns:
+        Dimensionless gait periods with the same shape, dtype, and device as
+        :paramref:`gait_period`.
+
+    Raises:
+        ValueError: If the period tensor or characteristic-length bounds are invalid.
+    """
+    if not isinstance(gait_period, torch.Tensor):
+        raise ValueError(f"gait_period must be a torch.Tensor; received {type(gait_period).__name__}.")
+    if not torch.is_floating_point(gait_period):
+        raise ValueError(f"gait_period must use a floating-point dtype; received {gait_period.dtype}.")
+    if torch.any(~torch.isfinite(gait_period)) or torch.any(gait_period <= 0.0):
+        raise ValueError("gait_period must contain only finite, strictly positive periods.")
+    length, gravity = _gait_characteristic_length_and_gravity(gait_period, base_height_range)
+    return gait_period * torch.sqrt(gravity / length)
+
 
 SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS = (
     (1.0, 1.0, 1.0),
@@ -444,11 +597,66 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     gait_curriculum_iterations: int = 0
     """Number of absolute learning iterations used by the annealed sampling profile."""
 
+    command_curriculum_mode: str = "none"
+    """Optional stateful command curriculum: ``"none"`` or ``"tr_orbit_reward_threshold_v1"``."""
+
+    curriculum_velocity_bin_count: int = 11
+    """Number of signed forward-velocity bins in the TR-orbit curriculum."""
+
+    curriculum_ewma_coefficient: float = 0.1
+    """Segment-success EWMA coefficient for the TR-orbit curriculum."""
+
+    curriculum_unlock_threshold: float = 0.8
+    """Success EWMA threshold for increasing a cell and its neighbors."""
+
+    curriculum_current_cell_increment: float = 1.0
+    """Weight increment applied to a competent cell and its TR partner."""
+
+    curriculum_neighbor_increment: float = 0.25
+    """Weight increment applied once to neighboring speed-magnitude orbits."""
+
+    curriculum_exploration_floor: float = 0.05
+    """Strictly positive minimum command-cell sampling weight."""
+
+    curriculum_maximum_weight: float = 10.0
+    """Maximum command-cell sampling weight."""
+
+    curriculum_seed: int = 0
+    """CPU random-number seed used for exact curriculum continuation."""
+
 
 class GaitVelocityCommand(CommandTerm):
     """Velocity command generator with sampled symmetric gait clocks."""
 
     cfg: GaitVelocityCommandCfg
+    _COMMAND_CURRICULUM_STATE_SCHEMA_VERSION = 2
+    _COMMAND_CURRICULUM_RUNTIME_PHASE_FIELD = "common_gait_phases"
+    _COMMAND_CURRICULUM_RUNTIME_TENSOR_FIELDS = (
+        "vel_command_b",
+        "heading_target",
+        "is_heading_env",
+        "is_standing_env",
+        "foot_thetas",
+        "gait_periods",
+        "duty_factors",
+        "kappa",
+        "time_left",
+        "command_counter",
+        "gait_time_left",
+        "gait_counter",
+        "gait_row_indices",
+        "gait_sequence_indices",
+        "common_gait_phases",
+        "_error_xy_sum",
+        "_error_yaw_sum",
+        "_step_count",
+        "_evaluation_active",
+        "_evaluation_forward_velocity",
+        "_evaluation_gait_indices",
+        "_evaluation_deterministic_timing",
+        "_curriculum_joint_resample_pending",
+        "_curriculum_skip_next_gait_resample",
+    )
 
     def __init__(self, cfg: GaitVelocityCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
@@ -529,8 +737,48 @@ class GaitVelocityCommand(CommandTerm):
         self._evaluation_gait_indices = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
         self._evaluation_deterministic_timing = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+        allowed_curriculum_modes = {"none", TR_ORBIT_COMMAND_CURRICULUM_MODE}
+        if cfg.command_curriculum_mode not in allowed_curriculum_modes:
+            raise ValueError(
+                f"command_curriculum_mode must be one of {sorted(allowed_curriculum_modes)!r}; "
+                f"received {cfg.command_curriculum_mode!r}."
+            )
+        self.command_curriculum: TimeReversalOrbitCurriculum | None = None
+        self._curriculum_joint_resample_pending = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._curriculum_skip_next_gait_resample = torch.zeros_like(self._curriculum_joint_resample_pending)
+        if cfg.command_curriculum_mode == TR_ORBIT_COMMAND_CURRICULUM_MODE:
+            if cfg.gait_sequence_enabled:
+                raise ValueError("The TR-orbit command curriculum is incompatible with deterministic gait sequences.")
+            if cfg.ranges.lin_vel_y != (0.0, 0.0) or cfg.ranges.ang_vel_z != (0.0, 0.0) or cfg.rel_standing_envs != 0.0:
+                raise ValueError(
+                    "The TR-orbit command curriculum currently requires zero lateral/yaw ranges and no standing "
+                    "mixture because its task grid is (gait row, signed forward-velocity bin)."
+                )
+            if cfg.gait_library_version != SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION or self.init_foot_thetas.shape[
+                0
+            ] != len(SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROWS):
+                raise ValueError(
+                    "The TR-orbit command curriculum requires the canonical time-reversal-closed training gait library."
+                )
+            self.command_curriculum = TimeReversalOrbitCurriculum(
+                num_envs=self.num_envs,
+                gait_partner_indices=SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_TIME_REVERSAL_PARTNERS,
+                velocity_range=cfg.ranges.lin_vel_x,
+                velocity_bin_count=cfg.curriculum_velocity_bin_count,
+                ewma_coefficient=cfg.curriculum_ewma_coefficient,
+                unlock_threshold=cfg.curriculum_unlock_threshold,
+                current_cell_increment=cfg.curriculum_current_cell_increment,
+                neighbor_increment=cfg.curriculum_neighbor_increment,
+                exploration_floor=cfg.curriculum_exploration_floor,
+                maximum_weight=cfg.curriculum_maximum_weight,
+                seed=cfg.curriculum_seed,
+                initial_gait_weights=configured_sampling_weights,
+            )
+
         self.metrics["gait_period"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["duty_factor"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["command_curriculum_segment_success"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["command_curriculum_unlocked_fraction"] = torch.zeros(self.num_envs, device=self.device)
         if self.init_foot_thetas.shape[0] == len(SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES):
             self._gait_row_metric_names = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_ROW_NAMES
             self._gait_row_metric_families = SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_FAMILIES
@@ -556,6 +804,120 @@ class GaitVelocityCommand(CommandTerm):
         """Absolute zero-based learning iteration used by the gait curriculum."""
         return self._training_iteration
 
+    @property
+    def command_curriculum_enabled(self) -> bool:
+        """Whether the stateful TR-orbit command curriculum is active."""
+        return getattr(self, "command_curriculum", None) is not None
+
+    def get_command_curriculum_state(self) -> dict | None:
+        """Return exact curriculum and active command/gait runtime state."""
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is None:
+            return None
+        runtime = {}
+        for name in self._COMMAND_CURRICULUM_RUNTIME_TENSOR_FIELDS:
+            tensor = (
+                self.common_gait_phases()
+                if name == self._COMMAND_CURRICULUM_RUNTIME_PHASE_FIELD
+                else getattr(self, name)
+            )
+            runtime[name] = tensor.detach().cpu().clone()
+        return {
+            "schema_version": self._COMMAND_CURRICULUM_STATE_SCHEMA_VERSION,
+            "training_iteration": self._training_iteration,
+            "curriculum": curriculum.state_dict(),
+            "runtime": runtime,
+        }
+
+    def load_command_curriculum_state(self, state: Mapping) -> None:
+        """Restore exact curriculum and active command/gait runtime state."""
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is None:
+            raise ValueError(
+                "The checkpoint contains command-curriculum state, but command_curriculum_mode='none' is active."
+            )
+        required = {"schema_version", "training_iteration", "curriculum", "runtime"}
+        if not isinstance(state, Mapping) or set(state) != required:
+            received = set(state) if isinstance(state, Mapping) else set()
+            raise ValueError(
+                "Command-curriculum checkpoint fields do not match: "
+                f"missing={sorted(required - received)}, unexpected={sorted(received - required)}."
+            )
+        schema_version = state["schema_version"]
+        if isinstance(schema_version, bool) or schema_version != self._COMMAND_CURRICULUM_STATE_SCHEMA_VERSION:
+            raise ValueError(
+                "Unsupported command-curriculum checkpoint schema: "
+                f"expected {self._COMMAND_CURRICULUM_STATE_SCHEMA_VERSION}, received {schema_version!r}."
+            )
+        training_iteration = state["training_iteration"]
+        if isinstance(training_iteration, bool) or not isinstance(training_iteration, int) or training_iteration < 0:
+            raise ValueError(
+                f"Command-curriculum training_iteration must be a nonnegative integer; received {training_iteration!r}."
+            )
+        runtime = state["runtime"]
+        runtime_fields = set(self._COMMAND_CURRICULUM_RUNTIME_TENSOR_FIELDS)
+        if not isinstance(runtime, Mapping) or set(runtime) != runtime_fields:
+            received = set(runtime) if isinstance(runtime, Mapping) else set()
+            raise ValueError(
+                "Command-curriculum runtime fields do not match: "
+                f"missing={sorted(runtime_fields - received)}, unexpected={sorted(received - runtime_fields)}."
+            )
+        validated_runtime: dict[str, torch.Tensor] = {}
+        for name in self._COMMAND_CURRICULUM_RUNTIME_TENSOR_FIELDS:
+            target = (
+                self._common_gait_phase_at_anchor
+                if name == self._COMMAND_CURRICULUM_RUNTIME_PHASE_FIELD
+                else getattr(self, name)
+            )
+            source = torch.as_tensor(runtime[name], device="cpu")
+            if source.shape != target.shape or source.dtype != target.dtype:
+                raise ValueError(
+                    f"Command-curriculum runtime {name} must have shape {tuple(target.shape)} and dtype "
+                    f"{target.dtype}; received {tuple(source.shape)} and {source.dtype}."
+                )
+            validated_runtime[name] = source
+
+        curriculum_state = state["curriculum"]
+        if not isinstance(curriculum_state, Mapping):
+            raise ValueError("Command-curriculum checkpoint curriculum must be a mapping.")
+        current_cell_fields = {"current_gait_indices", "current_velocity_bin_indices"}
+        if not current_cell_fields.issubset(curriculum_state):
+            raise ValueError(
+                "Command-curriculum checkpoint curriculum is missing current cell indices: "
+                f"{sorted(current_cell_fields - set(curriculum_state))}."
+            )
+        saved_current_gait = torch.as_tensor(curriculum_state["current_gait_indices"], dtype=torch.long, device="cpu")
+        saved_current_velocity_bin = torch.as_tensor(
+            curriculum_state["current_velocity_bin_indices"], dtype=torch.long, device="cpu"
+        )
+        expected_cell_shape = (self.num_envs,)
+        if saved_current_gait.shape != expected_cell_shape or saved_current_velocity_bin.shape != expected_cell_shape:
+            raise ValueError(
+                "Command-curriculum current cell indices must have shape "
+                f"{expected_cell_shape}; received {tuple(saved_current_gait.shape)} and "
+                f"{tuple(saved_current_velocity_bin.shape)}."
+            )
+        valid = (saved_current_gait >= 0) & (saved_current_velocity_bin >= 0)
+        if torch.any(valid):
+            saved_runtime_gait = validated_runtime["gait_row_indices"]
+            saved_runtime_velocity = validated_runtime["vel_command_b"][:, 0]
+            saved_runtime_velocity_bin = curriculum.velocity_bin_indices(saved_runtime_velocity)
+            if not torch.equal(saved_runtime_gait[valid], saved_current_gait[valid]):
+                raise ValueError("Checkpoint gait_row_indices disagree with active curriculum cells.")
+            if not torch.equal(saved_runtime_velocity_bin[valid], saved_current_velocity_bin[valid]):
+                raise ValueError("Checkpoint forward commands disagree with active curriculum velocity bins.")
+
+        curriculum.load_state_dict(curriculum_state)
+        for name, source in validated_runtime.items():
+            if name == self._COMMAND_CURRICULUM_RUNTIME_PHASE_FIELD:
+                self._common_gait_phase_at_anchor.copy_(source.to(device=self.device))
+                self._gait_phase_anchor_steps.fill_(int(self._env.common_step_counter))
+            else:
+                target = getattr(self, name)
+                target.copy_(source.to(device=target.device))
+        self._training_iteration = training_iteration
+        self._update_gait_sampling_probability_metrics()
+
     def set_training_iteration(self, iteration: int) -> None:
         """Set the absolute learning iteration and refresh curriculum weights.
 
@@ -576,6 +938,9 @@ class GaitVelocityCommand(CommandTerm):
                 curriculum_iterations=self.cfg.gait_curriculum_iterations,
             )
             self.foot_theta_sampling_weights = self._normalize_sampling_weights(weights)
+            curriculum = getattr(self, "command_curriculum", None)
+            if curriculum is not None:
+                curriculum.update_gait_prior_weights(self.foot_theta_sampling_weights.detach().cpu())
         self._update_gait_sampling_probability_metrics()
 
     def set_evaluation_scenario(
@@ -620,6 +985,12 @@ class GaitVelocityCommand(CommandTerm):
         if len(env_ids_tensor) == 0:
             return
 
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is not None:
+            self._finish_command_curriculum_segments(env_ids_tensor, terminated=False)
+            curriculum.clear_current_cells(env_ids_tensor.detach().cpu())
+            self._curriculum_joint_resample_pending[env_ids_tensor] = False
+            self._curriculum_skip_next_gait_resample[env_ids_tensor] = False
         self._evaluation_active[env_ids_tensor] = True
         self._evaluation_forward_velocity[env_ids_tensor] = forward_velocity
         self._evaluation_gait_indices[env_ids_tensor] = gait_index
@@ -650,6 +1021,11 @@ class GaitVelocityCommand(CommandTerm):
         self._evaluation_forward_velocity[env_ids_tensor] = 0.0
         self._evaluation_gait_indices[env_ids_tensor] = -1
         self._evaluation_deterministic_timing[env_ids_tensor] = False
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is not None:
+            curriculum.clear_current_cells(env_ids_tensor.detach().cpu())
+            self._curriculum_joint_resample_pending[env_ids_tensor] = True
+            self._curriculum_skip_next_gait_resample[env_ids_tensor] = False
         self.time_left[env_ids_tensor] = 0.0
         self.gait_time_left[env_ids_tensor] = 0.0
 
@@ -694,6 +1070,35 @@ class GaitVelocityCommand(CommandTerm):
                 gait_resampled_env_ids = env_ids
         self._update_velocity_resampled_gait_timing(velocity_resampled_env_ids, gait_resampled_env_ids)
 
+    def _finish_command_curriculum_segments(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        terminated: torch.Tensor | bool,
+    ) -> torch.Tensor:
+        """Finalize selected command/gait segments before their cell changes."""
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is None or len(env_ids) == 0:
+            return torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+        command = self.vel_command_b[env_ids]
+        xy_threshold = self.cfg.vel_xy_success_threshold + self.cfg.vel_xy_success_rel_threshold * torch.linalg.norm(
+            command[:, :2], dim=-1
+        )
+        yaw_threshold = self.cfg.vel_yaw_success_threshold + self.cfg.vel_yaw_success_rel_threshold * torch.abs(
+            command[:, 2]
+        )
+        success_cpu = curriculum.finish_segments(
+            env_ids.detach().cpu(),
+            xy_success_threshold=xy_threshold.detach().cpu(),
+            yaw_success_threshold=yaw_threshold.detach().cpu(),
+            terminated=terminated.detach().cpu() if isinstance(terminated, torch.Tensor) else terminated,
+        )
+        success = success_cpu.to(device=self.device)
+        self.metrics["command_curriculum_segment_success"][env_ids] = success.to(dtype=torch.float32)
+        unlocked_fraction = curriculum.unlock_state.to(torch.float32).mean().item()
+        self.metrics["command_curriculum_unlocked_fraction"].fill_(unlocked_fraction)
+        return success
+
     def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, float]:
         if env_ids is None:
             env_ids = slice(None)
@@ -719,6 +1124,13 @@ class GaitVelocityCommand(CommandTerm):
         self.metrics["success_rate"][env_ids_tensor] = (
             (mean_error_xy < xy_success_threshold) & (mean_error_yaw < yaw_success_threshold)
         ).float()
+
+        if getattr(self, "command_curriculum", None) is not None:
+            normal_env_ids = env_ids_tensor[~self._evaluation_mask(env_ids_tensor)]
+            terminated_buf = getattr(self._env, "reset_terminated", None)
+            terminated = True if terminated_buf is None else terminated_buf[normal_env_ids]
+            self._finish_command_curriculum_segments(normal_env_ids, terminated=terminated)
+            self._curriculum_joint_resample_pending[normal_env_ids] = True
 
         extras = super().reset(env_ids_tensor)
         self._env.extras.setdefault("log", {})["Metrics/success_rate"] = extras.pop("success_rate")
@@ -785,7 +1197,31 @@ class GaitVelocityCommand(CommandTerm):
             self._update_gait_sequence(env_ids_tensor, force=True)
             return
 
-        if self.foot_theta_sampling_weights is None:
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is not None:
+            skip_mask = self._curriculum_skip_next_gait_resample[env_ids_tensor]
+            skip_env_ids = env_ids_tensor[skip_mask]
+            if len(skip_env_ids) > 0:
+                self._curriculum_skip_next_gait_resample[skip_env_ids] = False
+                self.gait_time_left[skip_env_ids] = self.cfg.resampling_time_gait
+                self.gait_counter[skip_env_ids] += 1
+            env_ids_tensor = env_ids_tensor[~skip_mask]
+            if len(env_ids_tensor) == 0:
+                return
+
+            self._finish_command_curriculum_segments(env_ids_tensor, terminated=False)
+            env_ids_cpu = env_ids_tensor.detach().cpu()
+            velocity_bin_cpu = curriculum.current_velocity_bin_indices[env_ids_cpu].clone()
+            invalid = velocity_bin_cpu < 0
+            if torch.any(invalid):
+                velocity_bin_cpu[invalid] = curriculum.velocity_bin_indices(
+                    self.vel_command_b[env_ids_tensor[invalid.to(device=self.device)], 0].detach().cpu()
+                )
+            choices_cpu = curriculum.sample_gait_given_velocity(velocity_bin_cpu)
+            choices = choices_cpu.to(device=self.device)
+            self._assign_gait(env_ids_tensor, choices, add_theta_noise=self.cfg.add_noise_theta)
+            curriculum.set_current_cells(env_ids_cpu, choices_cpu, velocity_bin_cpu)
+        elif self.foot_theta_sampling_weights is None:
             choices = torch.randint(
                 low=0, high=self.init_foot_thetas.shape[0], size=(len(env_ids_tensor),), device=self.device
             )
@@ -795,7 +1231,8 @@ class GaitVelocityCommand(CommandTerm):
                 num_samples=len(env_ids_tensor),
                 replacement=True,
             )
-        self._assign_gait(env_ids_tensor, choices, add_theta_noise=self.cfg.add_noise_theta)
+        if curriculum is None:
+            self._assign_gait(env_ids_tensor, choices, add_theta_noise=self.cfg.add_noise_theta)
         self.gait_time_left[env_ids_tensor] = self.cfg.resampling_time_gait
         self.gait_counter[env_ids_tensor] += 1
 
@@ -893,7 +1330,11 @@ class GaitVelocityCommand(CommandTerm):
         """Publish current row and family probabilities into command metrics."""
         if not hasattr(self, "_gait_row_metric_names"):
             return
-        if self.foot_theta_sampling_weights is None:
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is not None:
+            row_weights = curriculum.weights.sum(dim=1)
+            probabilities = (row_weights / row_weights.sum()).to(device=self.device, dtype=torch.float32)
+        elif self.foot_theta_sampling_weights is None:
             probabilities = torch.full(
                 (self.init_foot_thetas.shape[0],),
                 1.0 / self.init_foot_thetas.shape[0],
@@ -917,17 +1358,29 @@ class GaitVelocityCommand(CommandTerm):
         self._error_xy_sum += error_xy
         self._error_yaw_sum += error_yaw
         self._step_count += 1.0
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is not None:
+            normal_env_ids = (~self._evaluation_active).nonzero(as_tuple=False).flatten()
+            if len(normal_env_ids) > 0:
+                curriculum.accumulate(
+                    error_xy[normal_env_ids].detach().cpu(),
+                    error_yaw[normal_env_ids].detach().cpu(),
+                    normal_env_ids.detach().cpu(),
+                )
         self._update_gait_sampling_probability_metrics()
 
     def _resample(self, env_ids: Sequence[int]) -> None:
         """Resample normal environments while preserving fixed evaluation scenarios."""
         env_ids_tensor = self._resolve_env_ids(env_ids)
         evaluation_mask = self._evaluation_mask(env_ids_tensor)
+        normal_env_ids = env_ids_tensor[~evaluation_mask]
+        if getattr(self, "command_curriculum", None) is not None and len(normal_env_ids) > 0:
+            completed_env_ids = normal_env_ids[~self._curriculum_joint_resample_pending[normal_env_ids]]
+            self._finish_command_curriculum_segments(completed_env_ids, terminated=False)
         if not torch.any(evaluation_mask):
             super()._resample(env_ids_tensor)
             return
 
-        normal_env_ids = env_ids_tensor[~evaluation_mask]
         if len(normal_env_ids) > 0:
             super()._resample(normal_env_ids)
         evaluation_env_ids = env_ids_tensor[evaluation_mask]
@@ -950,7 +1403,47 @@ class GaitVelocityCommand(CommandTerm):
     def _resample_random_command(self, env_ids_tensor: torch.Tensor) -> None:
         """Apply the configured random command sampler to environment indices."""
         r = torch.empty(len(env_ids_tensor), device=self.device)
-        self.vel_command_b[env_ids_tensor, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
+        curriculum = getattr(self, "command_curriculum", None)
+        if curriculum is None:
+            self.vel_command_b[env_ids_tensor, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
+        else:
+            pending_mask = self._curriculum_joint_resample_pending[env_ids_tensor]
+            pending_env_ids = env_ids_tensor[pending_mask]
+            if len(pending_env_ids) > 0:
+                gait_cpu, velocity_bin_cpu = curriculum.sample_joint(len(pending_env_ids))
+                self.vel_command_b[pending_env_ids, 0] = curriculum.sample_forward_velocity(velocity_bin_cpu).to(
+                    device=self.device, dtype=self.vel_command_b.dtype
+                )
+                self._assign_gait(
+                    pending_env_ids,
+                    gait_cpu.to(device=self.device),
+                    add_theta_noise=self.cfg.add_noise_theta,
+                )
+                curriculum.set_current_cells(pending_env_ids.detach().cpu(), gait_cpu, velocity_bin_cpu)
+                self._curriculum_joint_resample_pending[pending_env_ids] = False
+                self._curriculum_skip_next_gait_resample[pending_env_ids] = True
+
+            conditional_env_ids = env_ids_tensor[~pending_mask]
+            if len(conditional_env_ids) > 0:
+                gait_cpu = self.gait_row_indices[conditional_env_ids].detach().cpu()
+                invalid = gait_cpu < 0
+                if torch.any(invalid):
+                    fallback_gait, _ = curriculum.sample_joint(int(invalid.sum()))
+                    gait_cpu[invalid] = fallback_gait
+                    self._assign_gait(
+                        conditional_env_ids[invalid.to(device=self.device)],
+                        fallback_gait.to(device=self.device),
+                        add_theta_noise=self.cfg.add_noise_theta,
+                    )
+                velocity_bin_cpu = curriculum.sample_velocity_given_gait(gait_cpu)
+                self.vel_command_b[conditional_env_ids, 0] = curriculum.sample_forward_velocity(velocity_bin_cpu).to(
+                    device=self.device, dtype=self.vel_command_b.dtype
+                )
+                curriculum.set_current_cells(
+                    conditional_env_ids.detach().cpu(),
+                    gait_cpu,
+                    velocity_bin_cpu,
+                )
         self.vel_command_b[env_ids_tensor, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
         self.vel_command_b[env_ids_tensor, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
         if self.cfg.min_xy_command_norm > 0.0:
@@ -1094,20 +1587,7 @@ class GaitVelocityCommand(CommandTerm):
         self, cmd_forward_velocity: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return dimensionless speed with its characteristic length and gravity."""
-        lower_bound, upper_bound = self.cfg.base_height_range
-        if (
-            not math.isfinite(lower_bound)
-            or not math.isfinite(upper_bound)
-            or lower_bound <= 0.0
-            or upper_bound <= 0.0
-            or lower_bound > upper_bound
-        ):
-            raise ValueError(
-                "base_height_range must contain finite, positive, ordered characteristic lengths; "
-                f"received {self.cfg.base_height_range!r}."
-            )
-        length = cmd_forward_velocity.new_tensor((lower_bound + upper_bound) * 0.5)
-        gravity = cmd_forward_velocity.new_tensor(9.81)
+        length, gravity = _gait_characteristic_length_and_gravity(cmd_forward_velocity, self.cfg.base_height_range)
         velocity_star = torch.abs(cmd_forward_velocity) / torch.sqrt(gravity * length)
         return velocity_star, length, gravity
 
@@ -1143,26 +1623,73 @@ def foot_phase_cos(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return torch.cos(2.0 * torch.pi * gait_command.foot_phases())
 
 
+def second_previous_action(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Return the action preceding :func:`isaaclab.envs.mdp.last_action`.
+
+    At the decision observation returned after action ``u_k`` executes,
+    :func:`isaaclab.envs.mdp.last_action` is ``u_k`` and this term is
+    ``u_{k-1}``.
+    """
+    return env.action_manager.prev_action
+
+
+def dimensionless_gait_period(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Return the normalized gait period, shape ``(num_envs, 1)``.
+
+    The value is ``T * sqrt(g / L)``, using the midpoint of the command
+    generator's configured base-height range as ``L``.
+    """
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    gait_period = gait_command.gait_periods
+    if gait_period.shape != (env.num_envs,):
+        raise ValueError(
+            f"GaitVelocityCommand.gait_periods must have shape ({env.num_envs},); received {tuple(gait_period.shape)}."
+        )
+    normalized_period = compute_dimensionless_gait_period(gait_period, gait_command.cfg.base_height_range)
+    result = normalized_period.unsqueeze(-1)
+    if result.shape != (env.num_envs, 1):
+        raise RuntimeError(f"Expected dimensionless gait period shape ({env.num_envs}, 1), got {tuple(result.shape)}.")
+    return result
+
+
+def duty_factor(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Return the commanded stance ratio, shape ``(num_envs, 1)``."""
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    duty_factors = gait_command.duty_factors
+    if duty_factors.shape != (env.num_envs,):
+        raise ValueError(
+            f"GaitVelocityCommand.duty_factors must have shape ({env.num_envs},); received {tuple(duty_factors.shape)}."
+        )
+    if not torch.is_floating_point(duty_factors):
+        raise ValueError(f"duty_factors must use a floating-point dtype; received {duty_factors.dtype}.")
+    if torch.any(~torch.isfinite(duty_factors)) or torch.any((duty_factors <= 0.0) | (duty_factors >= 1.0)):
+        raise ValueError("duty_factors must contain only finite stance ratios strictly between zero and one.")
+    result = duty_factors.unsqueeze(-1)
+    if result.shape != (env.num_envs, 1):
+        raise RuntimeError(f"Expected duty-factor shape ({env.num_envs}, 1), got {tuple(result.shape)}.")
+    return result
+
+
 def foot_theta_sin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Sine of the sampled foot phase offsets."""
+    """Sine of sampled foot offsets (legacy diagnostic; not a policy term)."""
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
     return torch.sin(2.0 * torch.pi * gait_command.foot_thetas)
 
 
 def foot_theta_cos(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Cosine of the sampled foot phase offsets."""
+    """Cosine of sampled foot offsets (legacy diagnostic; not a policy term)."""
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
     return torch.cos(2.0 * torch.pi * gait_command.foot_thetas)
 
 
 def phase_ratios(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Swing and stance phase ratios."""
+    """Swing and stance ratios (legacy diagnostic; not a policy term)."""
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
     return gait_command.phase_ratios()
 
 
 def desired_base_twist(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Expand the planar command into desired linear and angular velocities.
+    """Expand the planar command into a legacy six-dimensional desired twist.
 
     The output order is ``(v_x, v_y, v_z, omega_x, omega_y, omega_z)``. The
     command generator only controls planar translation and yaw, so the other
@@ -1180,7 +1707,7 @@ def sagittal_plane_state(
     lateral_position_scale: float = 0.5,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Return observable cross-track and heading error for straight-line recovery.
+    """Return legacy simulator-only cross-track and heading diagnostics.
 
     The heading target is the environment's zero-yaw sagittal plane. Sine and
     cosine encode the wrapped heading error without a discontinuity at pi.
@@ -1231,7 +1758,7 @@ def straight_line_motion_reward(
     heading_scale: float = 0.5,
     lateral_velocity_scale: float = 0.25,
     yaw_rate_scale: float = 0.25,
-    pose_weight: float = 0.1,
+    pose_weight: float = 0.0,
     roll_scale: float = 0.25,
     pitch_scale: float = 0.5,
     min_base_height: float = 0.35,
@@ -1244,22 +1771,21 @@ def straight_line_motion_reward(
     lateral_position_deadband: float = 0.05,
     heading_deadband: float = 0.05,
 ) -> torch.Tensor:
-    """Additively reward commanded x motion, straightness, and supported posture.
+    """Additively reward commanded body motion and supported posture.
 
     Forward tracking is an independent term, so poor posture or temporary
-    cross-track error cannot erase its learning signal. The observable lateral
-    position and heading-error terms make returning to the sagittal plane
-    preferable to walking straight along a displaced or rotated path.
+    posture error cannot erase its learning signal. Absolute world lateral
+    position and heading do not contribute to this reward.
 
     Args:
         env: The environment instance.
         command_name: Name of the velocity command term.
         forward_velocity_scale: Forward velocity-error scale [m/s].
-        lateral_position_scale: Cross-track error scale [m].
-        heading_scale: Heading-error scale [rad].
+        lateral_position_scale: Deprecated, inactive cross-track diagnostic scale [m].
+        heading_scale: Deprecated, inactive heading diagnostic scale [rad].
         lateral_velocity_scale: Lateral velocity-error scale [m/s].
         yaw_rate_scale: Yaw-rate error scale [rad/s].
-        pose_weight: Weight of lateral-position and heading recovery.
+        pose_weight: Deprecated and inactive; must remain zero in task configurations.
         roll_scale: Straightness roll-error scale [rad].
         pitch_scale: Posture pitch scale and support corridor half-width [rad].
         min_base_height: Minimum supported base height [m].
@@ -1269,8 +1795,8 @@ def straight_line_motion_reward(
         forward_weight: Weight of forward command tracking.
         straight_weight: Weight of lateral velocity, yaw rate, and roll control.
         posture_weight: Weight of pitch and base-height posture.
-        lateral_position_deadband: Unpenalized cross-track corridor half-width [m].
-        heading_deadband: Unpenalized heading-error corridor half-width [rad].
+        lateral_position_deadband: Deprecated, inactive cross-track deadband [m].
+        heading_deadband: Deprecated, inactive heading deadband [rad].
 
     Returns:
         The bounded additive straight-line motion reward.
@@ -1279,8 +1805,6 @@ def straight_line_motion_reward(
         env,
         command_name=command_name,
         forward_velocity_scale=forward_velocity_scale,
-        lateral_position_scale=lateral_position_scale,
-        heading_scale=heading_scale,
         lateral_velocity_scale=lateral_velocity_scale,
         yaw_rate_scale=yaw_rate_scale,
         roll_scale=roll_scale,
@@ -1288,12 +1812,15 @@ def straight_line_motion_reward(
         min_base_height=min_base_height,
         height_scale=height_scale,
         asset_cfg=asset_cfg,
-        lateral_position_deadband=lateral_position_deadband,
-        heading_deadband=heading_deadband,
     )
+    if pose_weight != 0.0:
+        warnings.warn(
+            "pose_weight is deprecated and inactive because absolute world pose is not part of the locomotion task.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     reward = forward_weight * components["forward_score"]
     reward += straight_weight * components["straight_score"]
-    reward += pose_weight * components["pose_score"]
     reward += posture_weight * components["posture_score"]
     reward -= support_loss_weight * components["support_loss"]
     env._straight_line_motion_diagnostics = {
@@ -1318,15 +1845,13 @@ def straight_line_motion_reward_components(
     lateral_position_deadband: float = 0.05,
     heading_deadband: float = 0.05,
 ) -> dict[str, torch.Tensor]:
-    """Return the component tensors used by :func:`straight_line_motion_reward`.
+    """Return body-frame and posture components used by the motion reward.
 
-    This helper keeps training and diagnostic calculations identical. The
-    All returned values are bounded in ``[0, 1]``.
+    Legacy world-pose parameters remain accepted for source compatibility but
+    are inactive. All returned values are bounded in ``[0, 1]``.
     """
     positive_scales = {
         "forward_velocity_scale": forward_velocity_scale,
-        "lateral_position_scale": lateral_position_scale,
-        "heading_scale": heading_scale,
         "lateral_velocity_scale": lateral_velocity_scale,
         "yaw_rate_scale": yaw_rate_scale,
         "roll_scale": roll_scale,
@@ -1358,14 +1883,6 @@ def straight_line_motion_reward_components(
     straight_error += torch.square(normalized_roll)
     straight_score = torch.reciprocal(1.0 + straight_error)
 
-    lateral_position = asset.data.root_pos_w.torch[:, 1] - env.scene.env_origins[:, 1]
-    lateral_position_excess = torch.relu(torch.abs(lateral_position) - lateral_position_deadband)
-    heading_error = math_utils.wrap_to_pi(asset.data.heading_w.torch)
-    heading_excess = torch.relu(torch.abs(heading_error) - heading_deadband)
-    lateral_position_score = torch.exp(-torch.square(lateral_position_excess / lateral_position_scale))
-    heading_score = torch.exp(-torch.square(heading_excess / heading_scale))
-    pose_score = 0.5 * (lateral_position_score + heading_score)
-
     base_height = asset.data.root_pos_w.torch[:, 2] - env.scene.env_origins[:, 2]
     height_shortfall = torch.relu(min_base_height - base_height)
     posture_error = torch.square(pitch / pitch_scale)
@@ -1384,9 +1901,6 @@ def straight_line_motion_reward_components(
         "yaw_rate_score": yaw_rate_score,
         "roll_score": roll_score,
         "straight_score": straight_score,
-        "lateral_position_score": lateral_position_score,
-        "heading_score": heading_score,
-        "pose_score": pose_score,
         "posture_score": posture_score,
         "support_loss": support_loss,
     }
@@ -2242,6 +2756,85 @@ def _collect_single_body_contact_force_norms(
     return torch.stack(contact_forces, dim=-1)
 
 
+def infer_policy_history_length(policy_obs: torch.Tensor) -> int:
+    """Infer the number of 64D frames encoded in a policy observation.
+
+    A width of 64 is one instantaneous frame. Wider observations must be
+    flattened native history with a width divisible by 64.
+
+    Args:
+        policy_obs: Policy observations with an arbitrary leading shape.
+
+    Returns:
+        The positive number of encoded frames.
+
+    Raises:
+        ValueError: If no feature axis exists or its width is not a positive multiple of 64.
+    """
+    if not isinstance(policy_obs, torch.Tensor) or policy_obs.ndim < 1:
+        shape = tuple(policy_obs.shape) if isinstance(policy_obs, torch.Tensor) else None
+        raise ValueError(f"policy_obs must be a tensor with a feature axis; received shape {shape}.")
+    width = policy_obs.shape[-1]
+    if width <= 0 or width % SYMM_QUADRUPED_POLICY_OBS_DIM != 0:
+        raise ValueError(
+            "Policy observation width must be a positive multiple of "
+            f"{SYMM_QUADRUPED_POLICY_OBS_DIM}; received {width}."
+        )
+    return width // SYMM_QUADRUPED_POLICY_OBS_DIM
+
+
+def unpack_term_major_policy_history(policy_obs: torch.Tensor) -> torch.Tensor:
+    """Unpack native flattened history into ``(..., history, 64)`` frames.
+
+    Isaac Lab stores each observation term oldest-to-newest, flattens that
+    term's history, and then concatenates terms. This helper restores complete
+    chronological frames without changing any leading dimensions.
+    """
+    history_length = infer_policy_history_length(policy_obs)
+    leading_shape = policy_obs.shape[:-1]
+    cursor = 0
+    term_histories: list[torch.Tensor] = []
+    contract = SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT
+    for term_name in contract.term_order:
+        term_dim = getattr(contract.dimensions, term_name)
+        flattened_term_dim = history_length * term_dim
+        term_history = policy_obs[..., cursor : cursor + flattened_term_dim]
+        term_histories.append(term_history.reshape(*leading_shape, history_length, term_dim))
+        cursor += flattened_term_dim
+    if cursor != policy_obs.shape[-1]:
+        raise RuntimeError(f"Observation contract consumed {cursor} features from width {policy_obs.shape[-1]}.")
+    return torch.cat(term_histories, dim=-1)
+
+
+def pack_term_major_policy_history(frame_history: torch.Tensor) -> torch.Tensor:
+    """Pack ``(..., history, 64)`` frames in native term-major history order."""
+    if not isinstance(frame_history, torch.Tensor) or frame_history.ndim < 2:
+        shape = tuple(frame_history.shape) if isinstance(frame_history, torch.Tensor) else None
+        raise ValueError(f"frame_history must have shape (..., history, 64); received {shape}.")
+    if frame_history.shape[-1] != SYMM_QUADRUPED_POLICY_OBS_DIM:
+        raise ValueError(
+            f"frame_history must end in {SYMM_QUADRUPED_POLICY_OBS_DIM} features; "
+            f"received shape {tuple(frame_history.shape)}."
+        )
+    history_length = frame_history.shape[-2]
+    if history_length <= 0:
+        raise ValueError(f"frame_history must contain at least one frame; received {history_length}.")
+    leading_shape = frame_history.shape[:-2]
+    contract = SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT
+    flattened_terms = []
+    for term_name in contract.term_order:
+        term_dim = getattr(contract.dimensions, term_name)
+        term_slice = getattr(contract.slices, term_name)
+        term_history = frame_history[..., term_slice]
+        flattened_terms.append(term_history.reshape(*leading_shape, history_length * term_dim))
+    return torch.cat(flattened_terms, dim=-1)
+
+
+def latest_policy_frame(policy_obs: torch.Tensor) -> torch.Tensor:
+    """Return the newest complete 64D frame from instantaneous or flattened history."""
+    return unpack_term_major_policy_history(policy_obs)[..., -1, :]
+
+
 @torch.no_grad()
 def compute_time_reversal_states(
     env: ManagerBasedRLEnv,
@@ -2328,6 +2921,8 @@ def time_reverse_phase_sin_cos(
         )
     if not torch.is_floating_point(phase_sin):
         raise ValueError(f"Expected floating-point phase features, got dtype {phase_sin.dtype}.")
+    if torch.any(~torch.isfinite(swing_ratio)):
+        raise ValueError("Expected swing_ratio to contain only finite values.")
 
     try:
         broadcast_shape = torch.broadcast_shapes(phase_sin.shape, swing_ratio.shape)
@@ -2351,8 +2946,8 @@ def time_reverse_phase_sin_cos(
     return phase_sin_tr, phase_cos_tr
 
 
-def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
-    """Time-reverse the shared 72D symmetric quadruped policy observation."""
+def _time_reverse_instantaneous_observations(obs: torch.Tensor) -> torch.Tensor:
+    """Time-reverse complete instantaneous 64D frames along their final axis."""
     if obs.ndim < 1 or obs.shape[-1] != SYMM_QUADRUPED_POLICY_OBS_DIM:
         raise ValueError(
             f"Expected a {SYMM_QUADRUPED_POLICY_OBS_DIM}D symmetric quadruped policy observation, "
@@ -2360,25 +2955,39 @@ def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
         )
 
     layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
+    duty_factor_value = obs[..., layout.duty_factor]
     phase_sin_tr, phase_cos_tr = time_reverse_phase_sin_cos(
         obs[..., layout.foot_phase_sin],
         obs[..., layout.foot_phase_cos],
-        obs[..., layout.swing_ratio],
+        1.0 - duty_factor_value,
     )
     obs_tr = obs.clone()
-    obs_tr[..., layout.measured_base_twist] = -obs[..., layout.measured_base_twist]
     obs_tr[..., layout.projected_gravity] = obs[..., layout.projected_gravity]
-    obs_tr[..., layout.desired_base_twist] = -obs[..., layout.desired_base_twist]
+    obs_tr[..., layout.velocity_command] = -obs[..., layout.velocity_command]
     obs_tr[..., layout.joint_position] = obs[..., layout.joint_position]
     obs_tr[..., layout.joint_velocity] = -obs[..., layout.joint_velocity]
     obs_tr[..., layout.previous_action] = obs[..., layout.previous_action]
+    obs_tr[..., layout.second_previous_action] = obs[..., layout.second_previous_action]
+    obs_tr[..., layout.gait_period] = obs[..., layout.gait_period]
+    obs_tr[..., layout.duty_factor] = duty_factor_value
     obs_tr[..., layout.foot_phase_sin] = phase_sin_tr
     obs_tr[..., layout.foot_phase_cos] = phase_cos_tr
-    obs_tr[..., layout.foot_theta_sin] = -obs[..., layout.foot_theta_sin]
-    obs_tr[..., layout.foot_theta_cos] = obs[..., layout.foot_theta_cos]
-    obs_tr[..., layout.phase_ratios] = obs[..., layout.phase_ratios]
-    obs_tr[..., layout.sagittal_plane_state] = obs[..., layout.sagittal_plane_state]
     return obs_tr
+
+
+def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
+    """Apply the 64D time-reversal map to instantaneous or flattened history.
+
+    Native term-major flattened history is unpacked, transformed frame by
+    frame, and repacked without reversing its oldest-to-newest time axis. A
+    tensor whose final width is exactly 64 is treated as instantaneous frames,
+    with all preceding axes preserved.
+    """
+    history_length = infer_policy_history_length(obs)
+    if history_length == 1:
+        return _time_reverse_instantaneous_observations(obs)
+    frame_history = unpack_term_major_policy_history(obs)
+    return pack_term_major_policy_history(_time_reverse_instantaneous_observations(frame_history))
 
 
 def time_reverse_actions(actions: torch.Tensor) -> torch.Tensor:

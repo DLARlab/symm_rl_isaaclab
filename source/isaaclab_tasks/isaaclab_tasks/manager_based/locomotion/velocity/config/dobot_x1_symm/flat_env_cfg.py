@@ -191,7 +191,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_dobot_x1_symm_observations(self) -> None:
-        """Configure the 72D Dobot policy observation to match Go2 ordering."""
+        """Configure the shared 64D Dobot policy observation and native history."""
         configure_policy_observations(self, dobot_mdp, _DOBOT_X1_JOINT_ORDER)
 
     def _configure_dobot_x1_symm_rewards(self) -> None:

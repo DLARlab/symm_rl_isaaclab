@@ -17,6 +17,8 @@ import pytest
 import torch
 
 from isaaclab.envs import mdp as base_mdp
+from isaaclab.managers import ActionManager, ObservationTermCfg
+from isaaclab.utils.buffers import CircularBuffer
 
 from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.agents.rsl_rl_ppo_cfg import (
     DobotX1SymmFlatPPORunnerCfg,
@@ -102,7 +104,7 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
     assert cfg.clip_actions is None
     assert cfg.actor.distribution_cfg.init_std == 0.5
     assert cfg.algorithm.entropy_coef == 0.005
-    assert cfg.algorithm.symmetry_cfg.command_observation_index == 9
+    assert cfg.algorithm.symmetry_cfg.command_observation_index == 3
     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
 
 
@@ -248,44 +250,168 @@ def test_running_reward_is_clipped_before_terminal_penalty_is_added():
     assert torch.equal(reward, torch.tensor([0.5, 0.0, -4.0]))
 
 
-def test_policy_observations_include_velocity_and_observable_sagittal_state():
+def test_policy_observations_use_hardware_proprioception_and_native_history():
     env_cfg = UnitreeGo2SymmFlatEnvCfg()
     policy = env_cfg.observations.policy
 
-    assert policy.base_lin_vel.func is base_mdp.base_lin_vel
-    assert policy.base_lin_vel.scale == (2.0, 2.0, 2.0)
-    assert policy.base_ang_vel.func is base_mdp.base_ang_vel
-    assert policy.base_ang_vel.scale == (0.25, 0.25, 0.25)
-    assert policy.velocity_commands.func is symm_quadruped.desired_base_twist
-    assert policy.velocity_commands.scale == (2.0, 2.0, 2.0, 0.25, 0.25, 0.25)
-    assert policy.sagittal_plane_state.func is symm_quadruped.sagittal_plane_state
-    assert policy.sagittal_plane_state.params == {"lateral_position_scale": 0.5}
+    assert policy.base_lin_vel is None
+    assert policy.base_ang_vel is None
+    assert policy.velocity_commands is None
+    assert policy.foot_theta_sin is None
+    assert policy.foot_theta_cos is None
+    assert policy.phase_ratios is None
+    assert policy.sagittal_plane_state is None
+    assert policy.velocity_command.func is base_mdp.generated_commands
+    assert policy.velocity_command.scale == (2.0, 2.0, 0.25)
+    assert policy.joint_position.func is base_mdp.joint_pos_rel
+    assert policy.joint_velocity.func is base_mdp.joint_vel_rel
+    assert policy.previous_action.func is base_mdp.last_action
+    assert policy.second_previous_action.func is symm_quadruped.second_previous_action
+    assert policy.gait_period.func is symm_quadruped.dimensionless_gait_period
+    assert policy.duty_factor.func is symm_quadruped.duty_factor
+    assert policy.history_length == 30
+    assert policy.flatten_history_dim is True
 
 
 @pytest.mark.parametrize("env_cfg_type", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
-def test_policy_observation_concatenation_remains_72d_and_in_original_order(env_cfg_type):
+def test_policy_observation_contract_is_64d_and_in_authoritative_order(env_cfg_type):
     policy = env_cfg_type().observations.policy
-    term_dimensions = {
-        "base_lin_vel": 3,
-        "base_ang_vel": 3,
-        "projected_gravity": 3,
-        "velocity_commands": 6,
-        "joint_pos": 12,
-        "joint_vel": 12,
-        "actions": 12,
-        "foot_phase_sin": 4,
-        "foot_phase_cos": 4,
-        "foot_theta_sin": 4,
-        "foot_theta_cos": 4,
-        "phase_ratios": 2,
-        "sagittal_plane_state": 3,
-    }
-    configured_terms = tuple(
-        name for name in policy.__dict__ if name in term_dimensions and getattr(policy, name) is not None
+    contract = symm_quadruped.SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT
+    configured_terms = tuple(name for name, value in policy.__dict__.items() if isinstance(value, ObservationTermCfg))
+
+    assert contract.version == "hardware_proprio_history_64d_v1"
+    assert contract.history_packing == "term_major_oldest_to_newest_flattened"
+    assert contract.instantaneous_frame_dim == 64
+    assert configured_terms == contract.term_order
+    assert sum(getattr(contract.dimensions, name) for name in configured_terms) == 64
+    assert policy.history_length * contract.instantaneous_frame_dim == 1920
+    assert contract.slices.projected_gravity == slice(0, 3)
+    assert contract.slices.velocity_command == slice(3, 6)
+    assert contract.slices.joint_position == slice(6, 18)
+    assert contract.slices.joint_velocity == slice(18, 30)
+    assert contract.slices.previous_action == slice(30, 42)
+    assert contract.slices.second_previous_action == slice(42, 54)
+    assert contract.slices.gait_period == slice(54, 55)
+    assert contract.slices.duty_factor == slice(55, 56)
+    assert contract.slices.foot_phase_sin == slice(56, 60)
+    assert contract.slices.foot_phase_cos == slice(60, 64)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_policy_history_pack_unpack_round_trip_and_latest_frame(dtype):
+    frames = torch.arange(2 * 3 * 5 * 64, dtype=dtype).reshape(2, 3, 5, 64)
+    contract = symm_quadruped.SYMM_QUADRUPED_POLICY_OBSERVATION_CONTRACT
+
+    packed = symm_quadruped.pack_term_major_policy_history(frames)
+    manually_packed = torch.cat(
+        [frames[..., getattr(contract.slices, name)].reshape(2, 3, -1) for name in contract.term_order],
+        dim=-1,
     )
 
-    assert configured_terms == tuple(term_dimensions)
-    assert sum(term_dimensions[name] for name in configured_terms) == symm_quadruped.SYMM_QUADRUPED_POLICY_OBS_DIM
+    assert packed.shape == (2, 3, 5 * 64)
+    assert packed.dtype == dtype
+    assert torch.equal(packed, manually_packed)
+    assert symm_quadruped.infer_policy_history_length(packed) == 5
+    assert torch.equal(symm_quadruped.unpack_term_major_policy_history(packed), frames)
+    assert torch.equal(symm_quadruped.latest_policy_frame(packed), frames[..., -1, :])
+    assert torch.equal(symm_quadruped.latest_policy_frame(frames[..., -1, :]), frames[..., -1, :])
+
+
+@pytest.mark.parametrize("width", [0, 1, 63, 65, 1919, 1921])
+def test_policy_history_rejects_invalid_flattened_width(width):
+    with pytest.raises(ValueError, match="positive multiple of 64"):
+        symm_quadruped.infer_policy_history_length(torch.zeros(2, width))
+
+
+def test_native_history_reset_clears_only_selected_environments():
+    history = CircularBuffer(max_len=3, batch_size=2, device="cpu")
+    history.append(torch.tensor([[1.0], [2.0]]))
+    history.append(torch.tensor([[3.0], [4.0]]))
+    preserved = history.buffer[0].clone()
+
+    history.reset(batch_ids=[1])
+
+    assert torch.equal(history.buffer[0], preserved)
+    assert torch.equal(history.buffer[1], torch.zeros(3, 1))
+
+
+def test_action_manager_exposes_previous_and_second_previous_action_values():
+    class _ActionTerm:
+        action_dim = 12
+
+        def process_actions(self, actions):
+            self.processed_actions = actions.clone()
+
+        def reset(self, env_ids=None):
+            self.reset_env_ids = env_ids
+
+    manager = object.__new__(ActionManager)
+    manager._resolve_terms_handle = None
+    manager._env = SimpleNamespace(num_envs=2, device="cpu")
+    manager._terms = {"joint_pos": _ActionTerm()}
+    manager._action = torch.zeros(2, 12)
+    manager._prev_action = torch.zeros(2, 12)
+    env = SimpleNamespace(action_manager=manager)
+    actions = [torch.full((2, 12), value) for value in (1.0, 2.0, 3.0)]
+
+    for index, action in enumerate(actions):
+        manager.process_action(action)
+        expected_second_previous = torch.zeros_like(action) if index == 0 else actions[index - 1]
+        assert torch.equal(base_mdp.last_action(env), action)
+        assert torch.equal(symm_quadruped.second_previous_action(env), expected_second_previous)
+
+    manager.reset(env_ids=[0])
+    assert torch.equal(manager.action[0], torch.zeros(12))
+    assert torch.equal(manager.prev_action[0], torch.zeros(12))
+    assert torch.equal(manager.action[1], actions[-1][1])
+    assert torch.equal(manager.prev_action[1], actions[-2][1])
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_dimensionless_gait_period_uses_midpoint_characteristic_length(dtype):
+    period = torch.tensor([0.45, 0.30], dtype=dtype)
+
+    period_star = symm_quadruped.compute_dimensionless_gait_period(period, (0.35, 0.45))
+
+    expected = period * math.sqrt(9.81 / 0.40)
+    assert period_star.dtype == dtype
+    assert period_star.device == period.device
+    assert torch.allclose(period_star, expected)
+
+
+@pytest.mark.parametrize(
+    ("period", "height_range"),
+    [
+        (torch.tensor([0.0]), (0.35, 0.45)),
+        (torch.tensor([float("nan")]), (0.35, 0.45)),
+        (torch.tensor([0.45]), (0.0, 0.45)),
+        (torch.tensor([0.45]), (0.45, 0.35)),
+        (torch.tensor([0.45]), (0.35, float("inf"))),
+    ],
+)
+def test_dimensionless_gait_period_rejects_invalid_inputs(period, height_range):
+    with pytest.raises(ValueError):
+        symm_quadruped.compute_dimensionless_gait_period(period, height_range)
+
+
+def test_period_and_duty_observation_terms_preserve_shape_dtype_and_device():
+    command = SimpleNamespace(
+        gait_periods=torch.tensor([0.45, 0.30], dtype=torch.float64),
+        duty_factors=torch.tensor([0.45, 0.60], dtype=torch.float64),
+        cfg=SimpleNamespace(base_height_range=(0.35, 0.45)),
+    )
+    env = SimpleNamespace(
+        num_envs=2,
+        command_manager=SimpleNamespace(get_term=lambda _: command),
+    )
+
+    period = symm_quadruped.dimensionless_gait_period(env, command_name="base_velocity")
+    duty = symm_quadruped.duty_factor(env, command_name="base_velocity")
+
+    assert period.shape == duty.shape == (2, 1)
+    assert period.dtype == duty.dtype == torch.float64
+    assert period.device == duty.device == command.gait_periods.device
+    assert torch.equal(duty[:, 0], command.duty_factors)
 
 
 def test_sagittal_plane_state_exposes_lateral_offset_and_wrapped_heading():
@@ -689,9 +815,9 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     assert env_cfg.rewards.straight_line_motion.params["command_name"] == "base_velocity"
     assert env_cfg.rewards.straight_line_motion.params["min_base_height"] == 0.35
     assert env_cfg.rewards.straight_line_motion.params["support_loss_weight"] == 0.25
-    assert env_cfg.rewards.straight_line_motion.params["lateral_position_scale"] == 0.35
-    assert env_cfg.rewards.straight_line_motion.params["heading_scale"] == 0.35
-    assert env_cfg.rewards.straight_line_motion.params["pose_weight"] == 0.30
+    assert "lateral_position_scale" not in env_cfg.rewards.straight_line_motion.params
+    assert "heading_scale" not in env_cfg.rewards.straight_line_motion.params
+    assert env_cfg.rewards.straight_line_motion.params["pose_weight"] == 0.0
     assert env_cfg.rewards.straight_line_motion.params["pitch_scale"] == 0.50
     assert env_cfg.rewards.termination_penalty.func is base_mdp.is_terminated
     assert env_cfg.rewards.termination_penalty.weight == -200.0
@@ -1345,28 +1471,25 @@ def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost
         heading_scale=0.50,
         lateral_velocity_scale=0.25,
         yaw_rate_scale=0.25,
-        pose_weight=0.10,
+        pose_weight=0.0,
         roll_scale=0.25,
         pitch_scale=0.35,
         min_base_height=0.35,
         height_scale=0.10,
     )
 
-    assert torch.equal(reward[:2], torch.full((2,), 1.55))
-    assert 0.50 < reward[2] < 0.60
+    assert torch.allclose(reward[:2], torch.full((2,), 1.45))
+    assert 0.40 < reward[2] < 0.50
     assert reward[3] < reward[0] - 0.20
     assert reward[4] < reward[0] - 0.20
     assert torch.all(reward >= -0.25)
-    assert torch.all(reward <= 1.55)
+    assert torch.all(reward <= 1.45)
     assert set(env._straight_line_motion_diagnostics) == {
         "forward_score",
         "lateral_velocity_score",
         "yaw_rate_score",
         "roll_score",
         "straight_score",
-        "lateral_position_score",
-        "heading_score",
-        "pose_score",
         "posture_score",
         "support_loss",
         "reward",
@@ -1375,13 +1498,13 @@ def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost
     assert all(not value.requires_grad for value in env._straight_line_motion_diagnostics.values())
 
 
-def test_straight_line_motion_reward_penalizes_world_lateral_position_and_heading():
+def test_straight_line_motion_reward_ignores_world_lateral_position_and_heading():
     scene = _Scene()
     scene.env_origins = torch.zeros(2, 3)
     scene["robot"] = SimpleNamespace(
         data=SimpleNamespace(
             root_pos_w=_tensor_data(torch.tensor([[0.0, 0.0, 0.4], [0.0, 20.0, 0.4]])),
-            root_quat_w=_tensor_data(torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]])),
+            root_quat_w=_tensor_data(torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 0.0]])),
             heading_w=_tensor_data(torch.tensor([0.0, math.pi])),
             root_lin_vel_b=_tensor_data(torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])),
             root_ang_vel_b=_tensor_data(torch.zeros(2, 3)),
@@ -1392,7 +1515,7 @@ def test_straight_line_motion_reward_penalizes_world_lateral_position_and_headin
 
     reward = symm_quadruped.straight_line_motion_reward(env, command_name="base_velocity")
 
-    assert reward[0] > reward[1] + 0.09
+    assert torch.equal(reward[0], reward[1])
 
 
 def test_straight_line_motion_reward_components_are_bounded_and_reusable():
@@ -1427,9 +1550,6 @@ def test_straight_line_motion_reward_components_are_bounded_and_reusable():
         "yaw_rate_score",
         "roll_score",
         "straight_score",
-        "lateral_position_score",
-        "heading_score",
-        "pose_score",
         "posture_score",
         "support_loss",
     }

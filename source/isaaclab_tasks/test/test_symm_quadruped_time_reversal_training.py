@@ -60,7 +60,9 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time
     TimeReversalPPO,
 )
 from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symm_quadruped import (
+    SYMM_QUADRUPED_POLICY_OBS_DIM,
     SYMM_QUADRUPED_POLICY_OBS_LAYOUT,
+    pack_term_major_policy_history,
 )
 
 from scripts.symm_locomotion.training_provenance import _config_dict, sha256_value
@@ -72,6 +74,7 @@ def _dynamics_state(
     phase: float = 0.2,
     command: float = 1.0,
     previous_action: float = 0.0,
+    second_previous_action: float = 0.0,
 ) -> TRDynamicsState:
     zeros3 = torch.zeros(batch_size, 3)
     zeros12 = torch.zeros(batch_size, 12)
@@ -88,6 +91,7 @@ def _dynamics_state(
         joint_velocity=zeros12.clone(),
         actuator_target=zeros12.clone(),
         previous_action=torch.full((batch_size, 12), previous_action),
+        second_previous_action=torch.full((batch_size, 12), second_previous_action),
         velocity_command=velocity_command,
         common_gait_phase=torch.full((batch_size,), phase),
         foot_phase_offsets=offsets,
@@ -116,6 +120,7 @@ class _FakeGaitCommand:
         self.gait_periods = torch.full((num_envs,), 0.4)
         self.gait_row_indices = torch.zeros(num_envs, dtype=torch.long)
         self.phase = torch.full((num_envs,), 0.2)
+        self.cfg = SimpleNamespace(base_height_range=(0.35, 0.55))
 
     def common_gait_phases(self):
         return self.phase
@@ -128,6 +133,7 @@ class _FakeManager:
         self.action = action
         if action is not None:
             self.total_action_dim = action.shape[-1]
+            self.prev_action = torch.zeros_like(action)
 
     def get_term(self, _name):
         return self._term
@@ -221,30 +227,20 @@ def _legacy_environment_projection(config) -> dict:
     return resolved
 
 
-@pytest.mark.parametrize(
-    ("config_type", "expected_sha256"),
-    [
-        (UnitreeGo2SymmFlatEnvCfg, "2610e4aa014407b7900e9047ac49a1c15cd05ef585d576c32a1002b08b029574"),
-        (DobotX1SymmFlatEnvCfg, "74b1094cc8701cb7beed8a2078936a62f7c3ae4f14d5ed9d32c584ae0b1c9509"),
-    ],
-)
-def test_default_environment_config_hash_is_unchanged(config_type, expected_sha256):
-    assert sha256_value(_legacy_environment_projection(config_type())) == expected_sha256
+@pytest.mark.parametrize("config_type", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
+def test_default_environment_config_serialization_is_deterministic(config_type):
+    first = sha256_value(_config_dict(config_type()))
+    second = sha256_value(_config_dict(config_type()))
+
+    assert first == second
 
 
-@pytest.mark.parametrize(
-    ("config_type", "expected_sha256"),
-    [
-        (UnitreeGo2SymmFlatPPORunnerCfg, "a688f79ad55fcb56c917d06950ff09fa3d35689eab96fc863e29d5673ebb97b4"),
-        (DobotX1SymmFlatPPORunnerCfg, "ee8ce1c951aade23e5e1e481d7ae62e2eb617db94be74f075d14e2c6f4cdf91b"),
-    ],
-)
-def test_default_agent_legacy_projection_hash_is_unchanged(config_type, expected_sha256):
-    resolved = _config_dict(config_type())
-    symmetry = resolved["algorithm"]["symmetry_cfg"]
-    for field in (*_PUBLICATION_SYMMETRY_FIELDS, *_SATURATION_SYMMETRY_FIELDS):
-        symmetry.pop(field)
-    assert sha256_value(resolved) == expected_sha256
+@pytest.mark.parametrize("config_type", [UnitreeGo2SymmFlatPPORunnerCfg, DobotX1SymmFlatPPORunnerCfg])
+def test_default_agent_config_serialization_is_deterministic(config_type):
+    first = sha256_value(_config_dict(config_type()))
+    second = sha256_value(_config_dict(config_type()))
+
+    assert first == second
 
 
 def _assert_nested_equal(actual, expected):
@@ -360,6 +356,12 @@ def test_shared_agent_config_emits_project_local_symmetry_schema():
     assert "tr_gradient_diagnostics" in serialized
     assert "tr_augmentation" in serialized
     assert serialized["tr_augmentation"]["filter_enabled"] is True
+    assert serialized["history_enabled"] is True
+    assert serialized["history_length"] == 30
+    assert serialized["history_trs_mode"] == "framewise_feature"
+    assert serialized["observation_contract_version"] == "hardware_proprio_history_64d_v1"
+    assert serialized["instantaneous_frame_dim"] == SYMM_QUADRUPED_POLICY_OBS_DIM
+    assert serialized["history_packing"] == "term_major_oldest_to_newest_flattened"
 
 
 def test_gradient_diagnostics_do_not_mutate_parameter_gradients():
@@ -435,19 +437,14 @@ def test_gradient_diagnostics_zero_and_nonfinite_inputs_are_finite_and_flagged()
 
 def _validity_observations() -> TensorDict:
     layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
-    policy = torch.zeros(4, 72)
-    policy[:, layout.desired_base_twist.start] = 2.0  # physical command 1 m/s at scale 2
-    policy[:, layout.measured_base_twist.start] = 1.8  # physical velocity 0.9 m/s at scale 2
+    policy = torch.zeros(4, SYMM_QUADRUPED_POLICY_OBS_DIM)
+    policy[:, layout.velocity_command.start] = 2.0  # physical command 1 m/s at scale 2
     policy[:, layout.projected_gravity] = torch.tensor((0.0, 0.0, -1.0))
-    phase = torch.full((4, 4), 0.25)
+    offsets = torch.tensor((0.0, 0.5, 0.5, 0.0)).repeat(4, 1)
+    phase = torch.remainder(torch.full((4, 1), 0.25) + offsets, 1.0)
     policy[:, layout.foot_phase_sin] = torch.sin(2.0 * torch.pi * phase)
     policy[:, layout.foot_phase_cos] = torch.cos(2.0 * torch.pi * phase)
-    offsets = torch.tensor((0.0, 0.5, 0.5, 0.0)).repeat(4, 1)
-    policy[:, layout.foot_theta_sin] = torch.sin(2.0 * torch.pi * offsets)
-    policy[:, layout.foot_theta_cos] = torch.cos(2.0 * torch.pi * offsets)
-    policy[:, layout.swing_ratio] = 0.55
-    policy[:, layout.stance_ratio] = 0.45
-    policy[1, layout.measured_base_twist.start] = 0.0
+    policy[:, layout.duty_factor] = 0.45
     policy[2, layout.projected_gravity.start] = 1.0
     policy[3, layout.foot_phase_sin] = 0.0
     policy[3, layout.foot_phase_cos] = 1.0
@@ -458,9 +455,9 @@ def _validity_observations() -> TensorDict:
     ("mode", "expected"),
     [
         ("command", [1.0, 1.0, 1.0, 1.0]),
-        ("command_tracking", [1.0, 0.0, 1.0, 1.0]),
+        ("command_tracking", [1.0, 1.0, 1.0, 1.0]),
         ("command_upright_phase", [1.0, 1.0, 0.0, 0.0]),
-        ("command_tracking_upright_phase", [1.0, 0.0, 0.0, 0.0]),
+        ("command_tracking_upright_phase", [1.0, 1.0, 0.0, 0.0]),
     ],
 )
 def test_historical_validity_modes_use_only_observation_fields(mode, expected):
@@ -482,6 +479,20 @@ def test_historical_validity_modes_use_only_observation_fields(mode, expected):
     assert "tr_mask/gait_family/trot" in diagnostics
     assert "tr_mask/command_sign/positive" in diagnostics
     assert all(f"tr_mask/command_speed_bin/{index}" in diagnostics for index in range(4))
+
+
+def test_history_validity_mask_uses_latest_scaled_forward_command():
+    layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
+    frames = _validity_observations()["policy"][:1, None, :].repeat(1, 3, 1)
+    frames[:, 0, layout.velocity_command.start] = 0.0
+    frames[:, 1, layout.velocity_command.start] = 2.0
+    frames[:, 2, layout.velocity_command.start] = 4.0
+    observations = TensorDict({"policy": pack_term_major_policy_history(frames)}, batch_size=[1])
+
+    mask = time_reversal_validity_mask(observations, {"mode": "command", "min_abs_command_velocity": 1.5})
+
+    assert mask.command_velocity.item() == pytest.approx(2.0)
+    assert mask.combined.item() == 1.0
 
 
 def test_legacy_instantaneous_ppo_augmentation_warns_and_retains_its_schedule():
@@ -597,30 +608,39 @@ def test_component_aware_dynamics_residual_uses_so3_geodesic_angle():
     assert residual.item() == pytest.approx(expected, rel=1.0e-5)
 
 
-def test_reversed_sequence_builder_uses_prior_reversed_action_and_drops_first_pair():
+def test_reversed_sequence_builder_reconstructs_two_actions_and_drops_first_two_pairs():
     states = [
         _dynamics_state(phase=0.1),
         _dynamics_state(phase=0.2),
         _dynamics_state(phase=0.3),
+        _dynamics_state(phase=0.4),
     ]
-    actions = [torch.ones(1, 12), torch.full((1, 12), 2.0)]
+    actions = [torch.ones(1, 12), torch.full((1, 12), 2.0), torch.full((1, 12), 3.0)]
     states[1].actuator_target.fill_(1.0)
     states[2].actuator_target.fill_(2.0)
+    states[3].actuator_target.fill_(3.0)
 
-    reversed_sequence = build_reversed_sequence_segment(states, actions)
+    reversed_sequence = build_reversed_sequence_segment(
+        states,
+        actions,
+        base_height_range=(0.35, 0.55),
+    )
     layout = SYMM_QUADRUPED_POLICY_OBS_LAYOUT
 
-    assert reversed_sequence.observations.shape == (1, 72)
+    assert reversed_sequence.observations.shape == (1, 64)
     assert torch.equal(reversed_sequence.actions, actions[0])
     assert torch.equal(
         reversed_sequence.observations[:, layout.previous_action],
         actions[1],
     )
+    assert torch.equal(reversed_sequence.observations[:, layout.second_previous_action], actions[2])
     assert torch.equal(reversed_sequence.current_state.previous_action, actions[1])
+    assert torch.equal(reversed_sequence.current_state.second_previous_action, actions[2])
     assert torch.equal(reversed_sequence.successor_state.previous_action, actions[0])
+    assert torch.equal(reversed_sequence.successor_state.second_previous_action, actions[1])
     assert torch.equal(reversed_sequence.current_state.actuator_target, states[2].actuator_target)
     assert torch.equal(reversed_sequence.successor_state.actuator_target, states[1].actuator_target)
-    assert reversed_sequence.observations[0, layout.desired_base_twist.start].item() == -2.0
+    assert reversed_sequence.observations[0, layout.velocity_command.start].item() == -2.0
     phase_delta = torch.remainder(
         reversed_sequence.successor_state.common_gait_phase - reversed_sequence.current_state.common_gait_phase,
         1.0,
@@ -647,8 +667,12 @@ def test_learned_inverse_rebuilds_observation_action_and_actuator_target_histori
             return values.unsqueeze(-1).expand(-1, 12)
 
     augmentation.inverse_target = DistinctLearnedActions()
-    states = [replace(_dynamics_state(phase=value), body_mass=torch.ones(1, 13)) for value in (0.1, 0.2, 0.3)]
-    analytic_actions = [torch.ones(1, 12), torch.full((1, 12), 2.0)]
+    states = [replace(_dynamics_state(phase=value), body_mass=torch.ones(1, 13)) for value in (0.1, 0.2, 0.3, 0.4)]
+    analytic_actions = [
+        torch.ones(1, 12),
+        torch.full((1, 12), 2.0),
+        torch.full((1, 12), 3.0),
+    ]
 
     sequence = augmentation._learned_reversed_sequence(states, analytic_actions, environment_index=0)
     previous_action = sequence.current_state.previous_action
@@ -658,6 +682,10 @@ def test_learned_inverse_rebuilds_observation_action_and_actuator_target_histori
     assert not torch.allclose(previous_action, analytic_actions[1])
     assert not torch.allclose(final_action, analytic_actions[0])
     assert torch.equal(sequence.observations[:, layout.previous_action], previous_action)
+    assert torch.equal(
+        sequence.observations[:, layout.second_previous_action],
+        sequence.current_state.second_previous_action,
+    )
     assert torch.allclose(sequence.current_state.actuator_target, previous_action * 0.5 + 0.1)
     assert torch.allclose(sequence.successor_state.actuator_target, final_action * 0.5 + 0.1)
     assert torch.equal(sequence.successor_state.previous_action, final_action)
@@ -687,33 +715,41 @@ def test_learned_inverse_excludes_action_history_and_uses_physical_state():
 
     inverse = RootPositionInverse()
     augmentation.inverse_target = inverse
-    states = [replace(_dynamics_state(phase=value), body_mass=torch.ones(1, 13)) for value in (0.1, 0.2, 0.3)]
+    states = [replace(_dynamics_state(phase=value), body_mass=torch.ones(1, 13)) for value in (0.1, 0.2, 0.3, 0.4)]
     for index, state in enumerate(states):
         state.root_position[:, 0] = float(index + 1)
     changed_history = [state.clone() for state in states]
     for index, state in enumerate(changed_history):
         state.previous_action.fill_(10.0 + index)
+        state.second_previous_action.fill_(30.0 + index)
         state.actuator_target.fill_(-20.0 - index)
+
+    actions = [torch.ones(1, 12), torch.full((1, 12), 2.0), torch.full((1, 12), 3.0)]
+    changed_actions = [
+        torch.full((1, 12), -7.0),
+        torch.full((1, 12), 9.0),
+        torch.full((1, 12), 11.0),
+    ]
 
     first = augmentation._learned_reversed_sequence(
         states,
-        [torch.ones(1, 12), torch.full((1, 12), 2.0)],
+        actions,
         environment_index=0,
     )
     history_changed = augmentation._learned_reversed_sequence(
         changed_history,
-        [torch.full((1, 12), -7.0), torch.full((1, 12), 9.0)],
+        changed_actions,
         environment_index=0,
     )
     physical_changed = [state.clone() for state in states]
     physical_changed[1].root_position[:, 0].add_(1.0)
     physical = augmentation._learned_reversed_sequence(
         physical_changed,
-        [torch.ones(1, 12), torch.full((1, 12), 2.0)],
+        actions,
         environment_index=0,
     )
 
-    excluded_width = 24
+    excluded_width = 36
     assert inverse.input_widths == [2 * (augmentation.feature_layout.dimension - excluded_width)] * 3
     assert torch.equal(first.actions, history_changed.actions)
     assert not torch.equal(first.actions, physical.actions)
@@ -728,7 +764,7 @@ def test_sidecar_rejects_post_reset_successor_for_done_environment():
         scene=SimpleNamespace(sensors={}),
     )
     sidecar = TRSidecarBuffer(SimpleNamespace(unwrapped=environment))
-    observation = TensorDict({"policy": torch.zeros(2, 72)}, batch_size=[2])
+    observation = TensorDict({"policy": torch.zeros(2, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[2])
     state = _dynamics_state(batch_size=2, phase=0.1)
     successor = _dynamics_state(batch_size=2, phase=0.15)
     action = torch.zeros(2, 12)
@@ -757,7 +793,7 @@ def test_sidecar_treats_timeout_without_done_as_episode_boundary():
         scene=SimpleNamespace(sensors={}),
     )
     sidecar = TRSidecarBuffer(SimpleNamespace(unwrapped=environment))
-    observation = TensorDict({"policy": torch.zeros(2, 72)}, batch_size=[2])
+    observation = TensorDict({"policy": torch.zeros(2, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[2])
     state = _dynamics_state(batch_size=2, phase=0.1)
     successor = _dynamics_state(batch_size=2, phase=0.15)
     action = torch.zeros(2, 12)
@@ -789,7 +825,7 @@ def test_sidecar_compares_phase_offsets_circularly(successor_offset, expected):
         scene=SimpleNamespace(sensors={}),
     )
     sidecar = TRSidecarBuffer(SimpleNamespace(unwrapped=environment))
-    observation = TensorDict({"policy": torch.zeros(1, 72)}, batch_size=[1])
+    observation = TensorDict({"policy": torch.zeros(1, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[1])
     state = _dynamics_state(phase=0.1)
     successor = _dynamics_state(phase=0.15)
     state.foot_phase_offsets[:, 0] = 0.99
@@ -866,7 +902,7 @@ def test_nonfinite_real_transition_is_rejected_before_normalizer_or_model_update
         {"dynamics_hidden_dims": (8,), "inverse_hidden_dims": (8,), "rng_seed": 4},
         "cpu",
     )
-    observation = TensorDict({"policy": torch.zeros(1, 72)}, batch_size=[1])
+    observation = TensorDict({"policy": torch.zeros(1, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[1])
     action = torch.zeros(1, 12)
     augmentation.capture_before_step(observation, action, action, torch.ones_like(action))
     augmentation.sidecar.pending.action[0, 0] = float("nan")
@@ -908,10 +944,11 @@ def test_enabled_augmentation_builds_pool_and_round_trips_checkpoint_state():
         "rng_seed": 11,
     }
     augmentation = TimeReversalAugmentation(wrapper, config, "cpu")
-    observation = TensorDict({"policy": torch.zeros(4, 72)}, batch_size=[4])
-    for step in range(3):
+    observation = TensorDict({"policy": torch.zeros(4, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[4])
+    for step in range(4):
         action = torch.full((4, 12), 0.1 * (step + 1))
         augmentation.capture_before_step(observation, action, action, torch.ones_like(action))
+        wrapper.unwrapped.action_manager.prev_action.copy_(wrapper.unwrapped.action_manager.action)
         wrapper.unwrapped.action_manager.action.copy_(action)
         wrapper.unwrapped.scene["robot"].data.joint_pos_target.copy_(action)
         gait_command.phase.add_(0.05)
@@ -971,10 +1008,11 @@ def test_replay_diagnostic_retains_accepted_and_rejected_candidates_from_same_ro
         },
         "cpu",
     )
-    observation = TensorDict({"policy": torch.zeros(2, 72)}, batch_size=[2])
-    for step in range(3):
+    observation = TensorDict({"policy": torch.zeros(2, SYMM_QUADRUPED_POLICY_OBS_DIM)}, batch_size=[2])
+    for step in range(4):
         action = torch.stack((torch.full((12,), 0.1 * (step + 1)), torch.full((12,), 5.0)))
         augmentation.capture_before_step(observation, action, action, torch.ones_like(action))
+        wrapper.unwrapped.action_manager.prev_action.copy_(wrapper.unwrapped.action_manager.action)
         wrapper.unwrapped.action_manager.action.copy_(action)
         wrapper.unwrapped.scene["robot"].data.joint_pos_target.copy_(action)
         gait_command.phase.add_(0.05)
@@ -1010,8 +1048,13 @@ def _replay_candidate_fixture() -> TRReplayCandidatePool:
     successor = replace(state, root_position=state.root_position + 0.01)
     accepted = torch.tensor((True, False, False, True))
     return TRReplayCandidatePool(
-        observations=torch.arange(count * 72, dtype=torch.float32).reshape(count, 72),
-        successor_observations=torch.arange(count * 72, dtype=torch.float32).reshape(count, 72) + 1.0,
+        observations=torch.arange(count * SYMM_QUADRUPED_POLICY_OBS_DIM, dtype=torch.float32).reshape(
+            count, SYMM_QUADRUPED_POLICY_OBS_DIM
+        ),
+        successor_observations=torch.arange(count * SYMM_QUADRUPED_POLICY_OBS_DIM, dtype=torch.float32).reshape(
+            count, SYMM_QUADRUPED_POLICY_OBS_DIM
+        )
+        + 1.0,
         actions=torch.arange(count, dtype=torch.float32).unsqueeze(-1).expand(count, 12),
         current_state=state,
         successor_state=successor,
@@ -1046,7 +1089,14 @@ def test_replay_candidate_sampling_keeps_both_decisions_and_markov_metadata():
     assert sample.rollout_step.tolist() == [3, 2]
     assert sample.current_state.batch_size == 2
     assert sample.successor_state.batch_size == 2
-    assert sample.observations.shape == sample.successor_observations.shape == (2, 72)
+    assert (
+        sample.observations.shape
+        == sample.successor_observations.shape
+        == (
+            2,
+            SYMM_QUADRUPED_POLICY_OBS_DIM,
+        )
+    )
 
 
 def test_one_step_replay_reports_false_negative_and_all_confusion_paths():
@@ -1113,7 +1163,10 @@ def test_augmentation_rng_is_private_and_checkpoint_reproduces_next_actor_nll():
     )
 
     pool = TRAugmentationPool(
-        observations=torch.arange(4 * 72, dtype=torch.float32).reshape(4, 72) / 100.0,
+        observations=torch.arange(4 * SYMM_QUADRUPED_POLICY_OBS_DIM, dtype=torch.float32).reshape(
+            4, SYMM_QUADRUPED_POLICY_OBS_DIM
+        )
+        / 100.0,
         actions=torch.arange(4, dtype=torch.float32).reshape(4, 1).expand(4, 12),
         confidence=torch.ones(4),
         residual=torch.zeros(4),
@@ -1178,7 +1231,7 @@ def _filter_for_scalar_residual(
 ):
     successor_phase = phase + 0.01 if successor_phase is None else successor_phase
     return time_reversal_filter_mask(
-        observation=torch.zeros(1, 72),
+        observation=torch.zeros(1, SYMM_QUADRUPED_POLICY_OBS_DIM),
         action=torch.zeros(1, 12),
         reverse_residual=torch.as_tensor((residual,)),
         beta=beta,

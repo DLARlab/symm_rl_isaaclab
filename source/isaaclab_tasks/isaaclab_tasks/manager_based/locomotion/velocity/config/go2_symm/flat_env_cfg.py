@@ -159,7 +159,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_go2_symm_observations(self) -> None:
-        """Configure the shared 72D Go2 policy observation."""
+        """Configure the shared 64D Go2 policy observation and native history."""
         configure_policy_observations(self, go2_symm_mdp, _GO2_LEGGED_GYM_JOINT_ORDER)
 
     def _configure_go2_symm_rewards(self) -> None:

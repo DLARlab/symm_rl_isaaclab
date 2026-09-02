@@ -178,51 +178,68 @@ def make_gait_velocity_command(
 
 
 def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str]) -> None:
-    """Configure the shared 72D symmetric quadruped policy observation."""
+    """Configure the shared 64D hardware-oriented policy frame and native history."""
     policy = env_cfg.observations.policy
     ordered_joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
 
-    policy.base_lin_vel = ObsTerm(
-        func=base_mdp.base_lin_vel,
-        noise=Unoise(n_min=-0.1, n_max=0.1),
-        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.measured_base_twist[:3],
-    )
-    policy.base_ang_vel = ObsTerm(
-        func=base_mdp.base_ang_vel,
-        noise=Unoise(n_min=-0.2, n_max=0.2),
-        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.measured_base_twist[3:],
-    )
+    # Remove simulator-only and legacy policy terms while retaining their
+    # internal gait-generator and diagnostic implementations.
+    policy.base_lin_vel = None
+    policy.base_ang_vel = None
+    policy.velocity_commands = None
+    policy.joint_pos = None
+    policy.joint_vel = None
+    policy.actions = None
+    policy.height_scan = None
+    policy.foot_theta_sin = None
+    policy.foot_theta_cos = None
+    policy.phase_ratios = None
+    policy.sagittal_plane_state = None
+
     policy.projected_gravity = ObsTerm(
         func=base_mdp.projected_gravity,
         noise=Unoise(n_min=-0.05, n_max=0.05),
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.projected_gravity,
     )
-    policy.velocity_commands = ObsTerm(
-        func=mdp_module.desired_base_twist,
+    policy.velocity_command = ObsTerm(
+        func=base_mdp.generated_commands,
         params={"command_name": "base_velocity"},
-        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.desired_base_twist,
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.velocity_command,
     )
-    policy.joint_pos = ObsTerm(
+    policy.joint_position = ObsTerm(
         func=base_mdp.joint_pos_rel,
         noise=Unoise(n_min=-0.01, n_max=0.01),
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.joint_position,
         params={"asset_cfg": ordered_joint_cfg},
     )
-    policy.joint_vel = ObsTerm(
+    policy.joint_velocity = ObsTerm(
         func=base_mdp.joint_vel_rel,
         noise=Unoise(n_min=-1.5, n_max=1.5),
-        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.joint_velocity[0],
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.joint_velocity,
         params={"asset_cfg": ordered_joint_cfg},
     )
-    policy.actions = ObsTerm(func=base_mdp.last_action)
-    policy.height_scan = None
+    policy.previous_action = ObsTerm(
+        func=base_mdp.last_action,
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.previous_action,
+    )
+    policy.second_previous_action = ObsTerm(
+        func=mdp_module.second_previous_action,
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.second_previous_action,
+    )
+    policy.gait_period = ObsTerm(
+        func=mdp_module.dimensionless_gait_period,
+        params={"command_name": "base_velocity"},
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.gait_period,
+    )
+    policy.duty_factor = ObsTerm(
+        func=mdp_module.duty_factor,
+        params={"command_name": "base_velocity"},
+        scale=mdp_module.SYMM_QUADRUPED_POLICY_OBS_SCALE.duty_factor,
+    )
     policy.foot_phase_sin = ObsTerm(func=mdp_module.foot_phase_sin, params={"command_name": "base_velocity"})
     policy.foot_phase_cos = ObsTerm(func=mdp_module.foot_phase_cos, params={"command_name": "base_velocity"})
-    policy.foot_theta_sin = ObsTerm(func=mdp_module.foot_theta_sin, params={"command_name": "base_velocity"})
-    policy.foot_theta_cos = ObsTerm(func=mdp_module.foot_theta_cos, params={"command_name": "base_velocity"})
-    policy.phase_ratios = ObsTerm(func=mdp_module.phase_ratios, params={"command_name": "base_velocity"})
-    policy.sagittal_plane_state = ObsTerm(
-        func=mdp_module.sagittal_plane_state,
-        params={"lateral_position_scale": 0.5},
-    )
+    policy.history_length = 30
+    policy.flatten_history_dim = True
 
 
 def configure_rewards(
@@ -335,11 +352,9 @@ def configure_rewards(
         params={
             "command_name": "base_velocity",
             "forward_velocity_scale": 0.35,
-            "lateral_position_scale": 0.35,
-            "heading_scale": 0.35,
             "lateral_velocity_scale": 0.20,
             "yaw_rate_scale": 0.20,
-            "pose_weight": 0.30,
+            "pose_weight": 0.0,
             "roll_scale": 0.25,
             "pitch_scale": pitch_scale,
             "min_base_height": base_height_range[0],
@@ -348,8 +363,6 @@ def configure_rewards(
             "forward_weight": 1.0,
             "straight_weight": 0.30,
             "posture_weight": 0.15,
-            "lateral_position_deadband": 0.05,
-            "heading_deadband": 0.05,
         },
     )
     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
