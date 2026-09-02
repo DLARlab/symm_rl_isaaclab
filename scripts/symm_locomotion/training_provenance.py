@@ -33,6 +33,31 @@ INITIALIZATION_RELATIVE_PATH = Path("provenance") / "initialization.json"
 RESOLVED_COMMAND_RELATIVE_PATH = Path("provenance") / "resolved_command.json"
 COHORT_METADATA_RELATIVE_PATH = Path("provenance") / "cohort_metadata.json"
 POLICY_CONTRACT_RELATIVE_PATH = Path("policy_contract.json")
+TR_CONSISTENCY_MODES = {"transition_aligned_sequence", "framewise_feature_approx", "none"}
+TR_CONSISTENCY_MAPPING_VERSION = "transition_aligned_causal_sequence_v1"
+POLICY_ACTION_HISTORY_LENGTH = 2
+TR_SEQUENCE_ACTOR_ALIGNMENT = "edge_t_to_reverse_state_t_plus_1"
+TR_SEQUENCE_VALUE_ALIGNMENT = "state_t_plus_1"
+_DIRECT_CURRICULUM_CONFIG_FIELDS = {
+    "mode": "command_curriculum_mode",
+    "velocity_bin_count": "curriculum_velocity_bin_count",
+    "ewma_coefficient": "curriculum_ewma_coefficient",
+    "unlock_threshold": "curriculum_unlock_threshold",
+    "initial_max_abs_speed": "curriculum_initial_max_abs_speed",
+    "min_visits": "curriculum_min_visits",
+    "current_cell_increment": "curriculum_current_cell_increment",
+    "neighbor_increment": "curriculum_neighbor_increment",
+    "exploration_floor": "curriculum_exploration_floor",
+    "maximum_weight": "curriculum_maximum_weight",
+    "locked_cell_weight": "curriculum_locked_cell_weight",
+    "seed": "curriculum_seed",
+}
+_DIRECT_TR_TREATMENT_CONFIG_PATHS = {
+    "mirror_loss_coeff": "algorithm.symmetry_cfg.mirror_loss_coeff",
+    "value_loss_coeff": "algorithm.symmetry_cfg.value_loss_coeff",
+    "use_data_augmentation": "algorithm.symmetry_cfg.use_data_augmentation",
+    "trajectory_augmentation_enabled": "algorithm.symmetry_cfg.tr_augmentation.enabled",
+}
 _STRICT_MATCH_FIELDS = (
     "seed",
     "training_seed",
@@ -240,7 +265,7 @@ def _update_state_hash(digest: Any, value: Any) -> None:
         digest.update(b"\0")
         digest.update(canonical_json(list(tensor.shape)).encode("ascii"))
         digest.update(b"\0")
-        digest.update(tensor.view(torch.uint8).numpy().tobytes(order="C"))
+        digest.update(tensor.reshape(-1).view(torch.uint8).numpy().tobytes(order="C"))
         return
     if np is not None and isinstance(value, np.ndarray):
         array = np.ascontiguousarray(value)
@@ -953,7 +978,93 @@ def _parse_direct_launch_context(value: Mapping[str, Any] | str | None) -> dict[
         raise ValueError("Direct-launch context must be a mapping, JSON object string, or None.")
     if not isinstance(context, dict):
         raise ValueError("--symm_direct_launch_context must contain a JSON object.")
+    schema_version = context.get("schema_version", 1)
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version not in {1, 2}:
+        raise ValueError(f"--symm_direct_launch_context schema_version must be 1 or 2; received {schema_version!r}.")
+    context.setdefault("schema_version", schema_version)
     return context
+
+
+def _validate_direct_launch_context(
+    context: Mapping[str, Any] | None,
+    env_config: Mapping[str, Any],
+    agent_config: Mapping[str, Any],
+) -> None:
+    """Reject launcher metadata contradicted by the resolved Hydra configuration."""
+    if context is None:
+        return
+
+    if context.get("schema_version") == 2:
+        required_sections = {
+            "run_name",
+            "policy_contract",
+            "time_reversal_treatment",
+            "command_curriculum",
+        }
+        missing_sections = sorted(required_sections - set(context))
+        if missing_sections:
+            raise ValueError(f"Direct-launch schema 2 is missing required metadata: {missing_sections}.")
+
+    declared_run_name = context.get("run_name")
+    if declared_run_name is not None:
+        resolved_run_name = agent_config.get("run_name")
+        if not _runtime_values_equal(resolved_run_name, declared_run_name):
+            raise ValueError(
+                "Direct-launch run_name differs from resolved agent configuration: "
+                f"declared {declared_run_name!r}, resolved {resolved_run_name!r}."
+            )
+
+    declared_treatment = context.get("time_reversal_treatment")
+    if declared_treatment is not None:
+        if not isinstance(declared_treatment, Mapping):
+            raise ValueError("Direct-launch time_reversal_treatment must be a mapping.")
+        unexpected = sorted(set(declared_treatment) - set(_DIRECT_TR_TREATMENT_CONFIG_PATHS))
+        if unexpected:
+            raise ValueError(f"Direct-launch time_reversal_treatment has unexpected fields: {unexpected}.")
+        mismatches: dict[str, tuple[Any, Any]] = {}
+        for metadata_name, config_path in _DIRECT_TR_TREATMENT_CONFIG_PATHS.items():
+            if metadata_name not in declared_treatment:
+                continue
+            exists, resolved = _dotted_lookup(agent_config, config_path)
+            declared = declared_treatment[metadata_name]
+            if not exists or not _runtime_values_equal(resolved, declared):
+                mismatches[metadata_name] = (declared, resolved if exists else "<absent>")
+        if mismatches:
+            raise ValueError(
+                "Direct-launch time-reversal treatment differs from resolved configuration; "
+                f"a forwarded Hydra override contradicted launcher-owned metadata: {mismatches!r}."
+            )
+
+    declared_curriculum = context.get("command_curriculum")
+    if declared_curriculum is None:
+        if context.get("schema_version") == 2:
+            raise ValueError("Direct-launch schema 2 requires command_curriculum metadata.")
+        return
+    if not isinstance(declared_curriculum, Mapping):
+        raise ValueError("Direct-launch command_curriculum must be a mapping.")
+    unexpected = sorted(set(declared_curriculum) - set(_DIRECT_CURRICULUM_CONFIG_FIELDS))
+    missing = sorted(set(_DIRECT_CURRICULUM_CONFIG_FIELDS) - set(declared_curriculum))
+    if unexpected or (context.get("schema_version") == 2 and missing):
+        raise ValueError(
+            f"Direct-launch command_curriculum schema fields do not match: missing={missing}, unexpected={unexpected}."
+        )
+
+    command_cfg = _lookup(env_config, "commands", "base_velocity", default={})
+    if not isinstance(command_cfg, Mapping):
+        raise ValueError("Resolved environment base-velocity command configuration must be a mapping.")
+    mismatches: dict[str, tuple[Any, Any]] = {}
+    for metadata_name, config_name in _DIRECT_CURRICULUM_CONFIG_FIELDS.items():
+        if metadata_name not in declared_curriculum:
+            continue
+        resolved = command_cfg.get(config_name)
+        declared = declared_curriculum[metadata_name]
+        if not _runtime_values_equal(resolved, declared):
+            mismatches[metadata_name] = (declared, resolved)
+    if mismatches:
+        raise ValueError(
+            "Direct-launch command curriculum differs from resolved configuration; "
+            f"a forwarded Hydra override contradicted launcher-owned metadata: {mismatches!r}."
+        )
 
 
 def record_resolved_run_metadata(
@@ -987,6 +1098,7 @@ def record_resolved_run_metadata(
     agent_config = _config_dict(agent_cfg)
     git = git_provenance(root)
     direct_context = _parse_direct_launch_context(direct_launch_context)
+    _validate_direct_launch_context(direct_context, env_config, agent_config)
     study_context = _load_context(study_context_path)
     policy_contract = resolve_policy_contract(env_config, agent_config, observation_dimension)
     if policy_contract is not None:
@@ -1096,7 +1208,23 @@ def resolve_policy_contract(
     history_enabled = symmetry.get("history_enabled")
     history_length = symmetry.get("history_length")
     history_packing = symmetry.get("history_packing")
-    history_trs_mode = symmetry.get("history_trs_mode")
+    legacy_history_mode = symmetry.get("history_trs_mode")
+    if legacy_history_mode is not None:
+        legacy_modes = {"framewise_feature": "framewise_feature_approx", "none": "none"}
+        if legacy_history_mode not in legacy_modes:
+            raise ValueError(
+                "history_trs_mode is deprecated and must be 'framewise_feature', 'none', or None; "
+                f"received {legacy_history_mode!r}."
+            )
+        tr_consistency_mode = legacy_modes[legacy_history_mode]
+    else:
+        tr_consistency_mode = symmetry.get("tr_consistency_mode")
+    tr_consistency_mapping_version = symmetry.get("tr_consistency_mapping_version")
+    action_history_length = symmetry.get("action_history_length")
+    candidate_max_age_updates = symmetry.get("candidate_max_age_updates")
+    allowed_policy_version_span = symmetry.get("allowed_policy_version_span")
+    actor_alignment = TR_SEQUENCE_ACTOR_ALIGNMENT
+    value_alignment = TR_SEQUENCE_VALUE_ALIGNMENT
     if isinstance(frame_dimension, bool) or not isinstance(frame_dimension, int) or frame_dimension <= 0:
         raise ValueError(f"instantaneous_frame_dim must be a positive integer; received {frame_dimension!r}.")
     if not isinstance(history_enabled, bool):
@@ -1107,6 +1235,25 @@ def resolve_policy_contract(
         raise ValueError("history_enabled must be true exactly when history_length is positive.")
     if not isinstance(history_packing, str) or not history_packing:
         raise ValueError("history_packing must be a nonempty string.")
+    if tr_consistency_mode not in TR_CONSISTENCY_MODES:
+        raise ValueError(
+            f"tr_consistency_mode must be one of {sorted(TR_CONSISTENCY_MODES)}; received {tr_consistency_mode!r}."
+        )
+    if tr_consistency_mapping_version != TR_CONSISTENCY_MAPPING_VERSION:
+        raise ValueError(
+            "tr_consistency_mapping_version must identify the exact causal mapping: "
+            f"expected {TR_CONSISTENCY_MAPPING_VERSION!r}, received {tr_consistency_mapping_version!r}."
+        )
+    if action_history_length != POLICY_ACTION_HISTORY_LENGTH:
+        raise ValueError(
+            f"action_history_length must be {POLICY_ACTION_HISTORY_LENGTH}; received {action_history_length!r}."
+        )
+    for name, value in (
+        ("candidate_max_age_updates", candidate_max_age_updates),
+        ("allowed_policy_version_span", allowed_policy_version_span),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a nonnegative integer; received {value!r}.")
 
     env_history_length = _lookup(env_config, "observations", "policy", "history_length", default=None)
     if env_history_length != history_length:
@@ -1122,13 +1269,22 @@ def resolve_policy_contract(
             f"expected {expected_width}, received {policy_input_dimension}. "
             f"Use {required_flags} with contract {version_id!r}."
         )
+    sequence_history_length = history_length if history_enabled else 1
     return {
         "observation_contract_version": version_id,
         "instantaneous_frame_dim": frame_dimension,
         "history_enabled": history_enabled,
         "history_length": history_length,
         "history_packing": history_packing,
-        "history_trs_mode": history_trs_mode,
+        "tr_consistency_mode": tr_consistency_mode,
+        "tr_consistency_mapping_version": tr_consistency_mapping_version,
+        "action_history_length": action_history_length,
+        "sequence_history_length": sequence_history_length,
+        "required_sequence_records": sequence_history_length + action_history_length,
+        "candidate_max_age_updates": candidate_max_age_updates,
+        "allowed_policy_version_span": allowed_policy_version_span,
+        "actor_alignment": actor_alignment,
+        "value_alignment": value_alignment,
         "policy_input_dim": policy_input_dimension,
         "gait_phase_mapping_version": symmetry.get("gait_phase_mapping_version"),
         "gait_library_version": symmetry.get("gait_library_version"),

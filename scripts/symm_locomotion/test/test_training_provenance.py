@@ -100,6 +100,52 @@ def _configs(asset: Path) -> tuple[_Config, _Config]:
     return env, agent
 
 
+def _policy_symmetry(history_length: int) -> dict:
+    return {
+        "observation_contract_version": "hardware_proprio_history_64d_v1",
+        "instantaneous_frame_dim": 64,
+        "history_enabled": history_length > 0,
+        "history_length": history_length,
+        "history_packing": "term_major_oldest_to_newest_flattened",
+        "tr_consistency_mode": "transition_aligned_sequence",
+        "tr_consistency_mapping_version": "transition_aligned_causal_sequence_v1",
+        "action_history_length": 2,
+        "candidate_max_age_updates": 1,
+        "allowed_policy_version_span": 1,
+        "actor_alignment": "edge_t_to_reverse_state_t_plus_1",
+        "value_alignment": "state_t_plus_1",
+        "mirror_loss_coeff": 0.1,
+        "value_loss_coeff": 0.05,
+        "use_data_augmentation": False,
+        "tr_augmentation": {"enabled": False},
+        "gait_phase_mapping_version": "phase-v4",
+        "gait_library_version": "gait-v2",
+    }
+
+
+def _direct_curriculum() -> dict:
+    return {
+        "mode": "tr_orbit_reward_threshold_v1",
+        "velocity_bin_count": 11,
+        "ewma_coefficient": 0.1,
+        "unlock_threshold": 0.8,
+        "initial_max_abs_speed": 0.5,
+        "min_visits": 20,
+        "current_cell_increment": 1.0,
+        "neighbor_increment": 0.25,
+        "exploration_floor": 0.05,
+        "maximum_weight": 10.0,
+        "locked_cell_weight": 0.0,
+        "seed": 7,
+    }
+
+
+def _apply_direct_curriculum(env: _Config, curriculum: dict) -> None:
+    command_cfg = env.value.setdefault("commands", {}).setdefault("base_velocity", {})
+    for metadata_name, config_name in PROVENANCE._DIRECT_CURRICULUM_CONFIG_FIELDS.items():
+        command_cfg[config_name] = curriculum[metadata_name]
+
+
 def _study_condition(seed: int = 7) -> dict:
     schedule = {
         "enabled": True,
@@ -260,6 +306,17 @@ def test_state_hash_is_stable_and_changes_with_tensor_content():
     assert PROVENANCE.state_sha256(first) != PROVENANCE.state_sha256(changed)
 
 
+def test_state_hash_accepts_scalar_and_noncontiguous_tensors():
+    scalar = torch.tensor(3.0)
+    matrix = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+
+    scalar_hash = PROVENANCE.state_sha256(scalar)
+
+    assert scalar_hash == PROVENANCE.state_sha256(torch.tensor(3.0))
+    assert scalar_hash != PROVENANCE.state_sha256(torch.tensor(4.0))
+    assert PROVENANCE.state_sha256(matrix.T) == PROVENANCE.state_sha256(matrix.T.contiguous())
+
+
 def test_direct_run_writes_resolved_command_and_result_independent_cohort_metadata(tmp_path):
     repo, asset = _repository(tmp_path)
     env, agent = _configs(asset)
@@ -305,22 +362,196 @@ def test_direct_run_writes_resolved_command_and_result_independent_cohort_metada
     assert PROVENANCE.state_sha256(numpy_state) != PROVENANCE.state_sha256(changed_numpy_state)
 
 
+def test_direct_run_writes_exact_policy_contract_artifact(tmp_path):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+    env.value["observations"] = {"policy": {"history_length": 30, "flatten_history_dim": True}}
+    agent.value["algorithm"]["symmetry_cfg"] = _policy_symmetry(30)
+    agent.value["run_name"] = "go2_trseq_contract_test"
+    curriculum = _direct_curriculum()
+    _apply_direct_curriculum(env, curriculum)
+    declared_contract = PROVENANCE.resolve_policy_contract(env.value, agent.value, 1920)
+    declared_contract.pop("policy_input_dim")
+
+    PROVENANCE.record_resolved_run_metadata(
+        env_cfg=env,
+        agent_cfg=agent,
+        log_dir=tmp_path / "run",
+        repo_root=repo,
+        runtime_argv=["--task", "Test-Symm-v0"],
+        observation_dimension=1920,
+        action_dimension=12,
+        direct_launch_context={
+            "schema_version": 2,
+            "run_name": "go2_trseq_contract_test",
+            "policy_contract": declared_contract,
+            "time_reversal_treatment": {
+                "mirror_loss_coeff": 0.1,
+                "value_loss_coeff": 0.05,
+                "use_data_augmentation": False,
+                "trajectory_augmentation_enabled": False,
+            },
+            "command_curriculum": curriculum,
+        },
+    )
+
+    contract_path = tmp_path / "run" / "policy_contract.json"
+    assert contract_path.is_file()
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    assert contract["tr_consistency_mode"] == "transition_aligned_sequence"
+    assert contract["tr_consistency_mapping_version"] == "transition_aligned_causal_sequence_v1"
+    assert contract["sequence_history_length"] == 30
+    assert contract["required_sequence_records"] == 32
+    assert contract["actor_alignment"] == "edge_t_to_reverse_state_t_plus_1"
+    assert contract["value_alignment"] == "state_t_plus_1"
+
+
+def test_direct_run_rejects_forwarded_curriculum_override_that_contradicts_metadata(tmp_path):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+    curriculum = _direct_curriculum()
+    _apply_direct_curriculum(env, curriculum)
+    env.value["commands"]["base_velocity"]["curriculum_min_visits"] = 999
+
+    with pytest.raises(ValueError, match="forwarded Hydra override contradicted launcher-owned metadata"):
+        PROVENANCE.record_resolved_run_metadata(
+            env_cfg=env,
+            agent_cfg=agent,
+            log_dir=tmp_path / "run",
+            repo_root=repo,
+            runtime_argv=["--task", "Test-Symm-v0"],
+            observation_dimension=64,
+            action_dimension=12,
+            direct_launch_context={
+                "schema_version": 1,
+                "run_name": None,
+                "command_curriculum": curriculum,
+            },
+        )
+
+
+def test_direct_run_rejects_forwarded_tr_coefficient_that_contradicts_run_metadata(tmp_path):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+    agent.value["algorithm"]["symmetry_cfg"] = {
+        "mirror_loss_coeff": 0.2,
+        "value_loss_coeff": 0.05,
+        "use_data_augmentation": False,
+        "tr_augmentation": {"enabled": False},
+    }
+
+    with pytest.raises(ValueError, match="time-reversal treatment.*forwarded Hydra override"):
+        PROVENANCE.record_resolved_run_metadata(
+            env_cfg=env,
+            agent_cfg=agent,
+            log_dir=tmp_path / "run",
+            repo_root=repo,
+            runtime_argv=["--task", "Test-Symm-v0"],
+            observation_dimension=64,
+            action_dimension=12,
+            direct_launch_context={
+                "time_reversal_treatment": {
+                    "mirror_loss_coeff": 0.1,
+                    "value_loss_coeff": 0.05,
+                    "use_data_augmentation": False,
+                    "trajectory_augmentation_enabled": False,
+                }
+            },
+        )
+
+
+def test_direct_run_rejects_run_name_that_contradicts_resolved_agent_config(tmp_path):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+    agent.value["run_name"] = "resolved_name"
+
+    with pytest.raises(ValueError, match="run_name differs from resolved agent configuration"):
+        PROVENANCE.record_resolved_run_metadata(
+            env_cfg=env,
+            agent_cfg=agent,
+            log_dir=tmp_path / "run",
+            repo_root=repo,
+            runtime_argv=["--task", "Test-Symm-v0"],
+            observation_dimension=64,
+            action_dimension=12,
+            direct_launch_context={"schema_version": 1, "run_name": "declared_name"},
+        )
+
+
+def test_direct_run_rejects_policy_contract_that_contradicts_resolved_mode(tmp_path):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+    env.value["observations"] = {"policy": {"history_length": 30, "flatten_history_dim": True}}
+    agent.value["algorithm"]["symmetry_cfg"] = _policy_symmetry(30)
+    agent.value["run_name"] = "go2_trseq_contract_mismatch"
+    curriculum = _direct_curriculum()
+    _apply_direct_curriculum(env, curriculum)
+    declared_contract = PROVENANCE.resolve_policy_contract(env.value, agent.value, 1920)
+    declared_contract.pop("policy_input_dim")
+    declared_contract["tr_consistency_mode"] = "none"
+
+    with pytest.raises(ValueError, match="policy contract differs from resolved configuration"):
+        PROVENANCE.record_resolved_run_metadata(
+            env_cfg=env,
+            agent_cfg=agent,
+            log_dir=tmp_path / "run",
+            repo_root=repo,
+            runtime_argv=["--task", "Test-Symm-v0"],
+            observation_dimension=1920,
+            action_dimension=12,
+            direct_launch_context={
+                "schema_version": 2,
+                "run_name": "go2_trseq_contract_mismatch",
+                "policy_contract": declared_contract,
+                "time_reversal_treatment": {
+                    "mirror_loss_coeff": 0.1,
+                    "value_loss_coeff": 0.05,
+                    "use_data_augmentation": False,
+                    "trajectory_augmentation_enabled": False,
+                },
+                "command_curriculum": curriculum,
+            },
+        )
+
+
+@pytest.mark.parametrize("schema_version", [0, 3, True, "2"])
+def test_direct_launch_context_rejects_unsupported_schema_versions(tmp_path, schema_version):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+
+    with pytest.raises(ValueError, match="schema_version must be 1 or 2"):
+        PROVENANCE.record_resolved_run_metadata(
+            env_cfg=env,
+            agent_cfg=agent,
+            log_dir=tmp_path / "run",
+            repo_root=repo,
+            runtime_argv=["--task", "Test-Symm-v0"],
+            observation_dimension=64,
+            action_dimension=12,
+            direct_launch_context={"schema_version": schema_version},
+        )
+
+
+def test_direct_launch_schema_two_requires_all_launcher_owned_sections(tmp_path):
+    repo, asset = _repository(tmp_path)
+    env, agent = _configs(asset)
+
+    with pytest.raises(ValueError, match="schema 2 is missing required metadata"):
+        PROVENANCE.record_resolved_run_metadata(
+            env_cfg=env,
+            agent_cfg=agent,
+            log_dir=tmp_path / "run",
+            repo_root=repo,
+            runtime_argv=["--task", "Test-Symm-v0"],
+            observation_dimension=64,
+            action_dimension=12,
+            direct_launch_context={"schema_version": 2, "run_name": None},
+        )
+
+
 def test_policy_contract_resolves_native_history_and_rejects_width_mismatch():
     env = {"observations": {"policy": {"history_length": 30, "flatten_history_dim": True}}}
-    agent = {
-        "algorithm": {
-            "symmetry_cfg": {
-                "observation_contract_version": "hardware_proprio_history_64d_v1",
-                "instantaneous_frame_dim": 64,
-                "history_enabled": True,
-                "history_length": 30,
-                "history_packing": "term_major_oldest_to_newest_flattened",
-                "history_trs_mode": "framewise_feature",
-                "gait_phase_mapping_version": "phase-v4",
-                "gait_library_version": "gait-v2",
-            }
-        }
-    }
+    agent = {"algorithm": {"symmetry_cfg": _policy_symmetry(30)}}
 
     contract = PROVENANCE.resolve_policy_contract(env, agent, 1920)
 
@@ -330,7 +561,15 @@ def test_policy_contract_resolves_native_history_and_rejects_width_mismatch():
         "history_enabled": True,
         "history_length": 30,
         "history_packing": "term_major_oldest_to_newest_flattened",
-        "history_trs_mode": "framewise_feature",
+        "tr_consistency_mode": "transition_aligned_sequence",
+        "tr_consistency_mapping_version": "transition_aligned_causal_sequence_v1",
+        "action_history_length": 2,
+        "sequence_history_length": 30,
+        "required_sequence_records": 32,
+        "candidate_max_age_updates": 1,
+        "allowed_policy_version_span": 1,
+        "actor_alignment": "edge_t_to_reverse_state_t_plus_1",
+        "value_alignment": "state_t_plus_1",
         "policy_input_dim": 1920,
         "gait_phase_mapping_version": "phase-v4",
         "gait_library_version": "gait-v2",
@@ -341,22 +580,56 @@ def test_policy_contract_resolves_native_history_and_rejects_width_mismatch():
 
 def test_policy_contract_resolves_no_history_and_requires_matching_env_setting():
     env = {"observations": {"policy": {"history_length": 0, "flatten_history_dim": True}}}
-    symmetry = {
-        "observation_contract_version": "hardware_proprio_history_64d_v1",
-        "instantaneous_frame_dim": 64,
-        "history_enabled": False,
-        "history_length": 0,
-        "history_packing": "term_major_oldest_to_newest_flattened",
-        "history_trs_mode": "framewise_feature",
-        "gait_phase_mapping_version": "phase-v4",
-        "gait_library_version": "gait-v2",
-    }
+    symmetry = _policy_symmetry(0)
     agent = {"algorithm": {"symmetry_cfg": symmetry}}
 
-    assert PROVENANCE.resolve_policy_contract(env, agent, 64)["policy_input_dim"] == 64
+    contract = PROVENANCE.resolve_policy_contract(env, agent, 64)
+    assert contract["policy_input_dim"] == 64
+    assert contract["sequence_history_length"] == 1
+    assert contract["required_sequence_records"] == 3
     env["observations"]["policy"]["history_length"] = 30
     with pytest.raises(ValueError, match="Environment and algorithm policy-history settings differ"):
         PROVENANCE.resolve_policy_contract(env, agent, 64)
+
+
+def test_policy_contract_records_configurable_sequence_freshness_limits():
+    env = {"observations": {"policy": {"history_length": 30, "flatten_history_dim": True}}}
+    symmetry = _policy_symmetry(30)
+    symmetry["candidate_max_age_updates"] = 0
+    symmetry["allowed_policy_version_span"] = 2
+
+    contract = PROVENANCE.resolve_policy_contract(
+        env,
+        {"algorithm": {"symmetry_cfg": symmetry}},
+        1920,
+    )
+
+    assert contract["candidate_max_age_updates"] == 0
+    assert contract["allowed_policy_version_span"] == 2
+
+
+@pytest.mark.parametrize(("field", "value"), (("candidate_max_age_updates", -1), ("allowed_policy_version_span", True)))
+def test_policy_contract_rejects_invalid_sequence_freshness_limits(field, value):
+    env = {"observations": {"policy": {"history_length": 30, "flatten_history_dim": True}}}
+    symmetry = _policy_symmetry(30)
+    symmetry[field] = value
+
+    with pytest.raises(ValueError, match=rf"{field} must be a nonnegative integer"):
+        PROVENANCE.resolve_policy_contract(env, {"algorithm": {"symmetry_cfg": symmetry}}, 1920)
+
+
+def test_policy_contract_resolves_deprecated_framewise_alias_as_approximate_mode():
+    env = {"observations": {"policy": {"history_length": 30, "flatten_history_dim": True}}}
+    symmetry = _policy_symmetry(30)
+    symmetry["history_trs_mode"] = "framewise_feature"
+
+    contract = PROVENANCE.resolve_policy_contract(
+        env,
+        {"algorithm": {"symmetry_cfg": symmetry}},
+        1920,
+    )
+
+    assert contract["tr_consistency_mode"] == "framewise_feature_approx"
 
 
 def test_non_time_reversal_runner_is_untouched(tmp_path):

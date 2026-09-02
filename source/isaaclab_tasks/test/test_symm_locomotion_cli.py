@@ -272,7 +272,7 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
     assert "env.observations.policy.flatten_history_dim=true" in command
     assert "agent.algorithm.symmetry_cfg.history_enabled=true" in command
     assert "agent.algorithm.symmetry_cfg.history_length=30" in command
-    assert "agent.algorithm.symmetry_cfg.history_trs_mode=framewise_feature" in command
+    assert "agent.algorithm.symmetry_cfg.tr_consistency_mode='transition_aligned_sequence'" in command
 
 
 @pytest.mark.parametrize("command", ["train", "play", "record", "evaluation", "ablation"])
@@ -283,7 +283,28 @@ def test_history_defaults_are_shared_by_launcher_workflows(command):
 
     assert args.history_enabled is True
     assert args.history_length == 30
+    assert args.tr_consistency_mode == "transition_aligned_sequence"
     assert symm_cli.resolve_policy_history(args) == (True, 30)
+
+
+@pytest.mark.parametrize(
+    ("launcher_args", "expected_mode", "expected_label"),
+    [
+        ([], "transition_aligned_sequence", "trseq"),
+        (["--tr-consistency-mode", "framewise_feature_approx"], "framewise_feature_approx", "trff"),
+        (["--no-trs"], "none", "notr"),
+    ],
+)
+def test_tr_consistency_mode_controls_resolved_config_and_run_label(launcher_args, expected_mode, expected_label):
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", "go2", *launcher_args])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert f"agent.algorithm.symmetry_cfg.tr_consistency_mode='{expected_mode}'" in command
+    assert f"agent.algorithm.symmetry_cfg.tr_consistency_mode={expected_mode}" not in command
+    assert command[command.index("--run_name") + 1].startswith(f"go2_{expected_label}_")
 
 
 @pytest.mark.parametrize("no_history_option", ["--no_history", "--no-history"])
@@ -299,7 +320,7 @@ def test_history_aliases_disable_history_and_force_zero(no_history_option, lengt
     assert "env.observations.policy.history_length=0" in command
     assert "agent.algorithm.symmetry_cfg.history_enabled=false" in command
     assert "agent.algorithm.symmetry_cfg.history_length=0" in command
-    assert command[command.index("--run_name") + 1] == "go2_trs_m0p1_v0p05_h0_cur0_seeddefault"
+    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p1_v0p05_h0_cur0_seeddefault"
 
 
 @pytest.mark.parametrize("history_length", [0, -1])
@@ -322,7 +343,7 @@ def test_history_dry_run_prints_exact_hydra_overrides(capsys):
     assert "env.observations.policy.history_length=0" in output
     assert "agent.algorithm.symmetry_cfg.history_enabled=false" in output
     assert "agent.algorithm.symmetry_cfg.history_length=0" in output
-    assert "agent.algorithm.symmetry_cfg.history_trs_mode=framewise_feature" in output
+    assert "agent.algorithm.symmetry_cfg.tr_consistency_mode='transition_aligned_sequence'" in output
 
 
 def test_history_overrides_are_identical_for_play_record_and_evaluation(monkeypatch, tmp_path):
@@ -363,9 +384,23 @@ def test_train_direct_context_records_policy_contract_metadata():
         "history_enabled": True,
         "history_length": 5,
         "history_packing": "term_major_oldest_to_newest_flattened",
-        "history_trs_mode": "framewise_feature",
+        "action_history_length": 2,
+        "actor_alignment": "edge_t_to_reverse_state_t_plus_1",
+        "allowed_policy_version_span": 1,
+        "candidate_max_age_updates": 1,
+        "required_sequence_records": 7,
+        "sequence_history_length": 5,
+        "tr_consistency_mapping_version": "transition_aligned_causal_sequence_v1",
+        "tr_consistency_mode": "transition_aligned_sequence",
+        "value_alignment": "state_t_plus_1",
         "instantaneous_frame_dim": 64,
         "observation_contract_version": "hardware_proprio_history_64d_v1",
+    }
+    assert context["time_reversal_treatment"] == {
+        "mirror_loss_coeff": 0.1,
+        "trajectory_augmentation_enabled": False,
+        "use_data_augmentation": False,
+        "value_loss_coeff": 0.05,
     }
 
 
@@ -385,8 +420,22 @@ def test_command_curriculum_flags_build_validated_overrides_and_run_name():
             "0.2",
             "--curriculum-unlock-threshold",
             "0.75",
+            "--curriculum-initial-max-abs-speed",
+            "0.4",
+            "--curriculum-min-visits",
+            "24",
+            "--curriculum-current-cell-increment",
+            "0.8",
             "--curriculum-neighbor-increment",
             "0.3",
+            "--curriculum-exploration-floor",
+            "0.04",
+            "--curriculum-maximum-weight",
+            "8.0",
+            "--curriculum-locked-cell-weight",
+            "0.0",
+            "--curriculum-seed",
+            "123",
         ]
     )
     args.robot_spec = symm_cli.get_robot(args.robot)
@@ -397,9 +446,15 @@ def test_command_curriculum_flags_build_validated_overrides_and_run_name():
     assert "env.commands.base_velocity.curriculum_velocity_bin_count=13" in command
     assert "env.commands.base_velocity.curriculum_ewma_coefficient=0.2" in command
     assert "env.commands.base_velocity.curriculum_unlock_threshold=0.75" in command
+    assert "env.commands.base_velocity.curriculum_initial_max_abs_speed=0.4" in command
+    assert "env.commands.base_velocity.curriculum_min_visits=24" in command
+    assert "env.commands.base_velocity.curriculum_current_cell_increment=0.8" in command
     assert "env.commands.base_velocity.curriculum_neighbor_increment=0.3" in command
-    assert "env.commands.base_velocity.curriculum_seed=42" in command
-    assert command[command.index("--run_name") + 1] == "go2_trs_m0p1_v0p05_h30_cur1_seed42"
+    assert "env.commands.base_velocity.curriculum_exploration_floor=0.04" in command
+    assert "env.commands.base_velocity.curriculum_maximum_weight=8.0" in command
+    assert "env.commands.base_velocity.curriculum_locked_cell_weight=0.0" in command
+    assert "env.commands.base_velocity.curriculum_seed=123" in command
+    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p1_v0p05_h30_cur1_seed42"
 
 
 def test_disabled_command_curriculum_override_is_quoted_for_hydra():
@@ -411,6 +466,23 @@ def test_disabled_command_curriculum_override_is_quoted_for_hydra():
 
     assert "env.commands.base_velocity.command_curriculum_mode='none'" in command
     assert "env.commands.base_velocity.command_curriculum_mode=none" not in command
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--symm_direct_launch_context", "{}"],
+        ["--symm_direct_launch_context={}"],
+        ["--symm-direct-launch-context", "{}"],
+    ],
+)
+def test_train_rejects_passthrough_direct_context_override(extra):
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", "go2"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    with pytest.raises(ValueError, match="does not allow overriding"):
+        symm_cli.train_lab_args(args, extra)
 
 
 @pytest.mark.parametrize("option", ["--command_curriculum", "--command-curriculum"])
@@ -428,7 +500,14 @@ def test_command_curriculum_underscore_and_hyphen_aliases(option):
         ("--curriculum-velocity-bins", "1", "greater than or equal to two"),
         ("--curriculum-ewma", "0", "curriculum_ewma must be finite"),
         ("--curriculum-unlock-threshold", "1.1", "curriculum_unlock_threshold must be finite"),
+        ("--curriculum-initial-max-abs-speed", "-0.1", "initial_max_abs_speed must be finite"),
+        ("--curriculum-min-visits", "0", "min_visits must be a positive integer"),
+        ("--curriculum-current-cell-increment", "-0.1", "current_cell_increment must be finite"),
         ("--curriculum-neighbor-increment", "-0.1", "curriculum_neighbor_increment must be finite"),
+        ("--curriculum-exploration-floor", "-0.1", "exploration_floor must be finite"),
+        ("--curriculum-maximum-weight", "0", "maximum_weight must be finite"),
+        ("--curriculum-locked-cell-weight", "-0.1", "locked_cell_weight must be finite"),
+        ("--curriculum-seed", "-1", "curriculum_seed must be a nonnegative integer"),
     ],
 )
 def test_command_curriculum_rejects_invalid_values(option, value, message):
@@ -466,7 +545,7 @@ def test_train_run_name_records_primary_history_and_curriculum_treatment():
 
     command = symm_cli.train_lab_args(args, [])
 
-    assert command[command.index("--run_name") + 1] == "go2_trs_m0p2_v0p1_h30_cur0_seed42"
+    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p2_v0p1_h30_cur0_seed42"
 
 
 def test_ablation_uses_shared_training_scale_defaults():

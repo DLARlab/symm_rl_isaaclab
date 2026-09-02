@@ -37,10 +37,17 @@ DEFAULT_GAIT_SAMPLING_PROFILE = "trclosed_v2_equal_family"
 DEFAULT_GAIT_CURRICULUM_ITERATIONS = 0
 DEFAULT_HISTORY_ENABLED = True
 DEFAULT_HISTORY_LENGTH = 30
-DEFAULT_HISTORY_TRS_MODE = "framewise_feature"
+DEFAULT_TR_CONSISTENCY_MODE = "transition_aligned_sequence"
+TR_CONSISTENCY_MODES = ("transition_aligned_sequence", "framewise_feature_approx", "none")
+TR_CONSISTENCY_MAPPING_VERSION = "transition_aligned_causal_sequence_v1"
 POLICY_OBSERVATION_CONTRACT_VERSION = "hardware_proprio_history_64d_v1"
 POLICY_INSTANTANEOUS_FRAME_DIM = 64
 POLICY_HISTORY_PACKING = "term_major_oldest_to_newest_flattened"
+POLICY_ACTION_HISTORY_LENGTH = 2
+TR_SEQUENCE_CANDIDATE_MAX_AGE_UPDATES = 1
+TR_SEQUENCE_ALLOWED_POLICY_VERSION_SPAN = 1
+TR_SEQUENCE_ACTOR_ALIGNMENT = "edge_t_to_reverse_state_t_plus_1"
+TR_SEQUENCE_VALUE_ALIGNMENT = "state_t_plus_1"
 GAIT_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"
 GAIT_LIBRARY_VERSION = "time_reversal_closed_v2"
 COMMAND_CURRICULUM_MODE_NONE = "none"
@@ -49,7 +56,13 @@ COMMAND_CURRICULUM_MODES = (COMMAND_CURRICULUM_MODE_NONE, COMMAND_CURRICULUM_MOD
 DEFAULT_CURRICULUM_VELOCITY_BIN_COUNT = 11
 DEFAULT_CURRICULUM_EWMA_COEFFICIENT = 0.1
 DEFAULT_CURRICULUM_UNLOCK_THRESHOLD = 0.8
+DEFAULT_CURRICULUM_INITIAL_MAX_ABS_SPEED = 0.5
+DEFAULT_CURRICULUM_MIN_VISITS = 20
+DEFAULT_CURRICULUM_CURRENT_CELL_INCREMENT = 1.0
 DEFAULT_CURRICULUM_NEIGHBOR_INCREMENT = 0.25
+DEFAULT_CURRICULUM_EXPLORATION_FLOOR = 0.05
+DEFAULT_CURRICULUM_MAXIMUM_WEIGHT = 10.0
+DEFAULT_CURRICULUM_LOCKED_CELL_WEIGHT = 0.0
 DEFAULT_CURRICULUM_SEED = 0
 LEGACY_ABLATION_MIRROR_LOSS_COEFF = 0.2
 LEGACY_ABLATION_TR_VALUE_COEFF = 0.05
@@ -71,6 +84,10 @@ LEG_USAGE_PROTECTED_RUNTIME_OPTIONS = {
     "--seed",
     "--rl_library",
     "--rl-library",
+}
+TRAIN_PROTECTED_RUNTIME_OPTIONS = {
+    "--symm_direct_launch_context",
+    "--symm-direct-launch-context",
 }
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
 
@@ -260,16 +277,25 @@ def resolve_policy_history(args: argparse.Namespace) -> tuple[bool, int]:
     return enabled, history_length if enabled else 0
 
 
+def resolve_tr_consistency_mode(args: argparse.Namespace) -> str:
+    """Resolve and validate the policy time-reversal consistency mode."""
+    mode = getattr(args, "tr_consistency_mode", DEFAULT_TR_CONSISTENCY_MODE)
+    if mode not in TR_CONSISTENCY_MODES:
+        raise ValueError(f"--tr_consistency_mode must be one of {TR_CONSISTENCY_MODES}; received {mode!r}.")
+    return "none" if bool(getattr(args, "disable_symmetry", False)) else mode
+
+
 def policy_history_lab_args(args: argparse.Namespace) -> list[str]:
     """Build matching environment and TR-regularizer history overrides."""
     enabled, history_length = resolve_policy_history(args)
+    tr_consistency_mode = resolve_tr_consistency_mode(args)
     enabled_label = str(enabled).lower()
     return [
         f"env.observations.policy.history_length={history_length}",
         "env.observations.policy.flatten_history_dim=true",
         f"agent.algorithm.symmetry_cfg.history_enabled={enabled_label}",
         f"agent.algorithm.symmetry_cfg.history_length={history_length}",
-        f"agent.algorithm.symmetry_cfg.history_trs_mode={DEFAULT_HISTORY_TRS_MODE}",
+        f"agent.algorithm.symmetry_cfg.tr_consistency_mode='{tr_consistency_mode}'",
     ]
 
 
@@ -291,23 +317,60 @@ def resolve_command_curriculum(args: argparse.Namespace) -> dict[str, int | floa
     if not math.isfinite(unlock_threshold) or not 0.0 <= unlock_threshold <= 1.0:
         raise ValueError("--curriculum_unlock_threshold must be finite and in [0, 1].")
 
+    initial_max_abs_speed = getattr(args, "curriculum_initial_max_abs_speed", DEFAULT_CURRICULUM_INITIAL_MAX_ABS_SPEED)
+    if not math.isfinite(initial_max_abs_speed) or initial_max_abs_speed < 0.0:
+        raise ValueError("--curriculum_initial_max_abs_speed must be finite and nonnegative.")
+
+    min_visits = getattr(args, "curriculum_min_visits", DEFAULT_CURRICULUM_MIN_VISITS)
+    if isinstance(min_visits, bool) or not isinstance(min_visits, int) or min_visits <= 0:
+        raise ValueError("--curriculum_min_visits must be a positive integer.")
+
+    current_cell_increment = getattr(
+        args, "curriculum_current_cell_increment", DEFAULT_CURRICULUM_CURRENT_CELL_INCREMENT
+    )
+    if not math.isfinite(current_cell_increment) or current_cell_increment < 0.0:
+        raise ValueError("--curriculum_current_cell_increment must be finite and nonnegative.")
+
     neighbor_increment = getattr(args, "curriculum_neighbor_increment", DEFAULT_CURRICULUM_NEIGHBOR_INCREMENT)
     if not math.isfinite(neighbor_increment) or neighbor_increment < 0.0:
         raise ValueError("--curriculum_neighbor_increment must be finite and nonnegative.")
 
+    exploration_floor = getattr(args, "curriculum_exploration_floor", DEFAULT_CURRICULUM_EXPLORATION_FLOOR)
+    if not math.isfinite(exploration_floor) or exploration_floor <= 0.0:
+        raise ValueError("--curriculum_exploration_floor must be finite and positive.")
+
+    maximum_weight = getattr(args, "curriculum_maximum_weight", DEFAULT_CURRICULUM_MAXIMUM_WEIGHT)
+    if not math.isfinite(maximum_weight) or maximum_weight <= 0.0:
+        raise ValueError("--curriculum_maximum_weight must be finite and positive.")
+
+    locked_cell_weight = getattr(args, "curriculum_locked_cell_weight", DEFAULT_CURRICULUM_LOCKED_CELL_WEIGHT)
+    if not math.isfinite(locked_cell_weight) or locked_cell_weight < 0.0:
+        raise ValueError("--curriculum_locked_cell_weight must be finite and nonnegative.")
+    if max(exploration_floor, locked_cell_weight) > maximum_weight:
+        raise ValueError("Curriculum floor and locked-cell weights must not exceed --curriculum_maximum_weight.")
+
     training_seed = getattr(args, "seed", None)
-    curriculum_seed = DEFAULT_CURRICULUM_SEED if training_seed is None else training_seed
+    requested_curriculum_seed = getattr(args, "curriculum_seed", None)
+    curriculum_seed = (
+        requested_curriculum_seed
+        if requested_curriculum_seed is not None
+        else (DEFAULT_CURRICULUM_SEED if training_seed is None else training_seed)
+    )
     if isinstance(curriculum_seed, bool) or not isinstance(curriculum_seed, int) or curriculum_seed < 0:
-        if mode != COMMAND_CURRICULUM_MODE_NONE:
-            raise ValueError("The command curriculum requires a nonnegative training --seed.")
-        curriculum_seed = DEFAULT_CURRICULUM_SEED
+        raise ValueError("--curriculum_seed must be a nonnegative integer.")
 
     return {
         "mode": mode,
         "velocity_bin_count": velocity_bin_count,
         "ewma_coefficient": ewma_coefficient,
         "unlock_threshold": unlock_threshold,
+        "initial_max_abs_speed": initial_max_abs_speed,
+        "min_visits": min_visits,
+        "current_cell_increment": current_cell_increment,
         "neighbor_increment": neighbor_increment,
+        "exploration_floor": exploration_floor,
+        "maximum_weight": maximum_weight,
+        "locked_cell_weight": locked_cell_weight,
         "seed": curriculum_seed,
     }
 
@@ -322,7 +385,13 @@ def command_curriculum_lab_args(args: argparse.Namespace) -> list[str]:
         f"env.commands.base_velocity.curriculum_velocity_bin_count={settings['velocity_bin_count']}",
         f"env.commands.base_velocity.curriculum_ewma_coefficient={settings['ewma_coefficient']}",
         f"env.commands.base_velocity.curriculum_unlock_threshold={settings['unlock_threshold']}",
+        f"env.commands.base_velocity.curriculum_initial_max_abs_speed={settings['initial_max_abs_speed']}",
+        f"env.commands.base_velocity.curriculum_min_visits={settings['min_visits']}",
+        f"env.commands.base_velocity.curriculum_current_cell_increment={settings['current_cell_increment']}",
         f"env.commands.base_velocity.curriculum_neighbor_increment={settings['neighbor_increment']}",
+        f"env.commands.base_velocity.curriculum_exploration_floor={settings['exploration_floor']}",
+        f"env.commands.base_velocity.curriculum_maximum_weight={settings['maximum_weight']}",
+        f"env.commands.base_velocity.curriculum_locked_cell_weight={settings['locked_cell_weight']}",
         f"env.commands.base_velocity.curriculum_seed={settings['seed']}",
     ]
 
@@ -337,9 +406,17 @@ def default_training_run_name(args: argparse.Namespace, *, suffix: str | None = 
     seed = getattr(args, "seed", None)
     seed_label = seed if seed is not None else "default"
     curriculum_label = 0 if curriculum["mode"] == COMMAND_CURRICULUM_MODE_NONE else 1
-    trs_label = "trs" if symmetry_enabled else "no_trs"
+    tr_consistency_mode = resolve_tr_consistency_mode(args)
+    tr_active = symmetry_enabled and (mirror_coeff > 0.0 or value_coeff > 0.0)
+    tr_label = {
+        "transition_aligned_sequence": "trseq",
+        "framewise_feature_approx": "trff",
+        "none": "notr",
+    }[tr_consistency_mode]
+    if not tr_active:
+        tr_label = "notr"
     run_name = (
-        f"{args.robot_spec.key}_{trs_label}_m{coeff_label(mirror_coeff)}_v{coeff_label(value_coeff)}"
+        f"{args.robot_spec.key}_{tr_label}_m{coeff_label(mirror_coeff)}_v{coeff_label(value_coeff)}"
         f"_h{history_length}_cur{curriculum_label}_seed{seed_label}"
     )
     if suffix:
@@ -562,6 +639,13 @@ def add_history_args(parser: argparse.ArgumentParser) -> None:
         default=DEFAULT_HISTORY_LENGTH,
         help="Number of native policy-observation frames when history is enabled.",
     )
+    parser.add_argument(
+        "--tr_consistency_mode",
+        "--tr-consistency-mode",
+        choices=TR_CONSISTENCY_MODES,
+        default=DEFAULT_TR_CONSISTENCY_MODE,
+        help="Select exact causal sequence consistency, the framewise approximation, or no consistency objective.",
+    )
 
 
 def add_command_curriculum_args(parser: argparse.ArgumentParser) -> None:
@@ -618,10 +702,55 @@ def add_command_curriculum_args(parser: argparse.ArgumentParser) -> None:
         default=DEFAULT_CURRICULUM_UNLOCK_THRESHOLD,
     )
     parser.add_argument(
+        "--curriculum_initial_max_abs_speed",
+        "--curriculum-initial-max-abs-speed",
+        type=float,
+        default=DEFAULT_CURRICULUM_INITIAL_MAX_ABS_SPEED,
+        help="Largest absolute forward-speed bin eligible at initialization [m/s].",
+    )
+    parser.add_argument(
+        "--curriculum_min_visits",
+        "--curriculum-min-visits",
+        type=int,
+        default=DEFAULT_CURRICULUM_MIN_VISITS,
+        help="Minimum canonical-orbit visits required before mastery can unlock another orbit.",
+    )
+    parser.add_argument(
+        "--curriculum_current_cell_increment",
+        "--curriculum-current-cell-increment",
+        type=float,
+        default=DEFAULT_CURRICULUM_CURRENT_CELL_INCREMENT,
+    )
+    parser.add_argument(
         "--curriculum_neighbor_increment",
         "--curriculum-neighbor-increment",
         type=float,
         default=DEFAULT_CURRICULUM_NEIGHBOR_INCREMENT,
+    )
+    parser.add_argument(
+        "--curriculum_exploration_floor",
+        "--curriculum-exploration-floor",
+        type=float,
+        default=DEFAULT_CURRICULUM_EXPLORATION_FLOOR,
+    )
+    parser.add_argument(
+        "--curriculum_maximum_weight",
+        "--curriculum-maximum-weight",
+        type=float,
+        default=DEFAULT_CURRICULUM_MAXIMUM_WEIGHT,
+    )
+    parser.add_argument(
+        "--curriculum_locked_cell_weight",
+        "--curriculum-locked-cell-weight",
+        type=float,
+        default=DEFAULT_CURRICULUM_LOCKED_CELL_WEIGHT,
+    )
+    parser.add_argument(
+        "--curriculum_seed",
+        "--curriculum-seed",
+        type=int,
+        default=None,
+        help="Curriculum RNG seed; defaults to the training seed, then zero.",
     )
 
 
@@ -731,6 +860,7 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
 
 def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     """Build Isaac Lab arguments for a training run."""
+    validate_train_runtime_overrides(extra)
     foot_phase_weight = getattr(args, "foot_phase_weight", DEFAULT_FOOT_PHASE_WEIGHT)
     foot_phase_reduction = getattr(args, "foot_phase_reduction", DEFAULT_FOOT_PHASE_REDUCTION)
     joint_target_limit_mode = getattr(args, "joint_target_limit_mode", DEFAULT_JOINT_TARGET_LIMIT_MODE)
@@ -803,12 +933,16 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     if joint_target_limit_weight is not None:
         command.append(f"env.rewards.joint_target_limits.weight={joint_target_limit_weight}")
     history_enabled, history_length = resolve_policy_history(args)
+    tr_consistency_mode = resolve_tr_consistency_mode(args)
+    sequence_history_length = history_length if history_enabled else 1
     curriculum = resolve_command_curriculum(args)
+    mirror_loss_coeff = 0.0 if args.disable_symmetry else args.mirror_loss_coeff
+    value_loss_coeff = 0.0 if args.disable_symmetry else args.tr_value_coeff
     resolved_runtime_argv = [*command, *extra]
     direct_argv = getattr(args, "_direct_launcher_argv", None)
     direct_interface = getattr(args, "_direct_launcher_interface", "scripts/symm_locomotion/symm_cli.py")
     direct_context = {
-        "schema_version": 1,
+        "schema_version": 2,
         "interface": direct_interface,
         "argv": direct_argv,
         "resolved_runtime_argv_without_context": resolved_runtime_argv,
@@ -820,9 +954,23 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
             "history_enabled": history_enabled,
             "history_length": history_length,
             "history_packing": POLICY_HISTORY_PACKING,
-            "history_trs_mode": DEFAULT_HISTORY_TRS_MODE,
+            "tr_consistency_mode": tr_consistency_mode,
+            "tr_consistency_mapping_version": TR_CONSISTENCY_MAPPING_VERSION,
+            "action_history_length": POLICY_ACTION_HISTORY_LENGTH,
+            "sequence_history_length": sequence_history_length,
+            "required_sequence_records": sequence_history_length + POLICY_ACTION_HISTORY_LENGTH,
+            "candidate_max_age_updates": TR_SEQUENCE_CANDIDATE_MAX_AGE_UPDATES,
+            "allowed_policy_version_span": TR_SEQUENCE_ALLOWED_POLICY_VERSION_SPAN,
+            "actor_alignment": TR_SEQUENCE_ACTOR_ALIGNMENT,
+            "value_alignment": TR_SEQUENCE_VALUE_ALIGNMENT,
             "gait_phase_mapping_version": GAIT_PHASE_MAPPING_VERSION,
             "gait_library_version": GAIT_LIBRARY_VERSION,
+        },
+        "time_reversal_treatment": {
+            "mirror_loss_coeff": mirror_loss_coeff,
+            "value_loss_coeff": value_loss_coeff,
+            "use_data_augmentation": False,
+            "trajectory_augmentation_enabled": False,
         },
         "command_curriculum": curriculum,
     }
@@ -838,6 +986,14 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         *command[hydra_start:],
         *extra,
     ]
+
+
+def validate_train_runtime_overrides(extra: list[str]) -> None:
+    """Reject passthrough options that could replace launcher-owned provenance."""
+    for token in extra:
+        option = token.split("=", 1)[0]
+        if option in TRAIN_PROTECTED_RUNTIME_OPTIONS:
+            raise ValueError(f"Training controls {option} and does not allow overriding it after '--'.")
 
 
 def add_checkpoint_args(parser: argparse.ArgumentParser) -> None:
