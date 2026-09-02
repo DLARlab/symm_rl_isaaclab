@@ -160,6 +160,9 @@ Training options:
 --num-envs
 --run-name
 --seed
+--history / --no-history
+--history-length
+--tr-consistency-mode transition_aligned_sequence|framewise_feature_approx|none
 --mirror
 --tr-value-coef
 --tr-warmup-iterations
@@ -174,12 +177,25 @@ Training options:
 --tr_policy_output_space raw_action_mean|normalized_requested_joint_target
 --gait_sampling_profile trclosed_v2_equal_family|trclosed_v2_v1_equivalent|trclosed_v2_halfbound_anneal
 --gait_curriculum_iterations
+--command-curriculum / --no-command-curriculum
+--command-curriculum-mode none|tr_orbit_reward_threshold_v1
+--curriculum-velocity-bins
+--curriculum-ewma
+--curriculum-unlock-threshold
+--curriculum-initial-max-abs-speed
+--curriculum-min-visits
+--curriculum-current-cell-increment
+--curriculum-neighbor-increment
+--curriculum-exploration-floor
+--curriculum-maximum-weight
+--curriculum-locked-cell-weight
+--curriculum-seed
 --no-trs
 --smoke
 ```
 
-New launcher options use the snake_case spellings shown above. Their
-hyphenated forms remain accepted as compatibility aliases.
+New launcher options use the hyphenated spellings shown above. Their
+snake_case forms remain accepted as compatibility aliases.
 
 Training and ablation runs default to 20,000 iterations across 512 environments.
 
@@ -192,6 +208,14 @@ different branch or detached HEAD.
 
 `--tr-min-abs-cmd-vel` defaults to `0.0`, so TRS losses also train on
 zero-velocity commands used for in-place behavior.
+
+`--tr-consistency-mode` defaults to `transition_aligned_sequence`. Generated
+run names contain `trseq`, `trff`, or `notr` for exact sequence consistency,
+the framewise approximation, and no time-reversal objective, respectively.
+`framewise_feature_approx` preserves visible history order and freezes its
+action-history slots, so it is an ablation rather than a causal reverse
+sequence. The deprecated `history_trs_mode=framewise_feature` Hydra alias maps
+to that approximate mode with a warning.
 
 `--no-trs` disables symmetry data augmentation, mirror loss, and TRS value
 loss by forwarding these Hydra overrides:
@@ -208,13 +232,20 @@ agent.algorithm.symmetry_cfg.value_loss_coeff=0.0
 
 `TimeReversalPPO` keeps the ordinary on-policy PPO surrogate, value loss,
 entropy loss, GAE, returns, adaptive KL schedule, and rollout storage intact.
-Let `N` be a PPO minibatch, `D_a=12` the action dimension, `m_n` the historical
-validity mask, and `stopgrad` a detached target. The implemented auxiliary
-objectives are exactly:
+At decision `t`, a 64-D frame is `y_t=(z_t,a_{t-1},a_{t-2})`. The reverse
+frame at forward index `j` is reconstructed as
+`ybar_j=(R_Z z_j,R_A a_j,R_A a_{j+1})`, with the identity action map. For a
+history of length `H`, forward records through `a_{t+H+1}` produce the native
+term-major reverse input
+`Hbar_{t+1}=(ybar_{t+H},...,ybar_{t+1})`. This needs `H+2` records, so the
+default `H=30` buffer intentionally spans the 24-step PPO rollout boundary.
+
+Let `m_n` be the detached candidate-validity mask and `stopgrad` a detached
+target. The exact auxiliary alignment is:
 
 ```text
-r^pi_nd = mu_d(T_O(o_n)) - T_A(stopgrad(mu(o_n)))_d
-r^V_n   = V(T_O(o_n)) - stopgrad(V(o_n))
+r^pi_nd = mu_d(Hbar_{t+1,n}) - R_A(stopgrad(mu(H_t,n)))_d
+r^V_n   = V(Hbar_{t+1,n}) - stopgrad(V(H_{t+1,n}))
 
 L_TR_policy = sum_n sum_d m_n (r^pi_nd)^2 / max(1, D_a sum_n m_n)
 L_TR_value  = sum_n       m_n (r^V_n)^2  / max(1,     sum_n m_n)
@@ -223,19 +254,19 @@ L_TR_DA = -sum_j v_j w_j log pi(a_tilde_j | o_tilde_j)
            / (sum_j v_j w_j + 1e-8)
 ```
 
-Here `v_j` selects an accepted reverse candidate and `w_j` is either one or
-its detached confidence. Policy MSE is therefore averaged over selected
-sample-action elements, not over per-sample squared vector norms. An empty
-policy/value mask returns exactly zero. Reverse-action NLL also returns exactly
-zero when there is no positive selected weight.
+Here `v_j` selects an accepted sidecar reverse-action candidate and `w_j` is
+either one or its detached confidence. Policy MSE is averaged over selected
+sample-action elements. Empty sequence masks return exact zero without extra
+actor/critic forwards. Reverse-action NLL also returns exact zero when no
+positive sidecar weight exists.
 
 The four mechanisms that can otherwise be confused are:
 
 | Mechanism | Data used | Implemented effect in this path |
 |---|---|---|
 | Inherited instantaneous symmetry augmentation | A transformed copy of the current PPO minibatch and its PPO quantities | Deprecated compatibility path retains the online minibatch duplication behavior after its warmup |
-| Policy consistency | Historical `o_n` and `T_O(o_n)` | Auxiliary actor-mean MSE only; no transition is inserted |
-| Value consistency | Historical `o_n` and `T_O(o_n)` | Auxiliary critic MSE only; no return or value target is inserted |
+| Exact sequence policy consistency | `H_t` and reconstructed `Hbar_{t+1}` | Current-actor mean MSE only; no transition is inserted |
+| Exact sequence value consistency | `H_{t+1}` and reconstructed `Hbar_{t+1}` | Current-critic MSE only; no return or value target is inserted |
 | Trajectory reverse-action augmentation | Complete authentic state-action-successor segments | Learned-filtered actor NLL only; no PPO ratio, GAE, return, critic, KL, or entropy term |
 
 The existing same-phase leg synchronization reward is a phase-gated task
@@ -329,11 +360,11 @@ update count. Every temporal partner pair has equal weight at every point;
 resume restores the absolute update before the next rollout. Full evaluation
 continues to cover all ten rows regardless of training probability.
 
-Every direct training run writes immutable
-`provenance/resolved_command.json` and `provenance/cohort_metadata.json` files
-alongside `provenance/initialization.json`. The initial cohort status is
-`incomplete`; later registry classification uses protocol facts and never the
-observed reward quality.
+Every direct training run writes a root-level immutable
+`policy_contract.json`, plus `provenance/resolved_command.json`,
+`provenance/cohort_metadata.json`, and `provenance/initialization.json`. The
+initial cohort status is `incomplete`; later registry classification uses
+protocol facts and never the observed reward quality.
 
 The resolved command records the active Python entry point using a
 repository-relative, forward-slash path (for example
@@ -350,43 +381,54 @@ treatments, their final checkpoints, and their full-V3 analysis provenance.
 They remain development evidence and are not members of either prospective
 confirmatory cohort.
 
-New V5 checkpoints store schema-3 `time_reversal_state` with the exact policy
-observation contract plus
-`last_completed_update`, the consecutive `next_absolute_update`, and the exact
-resolved policy, value, and augmentation schedules. The runner `iter` must be
-either that last or next update; loading advances execution to the saved next
-absolute update. A pre-schema checkpoint falls back to `iter+1`. Enabled
-trajectory augmentation additionally requires matching side-model state,
-semantic configuration, RNG state, and schedule iteration; it refuses a
-silent random restart or a checkpoint whose schedule semantics differ.
-An enabled command curriculum likewise stores its grid, RNG, active cells, and
-task-local command/gait runtime, and full resume rejects a curriculum-mode
-mismatch in either direction.
+New V5 checkpoints use the bumped `time_reversal_state` schema. In addition to
+absolute update and schedule state, policy metadata records
+`tr_consistency_mode`, mapping version
+`transition_aligned_causal_sequence_v1`, action-history length two, sequence
+history length, required `H+2` records, one-update candidate age and policy
+version span, actor alignment `edge_t_to_reverse_state_t_plus_1`, and value
+alignment `state_t_plus_1`. Full resume fails closed on incompatible mapping
+semantics. Actor-only playback and explicit weights-only initialization may
+load a matching observation contract because they do not restore the transient
+sequence buffer.
 
-The TR validity mask is computed from the latest 64D frame in the saved policy
-minibatch observation, whether the policy input is instantaneous or a native
-term-major flattened history. Available modes are
-`command`, `command_tracking`, `command_upright_phase`, and
-`command_tracking_upright_phase`. Their components are:
+The exact sequence mask validates every record in the reconstructed window.
+It requires one episode, command/task segment, gait segment, disturbance
+generation, complete native history, finite values, and no done, timeout,
+reset, command/gait boundary, push, or unexecuted final future action. Its
+physical gates include:
 
 ```text
 abs(vx_cmd) >= v_min
+||v_xy_measured - v_xy_command|| <= absolute + relative tolerance
+|wz_measured - wz_command| <= absolute + relative tolerance
 sqrt(projected_gravity_x^2 + projected_gravity_y^2) <= g_tolerance
 d_S1(phase_i, 0) >= epsilon_phase and
 d_S1(phase_i, swing_ratio) >= epsilon_phase for every foot
 ```
 
-Measured base velocity is intentionally absent from the hardware policy
-contract, so the legacy `command_tracking` variants reduce to the command gate;
-reward-side tracking diagnostics remain simulator-only.
+Measured velocity, contact impulse, slip, reverse residual, saturation, and
+push generation remain detached simulator-only metadata; changing them cannot
+change actor or critic inputs. These are heuristic gates, not proof that a
+physical transition is reversible. Low-frequency gradient diagnostics use
+`torch.autograd.grad` without changing `.grad`, optimizer state, or the
+training loss. An empty mask contributes exact zero.
 
-These are heuristic stable-phase validity gates, not proof that a physical
-transition is reversible. Low-frequency gradient diagnostics use
-`torch.autograd.grad` on only the first selected minibatch and report norms,
-weighted norm ratios, cosine similarities, parameter coverage, and
-non-finite status without changing `.grad`, optimizer state, or the training
-loss. When evaluated, diagnostics expose an empty mask, which contributes an
-exact zero auxiliary loss.
+The staged TR-orbit curriculum stores orbit-symmetric `eligible`, `mastered`,
+`priority`, EWMA-success, and visit-count tensors. Only nonzero-prior rows and
+speed bins inside the initial absolute-speed bound start eligible. Mastery
+requires the configured minimum visits, marks an orbit once, and unlocks the
+next larger absolute-speed orbit plus its time-reversal partner. Outcomes are
+aggregated once per canonical orbit, making updates permutation invariant.
+Duplicating a batch preserves its mean-success EWMA update and doubles only its
+visit increment unless that larger increment crosses `curriculum_min_visits`;
+at that threshold the required visit-count mastery rule can also change
+mastery, eligibility, and priority. Universal duplication invariance is
+therefore mathematically incompatible with the specified
+`visits += sample_count` threshold rule. Full resume restores global competence
+tensors, RNG, semantic config, and absolute iteration, then discards current
+cells, partial errors, command/gait/timer/phase state, action history, and
+observation history before sampling every environment afresh.
 
 Trajectory augmentation is disabled by default. When explicitly enabled,
 `tr_augmentation.mode` must be
@@ -501,8 +543,9 @@ Maintained assumptions and limitations are intentionally strict:
   to these even position-target offsets; another controller needs a new action
   transform and target reconstruction.
 - Recurrent actor/critics are rejected because reversed hidden-state semantics
-  are undefined. Distributed/multi-GPU augmentation is rejected because side
-  models are not synchronized.
+  are undefined. Distributed/multi-GPU exact sequence consistency, curriculum,
+  and sidecar augmentation fail closed because their task-local state is not
+  synchronized across ranks.
 - Isaac Lab exposes returned observations after auto-reset but no authentic
   terminal dynamics state here. Every done or timeout transition is therefore
   rejected; no post-reset observation is paired with a terminal state.
@@ -524,11 +567,13 @@ profile so it cannot invoke instantaneous minibatch copying:
 ```text
 # No TRS
 agent.algorithm.symmetry_cfg.use_data_augmentation=false
+agent.algorithm.symmetry_cfg.tr_consistency_mode=none
 agent.algorithm.symmetry_cfg.use_tr_policy_consistency=false
 agent.algorithm.symmetry_cfg.use_tr_value_consistency=false
 agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false
 
 # Actor only (append to the common use_data_augmentation=false override)
+agent.algorithm.symmetry_cfg.tr_consistency_mode=transition_aligned_sequence
 agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true
 agent.algorithm.symmetry_cfg.use_tr_value_consistency=false
 agent.algorithm.symmetry_cfg.tr_policy_schedule.enabled=true
@@ -536,6 +581,7 @@ agent.algorithm.symmetry_cfg.tr_policy_schedule.target_coeff=0.1
 agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false
 
 # Value only
+agent.algorithm.symmetry_cfg.tr_consistency_mode=transition_aligned_sequence
 agent.algorithm.symmetry_cfg.use_tr_policy_consistency=false
 agent.algorithm.symmetry_cfg.use_tr_value_consistency=true
 agent.algorithm.symmetry_cfg.tr_value_schedule.enabled=true
@@ -543,6 +589,7 @@ agent.algorithm.symmetry_cfg.tr_value_schedule.target_coeff=0.05
 agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false
 
 # Actor + value
+agent.algorithm.symmetry_cfg.tr_consistency_mode=transition_aligned_sequence
 agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true
 agent.algorithm.symmetry_cfg.use_tr_value_consistency=true
 agent.algorithm.symmetry_cfg.tr_policy_schedule.enabled=true
@@ -551,7 +598,8 @@ agent.algorithm.symmetry_cfg.tr_value_schedule.enabled=true
 agent.algorithm.symmetry_cfg.tr_value_schedule.target_coeff=0.05
 agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false
 
-# Actor + value + optional analytic reverse-action supervision
+# Actor + value + optional analytic reverse-action supervision (requires --no-history)
+agent.algorithm.symmetry_cfg.tr_consistency_mode=transition_aligned_sequence
 agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true
 agent.algorithm.symmetry_cfg.use_tr_value_consistency=true
 agent.algorithm.symmetry_cfg.tr_augmentation.enabled=true
@@ -575,11 +623,11 @@ match. A reward-profile name is provenance only—its resolved Hydra overrides
 define behavior—and an unresolved external robot asset is an explicit
 publication-validation failure until an authoritative content hash is supplied.
 
-Policy consistency adds one transformed actor forward for each minibatch where
-its raw loss is requested; value consistency analogously adds one transformed
-critic forward. Diagnostics add two `autograd.grad` evaluations per enabled
-term on only the first minibatch at their configured cadence. Disabled raw
-logging and diagnostics add no such work when an effective coefficient is zero.
+Exact policy/value consistency forwards only nonempty candidate batches. The
+framewise approximation adds transformed actor/critic forwards to PPO
+minibatches where its raw loss is requested. Diagnostics use `autograd.grad` at
+their configured cadence. Disabled raw logging, zero coefficients, and empty
+candidate sets add no actor/critic work.
 
 For the default two-layer `256x256` side models and
 `D_x=89+B+3S+Z`, exact parameter counts are:

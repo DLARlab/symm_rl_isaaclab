@@ -373,6 +373,10 @@ Latest checkpoints:
 
 Specific routine run and model:
 
+The dated V4 run identifiers and curated paths below are archival references.
+They require the historical worktree recorded with each run; the current V5
+launcher intentionally rejects their 72D actors.
+
 ```powershell
 .\scripts\symm_locomotion\play.ps1 --robot go2 --run 2026-07-11_20-53-43_more_trs_lr1e4_fixed --model 9999
 .\scripts\symm_locomotion\play.ps1 --robot x1 --run 2026-07-11_20-53-48_more_trs_lr1e4_fixed --model 9999

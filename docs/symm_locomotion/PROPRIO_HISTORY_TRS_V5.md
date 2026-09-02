@@ -7,15 +7,17 @@ SPDX-License-Identifier: BSD-3-Clause
 
 # Proprioceptive History TRS V5
 
-V5 is a history-aware, hardware-oriented, duty-aware time-reversal actor/value
-regularizer for gait-conditioned hybrid locomotion. It retains the V4 gait
-library, command timing, reward boundary, joint-target safety path, and
-forward-time gait clock.
+V5 is a hardware-oriented, history-aware time-reversal consistency objective
+for gait-conditioned hybrid locomotion. It retains the V4 gait library,
+forward-time gait clock, duty-aware phase reflection, reward boundary, and
+joint-target safety path. Its default consistency mapping reconstructs an exact
+causal reversed observation sequence from authentic future decisions; it does
+not augment PPO transitions.
 
 ## Policy observation contract
 
-The contract identifier is `hardware_proprio_history_64d_v1`. One instantaneous
-frame is exactly 64 values:
+The immutable contract identifier is `hardware_proprio_history_64d_v1`. One
+instantaneous frame is exactly 64 values:
 
 | Term | Dimension | Slice | Scale | Time reversal |
 | --- | ---: | --- | --- | --- |
@@ -23,200 +25,278 @@ frame is exactly 64 values:
 | Body velocity command `(vx, vy, wz)` | 3 | `[3:6]` | `(2, 2, 0.25)` | odd |
 | Relative joint position | 12 | `[6:18]` | `1` | even |
 | Joint velocity | 12 | `[18:30]` | `0.05` | odd |
-| Previous action | 12 | `[30:42]` | `1` | even |
-| Second-previous action | 12 | `[42:54]` | `1` | even |
+| Previous action | 12 | `[30:42]` | `1` | reconstructed |
+| Second-previous action | 12 | `[42:54]` | `1` | reconstructed |
 | Dimensionless gait period | 1 | `[54:55]` | `1` | even |
 | Stance duty factor | 1 | `[55:56]` | `1` | even |
 | Foot-phase sine | 4 | `[56:60]` | `1` | duty-reflected |
 | Foot-phase cosine | 4 | `[60:64]` | `1` | duty-reflected |
 
-Measured base linear and angular velocity, the expanded six-dimensional desired
-twist, gait-theta features, the two phase ratios, and sagittal world-pose state
-are not policy inputs. Simulator velocities remain available to rewards,
-terminations, diagnostics, and evaluation. Actor and critic receive the same
-policy observation; V5 adds no privileged critic velocity.
+Measured base linear/angular velocity, absolute heading, expanded desired
+twist, gait-theta features, phase ratios, and world pose are not policy inputs.
+Simulator-only velocity, contact, disturbance, and segment metadata may gate or
+weight auxiliary samples, but are never concatenated into actor or critic
+observations. Actor and critic receive the same policy observation; there is no
+privileged critic velocity and no recurrent network state.
 
-Projected gravity describes tilt relative to gravity. It does **not** contain
-absolute yaw or world heading. V5 therefore removes absolute cross-track and
-heading recovery from the scalar motion reward. The active reward uses body-frame
-forward tracking, lateral-velocity and yaw-rate stabilization, roll, pitch, and
-base-height/support quality. World lateral position and heading may be retained
-as explicitly simulator-only diagnostics.
+Projected gravity describes tilt relative to gravity and contains no absolute
+yaw. The scalar motion reward therefore uses body-frame forward tracking,
+lateral-velocity and yaw-rate stabilization, roll, pitch, and base-height or
+support quality rather than absolute cross-track or heading recovery.
 
-## Action history
+## Action history and period normalization
 
-After action `u_k` has executed, Isaac Lab's `ActionManager.action` is `u_k` and
-`ActionManager.prev_action` is `u_{k-1}`. Accordingly:
+At decision `t`, write the physical, non-action features as `z_t` and the raw
+sampled/executed joint-position-offset action as `a_t`. The policy frame is
 
 ```text
-previous_action        = u_k
-second_previous_action = u_{k-1}
+y_t = (z_t, a_{t-1}, a_{t-2}).
 ```
 
-A selected environment reset clears both tensors. Actions are joint-position
-target offsets, so their time-reversal transform is the identity.
+After `a_t` executes, Isaac Lab exposes it as `ActionManager.action` and exposes
+`a_{t-1}` as `ActionManager.prev_action`; the next returned frame is therefore
+`y_{t+1} = (z_{t+1}, a_t, a_{t-1})`. Selected-environment resets clear both
+action tensors. The action time-reversal operator is the identity for this
+affine joint-position-offset controller.
 
-## Period normalization
-
-The policy observes
+The period feature is dimensionless:
 
 ```text
 T* = T sqrt(g / L)
 ```
 
-where `T` is the active gait period in seconds, `g = 9.81 m/s^2`, and `L` is the
-midpoint of the command configuration's `base_height_range` in metres. This is
-the same characteristic-length convention used by the existing speed/period
-curve. The helper rejects non-finite or non-positive periods and lengths.
+where `T` is the active period [s], `g = 9.81 m/s^2`, and `L` is the midpoint
+of `base_height_range` [m]. Non-finite or non-positive periods and lengths are
+rejected.
 
-## Native 30-frame history
+## Native history packing and inference
 
-New V5 runs enable Isaac Lab `ObservationManager` history with 30 frames and
-`flatten_history_dim=true`. The unchanged MLP therefore receives `30 * 64 =
-1920` values. `--no-history` selects one 64-D current frame.
+New runs default to native Isaac Lab observation history with `H=30` and
+`flatten_history_dim=true`, so the unchanged MLP receives `30 * 64 = 1920`
+values. `--no-history` uses `H=1` for sequence reconstruction and presents only
+the latest 64-D frame to the policy.
 
-Native packing is `term_major_oldest_to_newest_flattened`: each observation
-term stores its oldest sample first and its newest sample last, then the
-flattened term histories are concatenated in contract term order. Task-local
-pack, unpack, inference, and latest-frame helpers preserve arbitrary leading
-dimensions, dtype, and device. Observation-manager reset clears selected
-environment histories; the first post-reset append fills the history with the
-new initial frame, never pre-reset data.
+Packing is `term_major_oldest_to_newest_flattened`: each observation term
+stores its oldest sample first and newest sample last, and flattened term
+histories are concatenated in contract-term order. Task-local pack, unpack, and
+latest-frame helpers preserve arbitrary leading dimensions, dtype, and device.
+Reset clears selected native histories, and the first post-reset append fills
+them with the new initial frame rather than pre-reset data.
 
-## Duty-aware time reversal
+Deployment remains strictly causal. It keeps only the previous two executed
+actions and the native past-observation history. Future actions are required
+only while constructing training-time reverse targets from already executed
+rollout records.
 
-Let the stance duty factor be `beta`, `r = 1 - beta`, and a foot phase be `psi`.
-V5 uses
+## Duty-aware physical feature transform
+
+Let stance duty factor be `beta`, `r = 1 - beta`, and a foot phase be `psi`.
+The physical transform uses
 
 ```text
 psi_TR = remainder(r - psi, 1)
 alpha  = 2 pi r
 s_TR   = sin(alpha) c - cos(alpha) s
-c_TR   = cos(alpha) c + sin(alpha) s
+c_TR   = cos(alpha) c + sin(alpha) s.
 ```
 
-The full frame transform preserves projected gravity, joint position, both
-action-history values, period, and duty factor; negates all three command values
-and joint velocity; and applies the formula above to all four phase pairs. It is
-an involution and preserves the phase unit-circle norm. Away from boundaries it
-preserves contact mode; liftoff and touchdown boundaries exchange.
-
-This is an auxiliary feature map only. Negative commanded forward velocity does
-not reverse the actual gait clock: ordinary forward and backward locomotion use
-the same forward-time gait schedule.
-
-With history, `history_trs_mode=framewise_feature` applies the instantaneous map
-to every visible frame while preserving oldest-to-newest order. It is an
-involutive feature-level prior whose latest frame is the transformed latest
-state. It is not an exact causal history from a physically reversed rollout;
-such a history would require future samples from the original rollout.
-
-## PPO objectives
-
-The ordinary PPO surrogate, value regression, entropy term, adaptive KL,
-gradient clipping, and action-bound safeguards remain unchanged. The auxiliary
-objective is
+`time_reverse_physical_policy_features` preserves projected gravity, joint
+position, period, and duty factor; negates the three command values and joint
+velocity; and transforms all four phase pairs. It deliberately does not decide
+the two action-history slots. `build_reversed_causal_policy_frame` applies that
+physical map to `y_j`, then overwrites the slots with `(a_j, a_{j+1})`:
 
 ```text
-L_total = L_PPO + lambda_policy L_TR_policy + lambda_value L_TR_value
+ybar_j = (R_Z z_j, R_A a_j, R_A a_{j+1}),  R_A = identity.
+```
 
+The phase map is involutive, preserves unit-circle norm, and preserves contact
+mode away from event boundaries. Liftoff and touchdown boundaries exchange.
+This is an auxiliary map only: commanded backward locomotion still advances
+the ordinary gait clock forward.
+
+## Transition-aligned causal sequence
+
+An authentic forward edge and its reverse pairing are
+
+```text
+x_t --a_t--> x_{t+1}
+R_X x_{t+1} --R_A a_t--> R_X x_t.
+```
+
+For the edge at `t`, the default reverse policy input is associated with the
+successor. From forward frames `y_{t+1}, ..., y_{t+H}` and forward actions
+through `a_{t+H+1}`, the builder constructs
+
+```text
+Hbar_{t+1} = (ybar_{t+H}, ..., ybar_{t+1}),
+```
+
+which is oldest-to-newest in reversed time and is repacked in the native
+term-major layout. It needs `H+2` consecutive decision records: three for
+`H=1`, and 32 for the default `H=30`. Because the PPO rollout length is 24,
+the task-local sequence buffer intentionally spans rollout boundaries; the PPO
+rollout length is not increased to manufacture a candidate.
+
+The canonical modes are:
+
+- `transition_aligned_sequence` (default): exact causal reconstruction with
+  mapping version `transition_aligned_causal_sequence_v1`.
+- `framewise_feature_approx`: ablation-only instantaneous physical transforms
+  in unchanged history order with frozen visible action-history slots. It is
+  explicitly approximate and logs that history was not causally reversed.
+- `none`: no actor/value time-reversal consistency objective.
+
+The deprecated `history_trs_mode=framewise_feature` configuration alias maps to
+`framewise_feature_approx` with a warning. It is not the default for new runs.
+
+## Auxiliary objectives
+
+The source/target alignment is deliberately asymmetric across the edge:
+
+```text
 L_TR_policy = masked_mean(
-    ||mu(T_H(H)) - T_action(stop_gradient(mu(H)))||^2
+    ||mu(Hbar_{t+1}) - R_A stop_gradient(mu(H_t))||^2
 )
 
 L_TR_value = masked_mean(
-    (V(T_H(H)) - stop_gradient(V(H)))^2
-)
+    (V(Hbar_{t+1}) - stop_gradient(V(H_{t+1})))^2
+).
 ```
 
-The command mask reads the latest frame's scaled forward command through the
-observation schema, for either 64 or `H * 64` input. The value term is
-task-conditioned approximate time-reversal value consistency, not an exact
-consequence of reversible dissipative contact dynamics. Coefficients retain the
-existing warm-up/ramp schedules.
+Both actor means are recomputed with the current actor; an optional normalized
+joint-target coordinate is applied to both means. The actor source is `H_t`.
+The value source is `H_{t+1}`, never `H_t`. Stopped targets prevent the source
+branch from receiving auxiliary gradients.
 
-Four mechanisms remain distinct:
+These losses are auxiliary only. Reverse candidates never duplicate or replace
+old log probabilities, likelihood ratios, advantages, returns, value targets,
+clipped PPO value terms, adaptive KL inputs, or entropy samples.
+`use_data_augmentation=false` remains mandatory for this path. Authentic PPO
+quantities are captured before any auxiliary actor forward can update cached
+distribution parameters. Zero coefficients or an empty valid-candidate set
+produce exact zero without extra actor/critic forwards.
 
-- Policy consistency is the actor forward-pass residual above.
-- Value consistency is the task-conditioned critic residual above.
-- Model-based sidecar augmentation is optional filtered reverse-action actor
-  supervision from authentic transitions.
-- PPO transition augmentation would duplicate ratios, returns, advantages, or
-  targets; it remains disabled (`use_data_augmentation=false`).
+## Sequence buffer and validity
 
-## Model-based sidecar support
+The bounded task-local sequence buffer is independent of PPO rollout storage
+and the model-based sidecar. Per environment it records the full `H_t`, latest
+64-D frame, raw action `a_t`, episode/command/gait/disturbance segment IDs,
+collection update, transition validity, done, timeout, and detached
+simulator-only diagnostics. It is active only when exact consistency or its raw
+diagnostics need candidates. Transient contents are cleared on fresh reset and
+checkpoint load and are never checkpointed.
 
-| History | Sidecar | Support |
-| --- | --- | --- |
-| Off | Off | Supported |
-| Off | On | Supported, experimental |
-| On | Off | Supported, primary V5 path |
-| On | On | Rejected at startup |
+Distributed PPO fails closed when exact sequence consistency is active because
+the task-local candidates are not synchronized across ranks.
 
-The sidecar uses centralized 64-D slices when history is off. History plus the
-sidecar is rejected because transforming only the current frame would leave an
-inconsistent context, while fabricating a causal reversed history would require
-unavailable future observations.
+A candidate requires a finite, complete native history and a contiguous window
+within one episode, command/task segment, gait segment, disturbance generation,
+and permitted policy-version span. It rejects done, timeout, reset, command or
+gait changes, pushes, incomplete warm-up, and an unexecuted final future action.
+The original `H_t` must itself be task-homogeneous. Relative gait offsets are
+inferred from phase ratios and are invariant to common phase.
 
-## TR-orbit competence curriculum
+Measured body-frame linear velocity/yaw rate, uprightness, contact impulse,
+slip, reverse residual, saturation, and push generation remain detached
+validity or confidence metadata. Command tracking compares measurements to the
+command with absolute and relative tolerances; it is not an alias for command
+magnitude. Changing simulator-only metadata cannot change actor or critic
+inputs. Accepted samples have maximum age one update and span at most one
+policy-version update, both recorded in checkpoint and run metadata.
 
-`command_curriculum_mode=tr_orbit_reward_threshold_v1` optionally maintains a
-grid `(gait row, signed forward-speed bin)`. It is disabled by default and does
-not replace the existing gait sampling profile or its iteration schedule.
+The separately learned model-based sidecar remains experimental and independent
+of this buffer. It supports instantaneous (`H=1`) policies only. Enabling it
+with native history remains a startup error.
 
-The gait partner comes from the authoritative gait library; signed-speed bins
-span the symmetric command range and the velocity partner contains the negated
-bin. Weights, success EWMA, visit counts, unlock state, and sampling eligibility
-are identical across every partner orbit. Reset samples a joint cell. A
-velocity-only boundary samples a speed bin conditional on the retained gait; a
-gait-only boundary samples a gait conditional on the retained speed bin. The two
-timers remain independent, and deterministic evaluation overrides bypass the
-curriculum.
+## Staged TR-orbit curriculum
 
-Each segment accumulates mean body-frame XY velocity error, yaw-rate error,
-completion/termination, and visits. Success uses the command generator's
-absolute plus relative thresholds and requires nontermination. A successful
-EWMA above the unlock threshold increases the current orbit and neighboring
-speed-magnitude orbits, with a nonzero exploration floor and a configured
-maximum. Checkpoint state includes weights, the active iteration-dependent gait
-prior, EWMA, visits, unlocks, current per-environment cells, partial segment
-accumulators, and the curriculum RNG. The task-local checkpoint hook also saves
-and restores the active command, gait, timing, current phase, and segment runtime;
-a full training resume refuses either direction of a curriculum-mode mismatch.
-Actor-only play/evaluation loads synchronize the gait-schedule iteration but do
-not restore per-environment curriculum runtime, so inference may use a different
-environment count or keep the curriculum disabled.
+`command_curriculum_mode=tr_orbit_reward_threshold_v1` is optional and disabled
+by default. For each gait row and signed forward-speed bin it stores:
 
-## Checkpoints and launch controls
+- `eligible` and `mastered` Boolean tensors;
+- sampling `priority`;
+- success EWMA and visit count.
 
-Train, play, record, and fixed-grid evaluation share `--history`, `--no-history`,
-and `--history-length`. New runs default to `--history --history-length 30`.
-Train and ablation additionally expose the optional command curriculum. Run
-names include `h30` or `h0` and a compact curriculum label.
+Every tensor is closed over the authoritative gait/velocity time-reversal
+orbit. At initialization, only nonzero-gait-prior cells whose speed-bin center
+satisfies `abs(v_x) <= curriculum_initial_max_abs_speed` are eligible; their
+partners are made eligible atomically. Locked cells use
+`curriculum_locked_cell_weight` (zero by default). The exploration floor is
+applied only to eligible cells, and zero-prior gait rows never activate.
 
-Each V5 run stores resolved environment/agent configuration, a
-`policy_contract.json` manifest, and matching checkpoint metadata. Loading
-checks the actor input width and contract before rollout and reports the expected
-and received widths plus the required history flags. A 72-D V4 checkpoint is
-incompatible: V5 never pads, truncates, projects, or silently migrates it.
+Outcomes in one update are first aggregated by canonical orbit. One EWMA update
+uses the orbit's mean success and visits increase by the number of samples, so
+permuting outcomes is invariant. Duplicating all outcomes leaves the EWMA
+update unchanged and doubles the visit-count increment. If both increments
+remain on the same side of `curriculum_min_visits`, eligibility, mastery, and
+priority are also unchanged. At the threshold, however, the required
+`visits_new = visits_old + sample_count` and
+`mastered = visits_new >= minimum and EWMA >= threshold` equations make
+universal duplication-invariant mastery mathematically impossible: a doubled
+batch can cross the visit threshold when the original batch does not. The
+implementation follows those explicit equations and records batch multiplicity
+as part of the training protocol rather than claiming the contradictory
+invariant. Once an eligible orbit is mastered, it remains eligible and is
+marked exactly once. The next larger absolute-speed orbit and its partner are
+then unlocked and initialized from their gait prior/exploration floor;
+repeated successes do not unlock it again.
+
+Full-resume state contains gait prior, priority, eligible/mastered masks, EWMA,
+visits, curriculum RNG, semantic curriculum configuration, and absolute
+training iteration. Current cells, partial segment errors, commands, gait,
+timers, phase, action history, observation history, and episode state are
+transient. Resume restores global curriculum competence, discards transient
+state, invalidates every cell, clears segment accumulators, and requests a
+fresh sample for every environment from the fresh simulator state. Legacy V5
+adaptive-weight curriculum state is migrated into global competence tensors;
+its stale per-environment runtime is discarded with a warning.
+Distributed PPO likewise rejects an enabled command curriculum until global
+competence updates and RNG state are synchronized across ranks.
+
+## Checkpoints, launch controls, and provenance
+
+Train, play, record, and fixed-grid evaluation share `--history`,
+`--no-history`, `--history-length`, and `--tr-consistency-mode`. Training and
+ablation expose every staged-curriculum setting. Generated training names use
+`trseq`, `trff`, or `notr` so exact, approximate, and disabled runs cannot be
+confused.
+
+Each run stores resolved environment and agent configurations plus an immutable
+`policy_contract.json`. Policy/checkpoint metadata includes the consistency
+mode and mapping version, action-history length two, sequence history length,
+required `H+2` records, candidate age and policy-version limits, and actor/value
+edge alignment. Forwarded Hydra arguments remain available, but a value that
+contradicts launcher-owned curriculum or policy metadata fails closed.
+
+A full resume rejects incompatible observation or causal-mapping semantics.
+Actor-only play/evaluation may load weights when the observation contract and
+actor width match, because the training-only sequence buffer is not needed for
+inference. Explicit weights-only initialization is likewise permitted. A 72-D
+V4 actor is incompatible: V5 does not pad, truncate, project, or silently
+migrate its inputs.
 
 Example Windows launches:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --history --history-length 30 --tr-policy-coef 0.1 --tr-value-coef 0.05
+.\scripts\symm_locomotion\train.ps1 --robot go2 --history --history-length 30 --tr-consistency-mode transition_aligned_sequence --tr-policy-coef 0.1 --tr-value-coef 0.05
+.\scripts\symm_locomotion\train.ps1 --robot x1 --history --tr-consistency-mode framewise_feature_approx
 .\scripts\symm_locomotion\train.ps1 --robot x1 --no-history --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest --history --history-length 30
 ```
 
 ## Physical limitations
 
-The time-reversal feature map is an inductive bias, not a claim that the robot
-and contact process are reversible. Motor damping, friction, inelastic impact,
-actuation lag, controller saturation, observation delay, contact discontinuity,
-and termination all break physical reversibility. Framewise history does not
-repair those effects. The value residual is approximate and task-conditioned,
-and the experimental sidecar must still reject dynamically implausible reverse
-candidates. Curriculum checkpointing exactly restores its sampler and task-local
-command/gait bookkeeping, but ordinary RSL-RL checkpoints do not snapshot the
-complete simulator physics state; resumed rollouts are therefore not claimed to
-be bitwise continuations of contact dynamics.
+The exactness claimed here is exact indexing and causal observation
+reconstruction for the declared discrete edge—not reversibility of the robot
+or simulator physics. Motor damping, friction, inelastic impacts, actuation
+lag, controller saturation, observation delay, contact discontinuities,
+external pushes, and termination break physical reversibility. Validity gates
+and detached confidence weights reduce obvious violations but do not prove
+that a candidate is dynamically realizable. The value residual remains a
+task-conditioned inductive bias.
+
+Ordinary checkpoints do not snapshot the complete simulator physics state, so
+a resumed rollout is not claimed to be a bitwise continuation of contact
+dynamics. The curriculum restores global learning competence and deliberately
+starts fresh transient simulator/task state.

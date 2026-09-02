@@ -88,7 +88,9 @@ analysis engine, while the Milestone 2 phase-mapping wrappers retain an
 archival notice and the exact detached commit required for their original
 regeneration.
 
-To play an archived policy, pass its checkpoint path directly, for example:
+Archived policy playback must use the historical worktree recorded in that
+run's provenance. From that worktree, pass the checkpoint path directly, for
+example:
 
 ```powershell
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
