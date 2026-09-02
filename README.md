@@ -158,13 +158,19 @@ scripts/symm_locomotion/
 
 Use `scripts/symm_locomotion` for normal work.
 
+New V5 runs use the 64-D hardware-proprioceptive contract and native 30-frame
+history by default (`1920` MLP inputs). See
+[Proprioceptive History TRS V5](docs/symm_locomotion/PROPRIO_HISTORY_TRS_V5.md)
+for the exact observation slices, history packing, time-reversal objectives,
+checkpoint compatibility, and optional TR-orbit command curriculum.
+
 Windows PowerShell:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 20000 --num-envs 512 --no-trs
-.\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 20000 --num-envs 512 --no-trs
-.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest
-.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest
+.\scripts\symm_locomotion\train.ps1 --robot go2 --history --history-length 30 --tr-policy-coef 0.1 --tr-value-coef 0.05
+.\scripts\symm_locomotion\train.ps1 --robot x1 --no-history --no-trs
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest --history --history-length 30
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint latest --no-history
 .\scripts\symm_locomotion\record.ps1 --robot go2 --checkpoint latest --gif
 .\scripts\symm_locomotion\symm_locomotion.ps1 compare --robots go2 x1
 .\scripts\symm_locomotion\tensorboard.ps1 --robots go2 x1
@@ -253,10 +259,11 @@ Direct IsaacLab commands still work:
 
 The current mapping is recorded in each environment configuration as
 `phase_mapping_version = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"`.
-The policy observation remains 72D and contains no clock-direction channel.
-Policies trained with an earlier mapping version should be retrained before
-correctness-aligned v4 deployment; use their archived code and environment
-configuration when exact legacy checkpoint or video reproduction is required.
+The V5 instantaneous policy observation is 64D and contains no clock-direction
+channel; the default MLP input is a native, flattened 30-frame history (1920D).
+Policies trained with an earlier mapping or observation contract should be
+retrained; use their archived code and environment configuration when exact
+legacy checkpoint or video reproduction is required.
 
 Ordinary backward locomotion uses the same forward-time gait schedule as
 forward locomotion. For common clock `phi` and fixed leg offsets `theta`, both
@@ -351,10 +358,9 @@ sampled low-speed commands remain continuous through zero instead of being
 converted to standstill commands. Exact standstill commands are not sampled
 while `rel_standing_envs=0.0`.
 
-Existing 72D checkpoints trained with the earlier negative-command phase
-reversal have different environment semantics. Reproduce those archived runs
-with their archived environment code and configuration rather than this phase
-mapping.
+Existing 72D checkpoints use an incompatible observation contract and are not
+silently adapted. Reproduce those archived runs with their archived environment
+code and configuration rather than this V5 policy contract.
 
 ## Playing and Recording
 
@@ -445,7 +451,7 @@ milestones:
 3. [Gait-family V2](logs/rsl_rl/good_runs/MILESTONE_3_GAIT_FAMILY_V2.md)
 4. [Gait-closure parameter V4](logs/rsl_rl/good_runs/MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md)
 
-Milestone 4 records the current five-policy cohort for each robot. The Go2
+Milestone 4 records the archived V4 five-policy cohort for each robot. The Go2
 screen recovers the Milestone 3 reward deficit for selected TRS settings while
 retaining useful leg-usage tradeoffs. Results remain single-seed,
 configuration-specific checkpoint comparisons rather than method-level causal

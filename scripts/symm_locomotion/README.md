@@ -350,7 +350,8 @@ treatments, their final checkpoints, and their full-V3 analysis provenance.
 They remain development evidence and are not members of either prospective
 confirmatory cohort.
 
-New checkpoints store schema-2 `time_reversal_state` with
+New V5 checkpoints store schema-3 `time_reversal_state` with the exact policy
+observation contract plus
 `last_completed_update`, the consecutive `next_absolute_update`, and the exact
 resolved policy, value, and augmentation schedules. The runner `iter` must be
 either that last or next update; loading advances execution to the saved next
@@ -358,19 +359,26 @@ absolute update. A pre-schema checkpoint falls back to `iter+1`. Enabled
 trajectory augmentation additionally requires matching side-model state,
 semantic configuration, RNG state, and schedule iteration; it refuses a
 silent random restart or a checkpoint whose schedule semantics differ.
+An enabled command curriculum likewise stores its grid, RNG, active cells, and
+task-local command/gait runtime, and full resume rejects a curriculum-mode
+mismatch in either direction.
 
-The historical mask is computed only from the saved 72D minibatch observation,
-using the centralized observation layout and scales. Available modes are
+The TR validity mask is computed from the latest 64D frame in the saved policy
+minibatch observation, whether the policy input is instantaneous or a native
+term-major flattened history. Available modes are
 `command`, `command_tracking`, `command_upright_phase`, and
 `command_tracking_upright_phase`. Their components are:
 
 ```text
 abs(vx_cmd) >= v_min
-abs(vx - vx_cmd) <= e_abs + e_rel * abs(vx_cmd)
 sqrt(projected_gravity_x^2 + projected_gravity_y^2) <= g_tolerance
 d_S1(phase_i, 0) >= epsilon_phase and
 d_S1(phase_i, swing_ratio) >= epsilon_phase for every foot
 ```
+
+Measured base velocity is intentionally absent from the hardware policy
+contract, so the legacy `command_tracking` variants reduce to the command gate;
+reward-side tracking diagnostics remain simulator-only.
 
 These are heuristic stable-phase validity gates, not proof that a physical
 transition is reversible. Low-frequency gradient diagnostics use
@@ -951,7 +959,7 @@ estimate fatigue life or failure probability.
 ```powershell
 .\scripts\symm_locomotion\evaluation.ps1 `
   --robot go2 --run 2026-08-21_example --model 19999 `
-  --expected_branch 72d-symm-v4-integration
+  --expected_branch jding/proprio-history-trs-v5
 ```
 
 Use the exact light and full commands below for a resolved checkpoint:
@@ -959,11 +967,11 @@ Use the exact light and full commands below for a resolved checkpoint:
 ```powershell
 .\scripts\symm_locomotion\evaluation.ps1 `
   --robot go2 --checkpoint C:\path\to\model_19999.pt --protocol light `
-  --expected_branch 72d-symm-v4-integration
+  --expected_branch jding/proprio-history-trs-v5
 
 .\scripts\symm_locomotion\evaluation.ps1 `
   --robot go2 --checkpoint C:\path\to\model_19999.pt --protocol full `
-  --expected_branch 72d-symm-v4-integration
+  --expected_branch jding/proprio-history-trs-v5
 ```
 
 The utility resolves `--run`, `--model`, and `--checkpoint latest` in the same
