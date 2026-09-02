@@ -691,8 +691,7 @@ class TransitionAlignedTRBuffer:
             or environment_mask.device != self.device
         ):
             raise ValueError(
-                "environment_mask must be a boolean tensor on the buffer device with shape "
-                f"({self.num_envs},)."
+                f"environment_mask must be a boolean tensor on the buffer device with shape ({self.num_envs},)."
             )
         self._records_since_clear = torch.where(
             environment_mask,
@@ -721,10 +720,7 @@ class TransitionAlignedTRBuffer:
         """Consume one full observation and return only its compact causal state."""
         expected_shape = (self.num_envs, self.history_length * SYMM_QUADRUPED_POLICY_OBS_DIM)
         _validate_tensor_shape(policy_observation, expected_shape, "policy_observation")
-        if (
-            not torch.is_floating_point(policy_observation)
-            or policy_observation.device != self.device
-        ):
+        if not torch.is_floating_point(policy_observation) or policy_observation.device != self.device:
             raise ValueError("policy_observation must be floating point and reside on the buffer device.")
         policy_frames = unpack_term_major_policy_history(policy_observation)
         latest_frame = policy_frames[:, -1, :].clone()
@@ -795,9 +791,7 @@ class TransitionAlignedTRBuffer:
         if isinstance(record, TransitionAlignedTRRecord):
             record = self.prepare_record(record)
         if collection_update is not None and (
-            isinstance(collection_update, bool)
-            or not isinstance(collection_update, Integral)
-            or collection_update < 0
+            isinstance(collection_update, bool) or not isinstance(collection_update, Integral) or collection_update < 0
         ):
             raise ValueError(f"collection_update must be a nonnegative integer; received {collection_update!r}.")
         if record.policy_history_seed is not None:
@@ -837,9 +831,7 @@ class TransitionAlignedTRBuffer:
             "tr_sequence/new_candidate_count": 0.0,
         }
         newest_update = (
-            int(collection_update)
-            if collection_update is not None
-            else int(record.collection_update_id.max().item())
+            int(collection_update) if collection_update is not None else int(record.collection_update_id.max().item())
         )
         if len(self._records) == self.required_sequence_records:
             window = _CompactCandidateWindow(
