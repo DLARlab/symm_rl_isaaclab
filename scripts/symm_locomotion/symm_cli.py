@@ -35,6 +35,22 @@ DEFAULT_ACTOR_MEAN_BOUND_MODE = "legacy_global"
 DEFAULT_TR_POLICY_OUTPUT_SPACE = "raw_action_mean"
 DEFAULT_GAIT_SAMPLING_PROFILE = "trclosed_v2_equal_family"
 DEFAULT_GAIT_CURRICULUM_ITERATIONS = 0
+DEFAULT_HISTORY_ENABLED = True
+DEFAULT_HISTORY_LENGTH = 30
+DEFAULT_HISTORY_TRS_MODE = "framewise_feature"
+POLICY_OBSERVATION_CONTRACT_VERSION = "hardware_proprio_history_64d_v1"
+POLICY_INSTANTANEOUS_FRAME_DIM = 64
+POLICY_HISTORY_PACKING = "term_major_oldest_to_newest_flattened"
+GAIT_PHASE_MAPPING_VERSION = "same_gait_backward_duty_aware_integrated_reward_boundary_v4"
+GAIT_LIBRARY_VERSION = "time_reversal_closed_v2"
+COMMAND_CURRICULUM_MODE_NONE = "none"
+COMMAND_CURRICULUM_MODE_TR_ORBIT = "tr_orbit_reward_threshold_v1"
+COMMAND_CURRICULUM_MODES = (COMMAND_CURRICULUM_MODE_NONE, COMMAND_CURRICULUM_MODE_TR_ORBIT)
+DEFAULT_CURRICULUM_VELOCITY_BIN_COUNT = 11
+DEFAULT_CURRICULUM_EWMA_COEFFICIENT = 0.1
+DEFAULT_CURRICULUM_UNLOCK_THRESHOLD = 0.8
+DEFAULT_CURRICULUM_NEIGHBOR_INCREMENT = 0.25
+DEFAULT_CURRICULUM_SEED = 0
 LEGACY_ABLATION_MIRROR_LOSS_COEFF = 0.2
 LEGACY_ABLATION_TR_VALUE_COEFF = 0.05
 DEFAULT_VIDEO_DURATION_S = 30.0
@@ -233,6 +249,106 @@ def coeff_label(value: float) -> str:
     return f"{value:g}".replace("-", "m").replace(".", "p")
 
 
+def resolve_policy_history(args: argparse.Namespace) -> tuple[bool, int]:
+    """Resolve and validate the policy-observation history requested by a launcher command."""
+    enabled = bool(getattr(args, "history_enabled", DEFAULT_HISTORY_ENABLED))
+    history_length = getattr(args, "history_length", DEFAULT_HISTORY_LENGTH)
+    if isinstance(history_length, bool) or not isinstance(history_length, int):
+        raise ValueError(f"--history_length must be an integer; received {history_length!r}.")
+    if enabled and history_length <= 0:
+        raise ValueError("--history_length must be a positive integer when history is enabled.")
+    return enabled, history_length if enabled else 0
+
+
+def policy_history_lab_args(args: argparse.Namespace) -> list[str]:
+    """Build matching environment and TR-regularizer history overrides."""
+    enabled, history_length = resolve_policy_history(args)
+    enabled_label = str(enabled).lower()
+    return [
+        f"env.observations.policy.history_length={history_length}",
+        "env.observations.policy.flatten_history_dim=true",
+        f"agent.algorithm.symmetry_cfg.history_enabled={enabled_label}",
+        f"agent.algorithm.symmetry_cfg.history_length={history_length}",
+        f"agent.algorithm.symmetry_cfg.history_trs_mode={DEFAULT_HISTORY_TRS_MODE}",
+    ]
+
+
+def resolve_command_curriculum(args: argparse.Namespace) -> dict[str, int | float | str]:
+    """Resolve and validate optional TR-orbit command-curriculum launcher settings."""
+    mode = getattr(args, "command_curriculum_mode", COMMAND_CURRICULUM_MODE_NONE)
+    if mode not in COMMAND_CURRICULUM_MODES:
+        raise ValueError(f"--command_curriculum_mode must be one of {COMMAND_CURRICULUM_MODES}; received {mode!r}.")
+
+    velocity_bin_count = getattr(args, "curriculum_velocity_bin_count", DEFAULT_CURRICULUM_VELOCITY_BIN_COUNT)
+    if isinstance(velocity_bin_count, bool) or not isinstance(velocity_bin_count, int) or velocity_bin_count < 2:
+        raise ValueError("--curriculum_velocity_bins must be an integer greater than or equal to two.")
+
+    ewma_coefficient = getattr(args, "curriculum_ewma_coefficient", DEFAULT_CURRICULUM_EWMA_COEFFICIENT)
+    if not math.isfinite(ewma_coefficient) or not 0.0 < ewma_coefficient <= 1.0:
+        raise ValueError("--curriculum_ewma must be finite and in (0, 1].")
+
+    unlock_threshold = getattr(args, "curriculum_unlock_threshold", DEFAULT_CURRICULUM_UNLOCK_THRESHOLD)
+    if not math.isfinite(unlock_threshold) or not 0.0 <= unlock_threshold <= 1.0:
+        raise ValueError("--curriculum_unlock_threshold must be finite and in [0, 1].")
+
+    neighbor_increment = getattr(args, "curriculum_neighbor_increment", DEFAULT_CURRICULUM_NEIGHBOR_INCREMENT)
+    if not math.isfinite(neighbor_increment) or neighbor_increment < 0.0:
+        raise ValueError("--curriculum_neighbor_increment must be finite and nonnegative.")
+
+    training_seed = getattr(args, "seed", None)
+    curriculum_seed = DEFAULT_CURRICULUM_SEED if training_seed is None else training_seed
+    if isinstance(curriculum_seed, bool) or not isinstance(curriculum_seed, int) or curriculum_seed < 0:
+        if mode != COMMAND_CURRICULUM_MODE_NONE:
+            raise ValueError("The command curriculum requires a nonnegative training --seed.")
+        curriculum_seed = DEFAULT_CURRICULUM_SEED
+
+    return {
+        "mode": mode,
+        "velocity_bin_count": velocity_bin_count,
+        "ewma_coefficient": ewma_coefficient,
+        "unlock_threshold": unlock_threshold,
+        "neighbor_increment": neighbor_increment,
+        "seed": curriculum_seed,
+    }
+
+
+def command_curriculum_lab_args(args: argparse.Namespace) -> list[str]:
+    """Build Hydra overrides for the optional TR-orbit command curriculum."""
+    settings = resolve_command_curriculum(args)
+    return [
+        # Quote string values because OmegaConf resolves an unquoted ``none``
+        # override as null instead of the disabled curriculum mode.
+        f"env.commands.base_velocity.command_curriculum_mode='{settings['mode']}'",
+        f"env.commands.base_velocity.curriculum_velocity_bin_count={settings['velocity_bin_count']}",
+        f"env.commands.base_velocity.curriculum_ewma_coefficient={settings['ewma_coefficient']}",
+        f"env.commands.base_velocity.curriculum_unlock_threshold={settings['unlock_threshold']}",
+        f"env.commands.base_velocity.curriculum_neighbor_increment={settings['neighbor_increment']}",
+        f"env.commands.base_velocity.curriculum_seed={settings['seed']}",
+    ]
+
+
+def default_training_run_name(args: argparse.Namespace, *, suffix: str | None = None) -> str:
+    """Return a compact run name encoding the primary training treatment."""
+    _, history_length = resolve_policy_history(args)
+    curriculum = resolve_command_curriculum(args)
+    symmetry_enabled = not bool(getattr(args, "disable_symmetry", False))
+    mirror_coeff = getattr(args, "mirror_loss_coeff", DEFAULT_MIRROR_LOSS_COEFF) if symmetry_enabled else 0.0
+    value_coeff = getattr(args, "tr_value_coeff", DEFAULT_TR_VALUE_COEFF) if symmetry_enabled else 0.0
+    seed = getattr(args, "seed", None)
+    seed_label = seed if seed is not None else "default"
+    curriculum_label = 0 if curriculum["mode"] == COMMAND_CURRICULUM_MODE_NONE else 1
+    trs_label = "trs" if symmetry_enabled else "no_trs"
+    run_name = (
+        f"{args.robot_spec.key}_{trs_label}_m{coeff_label(mirror_coeff)}_v{coeff_label(value_coeff)}"
+        f"_h{history_length}_cur{curriculum_label}_seed{seed_label}"
+    )
+    if suffix:
+        run_name += f"_{suffix}"
+    if bool(getattr(args, "smoke", False)):
+        run_name += "_smoke"
+    return run_name
+
+
 def default_kit_args() -> str:
     """Return viewer Kit args for the current platform."""
     return DEFAULT_WINDOWS_KIT_ARGS if os.name == "nt" else ""
@@ -422,9 +538,98 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry_run", "--dry-run", action="store_true", help="Print commands without running them.")
 
 
+def add_history_args(parser: argparse.ArgumentParser) -> None:
+    """Add native policy-observation history controls."""
+    parser.set_defaults(history_enabled=DEFAULT_HISTORY_ENABLED)
+    history_group = parser.add_mutually_exclusive_group()
+    history_group.add_argument(
+        "--history",
+        dest="history_enabled",
+        action="store_true",
+        help="Enable native flattened policy-observation history (default).",
+    )
+    history_group.add_argument(
+        "--no_history",
+        "--no-history",
+        dest="history_enabled",
+        action="store_false",
+        help="Disable policy-observation history and use one instantaneous frame.",
+    )
+    parser.add_argument(
+        "--history_length",
+        "--history-length",
+        type=int,
+        default=DEFAULT_HISTORY_LENGTH,
+        help="Number of native policy-observation frames when history is enabled.",
+    )
+
+
+def add_command_curriculum_args(parser: argparse.ArgumentParser) -> None:
+    """Add controls for the optional TR-orbit command competence curriculum."""
+    parser.set_defaults(command_curriculum_mode=COMMAND_CURRICULUM_MODE_NONE)
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--command_curriculum",
+        "--command-curriculum",
+        dest="command_curriculum_mode",
+        action="store_const",
+        const=COMMAND_CURRICULUM_MODE_TR_ORBIT,
+        help="Enable the TR-orbit reward-threshold command curriculum.",
+    )
+    mode_group.add_argument(
+        "--no_command_curriculum",
+        "--no-command-curriculum",
+        dest="command_curriculum_mode",
+        action="store_const",
+        const=COMMAND_CURRICULUM_MODE_NONE,
+        help="Disable the TR-orbit command curriculum (default).",
+    )
+    mode_group.add_argument(
+        "--command_curriculum_mode",
+        "--command-curriculum-mode",
+        dest="command_curriculum_mode",
+        choices=COMMAND_CURRICULUM_MODES,
+        help="Select the command curriculum explicitly.",
+    )
+    parser.add_argument(
+        "--curriculum_velocity_bins",
+        "--curriculum-velocity-bins",
+        "--curriculum_velocity_bin_count",
+        "--curriculum-velocity-bin-count",
+        dest="curriculum_velocity_bin_count",
+        type=int,
+        default=DEFAULT_CURRICULUM_VELOCITY_BIN_COUNT,
+        help="Number of signed forward-velocity curriculum bins.",
+    )
+    parser.add_argument(
+        "--curriculum_ewma",
+        "--curriculum-ewma",
+        "--curriculum_ewma_coefficient",
+        "--curriculum-ewma-coefficient",
+        dest="curriculum_ewma_coefficient",
+        type=float,
+        default=DEFAULT_CURRICULUM_EWMA_COEFFICIENT,
+        help="EWMA coefficient for segment competence.",
+    )
+    parser.add_argument(
+        "--curriculum_unlock_threshold",
+        "--curriculum-unlock-threshold",
+        type=float,
+        default=DEFAULT_CURRICULUM_UNLOCK_THRESHOLD,
+    )
+    parser.add_argument(
+        "--curriculum_neighbor_increment",
+        "--curriculum-neighbor-increment",
+        type=float,
+        default=DEFAULT_CURRICULUM_NEIGHBOR_INCREMENT,
+    )
+
+
 def add_train_args(parser: argparse.ArgumentParser) -> None:
     """Add train command options."""
     add_common_args(parser)
+    add_history_args(parser)
+    add_command_curriculum_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=DEFAULT_NUM_ENVS)
     parser.add_argument(
         "--iterations", "--max-iterations", "--max_iterations", type=int, default=DEFAULT_TRAINING_ITERATIONS
@@ -544,19 +749,7 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         raise ValueError("--gait_curriculum_iterations must be nonnegative.")
     num_envs = 1 if args.smoke else args.num_envs
     iterations = 1 if args.smoke else args.iterations
-    if args.run_name:
-        run_name = args.run_name
-    elif args.disable_symmetry:
-        run_name = "no_trs_smoke" if args.smoke else "no_trs"
-    elif args.tr_rampup_iterations > 0:
-        seed_label = args.seed if args.seed is not None else "default"
-        run_name = (
-            f"{args.robot_spec.key}_trs_{args.tr_ramp_shape}_m{coeff_label(args.mirror_loss_coeff)}"
-            f"_v{coeff_label(args.tr_value_coeff)}_w{args.tr_warmup_iterations}"
-            f"_r{args.tr_rampup_iterations}_seed{seed_label}"
-        )
-    else:
-        run_name = ("trs_smoke_" if args.smoke else "with_trs_") + f"mirror{coeff_label(args.mirror_loss_coeff)}"
+    run_name = args.run_name if args.run_name else default_training_run_name(args)
 
     command = [
         "train",
@@ -605,8 +798,12 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         f"env.commands.base_velocity.gait_sampling_profile={gait_sampling_profile}",
         f"env.commands.base_velocity.gait_curriculum_iterations={gait_curriculum_iterations}",
     ]
+    command += policy_history_lab_args(args)
+    command += command_curriculum_lab_args(args)
     if joint_target_limit_weight is not None:
         command.append(f"env.rewards.joint_target_limits.weight={joint_target_limit_weight}")
+    history_enabled, history_length = resolve_policy_history(args)
+    curriculum = resolve_command_curriculum(args)
     resolved_runtime_argv = [*command, *extra]
     direct_argv = getattr(args, "_direct_launcher_argv", None)
     direct_interface = getattr(args, "_direct_launcher_interface", "scripts/symm_locomotion/symm_cli.py")
@@ -617,6 +814,17 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         "resolved_runtime_argv_without_context": resolved_runtime_argv,
         "robot": args.robot_spec.key,
         "run_name": run_name,
+        "policy_contract": {
+            "observation_contract_version": POLICY_OBSERVATION_CONTRACT_VERSION,
+            "instantaneous_frame_dim": POLICY_INSTANTANEOUS_FRAME_DIM,
+            "history_enabled": history_enabled,
+            "history_length": history_length,
+            "history_packing": POLICY_HISTORY_PACKING,
+            "history_trs_mode": DEFAULT_HISTORY_TRS_MODE,
+            "gait_phase_mapping_version": GAIT_PHASE_MAPPING_VERSION,
+            "gait_library_version": GAIT_LIBRARY_VERSION,
+        },
+        "command_curriculum": curriculum,
     }
     context_payload = json.dumps(direct_context, separators=(",", ":"), sort_keys=True)
     hydra_start = next(
@@ -738,6 +946,7 @@ def gait_sequence_lab_args(args: argparse.Namespace) -> list[str]:
 def add_play_args(parser: argparse.ArgumentParser) -> None:
     """Add play command options."""
     add_common_args(parser)
+    add_history_args(parser)
     add_checkpoint_args(parser)
     add_rollout_plot_args(parser)
     add_gait_sequence_args(parser)
@@ -790,12 +999,13 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         command += ["--kit_args", kit_args]
     if args.print_gait:
         command += ["--print_gait_info", "--print_gait_info_interval", str(args.print_gait_interval)]
-    return command + gait_sequence_lab_args(args) + rollout_plot_lab_args(args) + extra
+    return command + gait_sequence_lab_args(args) + rollout_plot_lab_args(args) + policy_history_lab_args(args) + extra
 
 
 def add_record_args(parser: argparse.ArgumentParser) -> None:
     """Add record command options."""
     add_common_args(parser)
+    add_history_args(parser)
     add_checkpoint_args(parser)
     add_rollout_plot_args(parser)
     add_gait_sequence_args(parser)
@@ -850,12 +1060,13 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
         command += ["--viz", "kit", "--real-time"]
     if kit_args:
         command += ["--kit_args", kit_args]
-    return command + gait_args + rollout_plot_lab_args(args) + extra, checkpoint
+    return command + gait_args + rollout_plot_lab_args(args) + policy_history_lab_args(args) + extra, checkpoint
 
 
 def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
     """Add fixed-grid policy evaluation and analysis options."""
     add_common_args(parser)
+    add_history_args(parser)
     add_checkpoint_args(parser)
     parser.set_defaults(_protocol_explicit=False)
     parser.add_argument(
@@ -952,6 +1163,7 @@ def evaluation_lab_args(
         "--headless",
         "--symm_leg_usage_plan",
         str(study_path),
+        *policy_history_lab_args(args),
         *extra,
     ]
 
@@ -1102,6 +1314,8 @@ run_analyze_leg_usage = run_evaluation
 def add_ablation_args(parser: argparse.ArgumentParser) -> None:
     """Add ablation command options."""
     add_common_args(parser)
+    add_history_args(parser)
+    add_command_curriculum_args(parser)
     parser.set_defaults(_mirror_loss_coeff_explicit=False, _tr_value_coeff_explicit=False)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=DEFAULT_NUM_ENVS)
     parser.add_argument(
@@ -1177,23 +1391,16 @@ def run_ablation(args: argparse.Namespace, extra: list[str]) -> int:
             train_args.tr_value_coeff = tr_value_coeff
             if args.schedule_variants is None:
                 train_args.disable_symmetry = variant == "no_trs"
-                train_args.run_name = (
-                    f"ablation_with_trs_seed{seed}_mirror{coeff_label(mirror_loss_coeff)}"
-                    if variant == "with_trs"
-                    else f"ablation_no_trs_seed{seed}"
-                )
+                train_args.run_name = default_training_run_name(train_args, suffix="ablation")
             else:
                 disable_symmetry, warmup_iterations, rampup_iterations, ramp_shape = TR_SCHEDULE_SETTINGS[variant]
                 train_args.disable_symmetry = disable_symmetry
                 train_args.tr_warmup_iterations = warmup_iterations
                 train_args.tr_rampup_iterations = rampup_iterations
                 train_args.tr_ramp_shape = ramp_shape
-                effective_mirror = 0.0 if disable_symmetry else mirror_loss_coeff
-                effective_value = 0.0 if disable_symmetry else tr_value_coeff
-                train_args.run_name = (
-                    f"{args.robot_spec.key}_{variant}_m{coeff_label(effective_mirror)}"
-                    f"_v{coeff_label(effective_value)}_w{warmup_iterations}_r{rampup_iterations}"
-                    f"_{ramp_shape}_seed{seed}"
+                train_args.run_name = default_training_run_name(
+                    train_args,
+                    suffix=f"{variant}_w{warmup_iterations}_r{rampup_iterations}_{ramp_shape}",
                 )
             print(f"{log_prefix(args)}ablation variant={variant} seed={seed}", flush=True)
             code = run_isaaclab(args, train_lab_args(train_args, extra))

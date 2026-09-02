@@ -279,7 +279,7 @@ def test_direct_run_writes_resolved_command_and_result_independent_cohort_metada
         log_dir=tmp_path / "run",
         repo_root=repo,
         runtime_argv=["--task", "Test-Symm-v0"],
-        observation_dimension=72,
+        observation_dimension=64,
         action_dimension=12,
         direct_launch_context={
             "interface": r".\scripts\symm_locomotion\train.ps1",
@@ -295,7 +295,7 @@ def test_direct_run_writes_resolved_command_and_result_independent_cohort_metada
     assert cohort["eligibility_status"] == "incomplete"
     assert cohort["eligibility_is_result_independent"] is True
     assert cohort["result_quality_used_for_eligibility"] is False
-    assert cohort["observation_dimension"] == 72
+    assert cohort["observation_dimension"] == 64
     assert cohort["action_dimension"] == 12
     assert cohort["initialization_record_sha256"] == PROVENANCE.sha256_file(initialization)
 
@@ -303,6 +303,60 @@ def test_direct_run_writes_resolved_command_and_result_independent_cohort_metada
     changed_numpy_state = numpy_state.copy()
     changed_numpy_state[500] += 1
     assert PROVENANCE.state_sha256(numpy_state) != PROVENANCE.state_sha256(changed_numpy_state)
+
+
+def test_policy_contract_resolves_native_history_and_rejects_width_mismatch():
+    env = {"observations": {"policy": {"history_length": 30, "flatten_history_dim": True}}}
+    agent = {
+        "algorithm": {
+            "symmetry_cfg": {
+                "observation_contract_version": "hardware_proprio_history_64d_v1",
+                "instantaneous_frame_dim": 64,
+                "history_enabled": True,
+                "history_length": 30,
+                "history_packing": "term_major_oldest_to_newest_flattened",
+                "history_trs_mode": "framewise_feature",
+                "gait_phase_mapping_version": "phase-v4",
+                "gait_library_version": "gait-v2",
+            }
+        }
+    }
+
+    contract = PROVENANCE.resolve_policy_contract(env, agent, 1920)
+
+    assert contract == {
+        "observation_contract_version": "hardware_proprio_history_64d_v1",
+        "instantaneous_frame_dim": 64,
+        "history_enabled": True,
+        "history_length": 30,
+        "history_packing": "term_major_oldest_to_newest_flattened",
+        "history_trs_mode": "framewise_feature",
+        "policy_input_dim": 1920,
+        "gait_phase_mapping_version": "phase-v4",
+        "gait_library_version": "gait-v2",
+    }
+    with pytest.raises(ValueError, match="expected 1920, received 64.*--history --history-length 30"):
+        PROVENANCE.resolve_policy_contract(env, agent, 64)
+
+
+def test_policy_contract_resolves_no_history_and_requires_matching_env_setting():
+    env = {"observations": {"policy": {"history_length": 0, "flatten_history_dim": True}}}
+    symmetry = {
+        "observation_contract_version": "hardware_proprio_history_64d_v1",
+        "instantaneous_frame_dim": 64,
+        "history_enabled": False,
+        "history_length": 0,
+        "history_packing": "term_major_oldest_to_newest_flattened",
+        "history_trs_mode": "framewise_feature",
+        "gait_phase_mapping_version": "phase-v4",
+        "gait_library_version": "gait-v2",
+    }
+    agent = {"algorithm": {"symmetry_cfg": symmetry}}
+
+    assert PROVENANCE.resolve_policy_contract(env, agent, 64)["policy_input_dim"] == 64
+    env["observations"]["policy"]["history_length"] = 30
+    with pytest.raises(ValueError, match="Environment and algorithm policy-history settings differ"):
+        PROVENANCE.resolve_policy_contract(env, agent, 64)
 
 
 def test_non_time_reversal_runner_is_untouched(tmp_path):

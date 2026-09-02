@@ -32,6 +32,7 @@ SCHEMA_VERSION = 1
 INITIALIZATION_RELATIVE_PATH = Path("provenance") / "initialization.json"
 RESOLVED_COMMAND_RELATIVE_PATH = Path("provenance") / "resolved_command.json"
 COHORT_METADATA_RELATIVE_PATH = Path("provenance") / "cohort_metadata.json"
+POLICY_CONTRACT_RELATIVE_PATH = Path("policy_contract.json")
 _STRICT_MATCH_FIELDS = (
     "seed",
     "training_seed",
@@ -987,6 +988,26 @@ def record_resolved_run_metadata(
     git = git_provenance(root)
     direct_context = _parse_direct_launch_context(direct_launch_context)
     study_context = _load_context(study_context_path)
+    policy_contract = resolve_policy_contract(env_config, agent_config, observation_dimension)
+    if policy_contract is not None:
+        declared_contract = direct_context.get("policy_contract") if direct_context is not None else None
+        if declared_contract is not None:
+            if not isinstance(declared_contract, Mapping):
+                raise ValueError("Direct-launch policy_contract must be a mapping.")
+            mismatches = {
+                name: (declared_contract.get(name), policy_contract[name])
+                for name in declared_contract
+                if name in policy_contract and declared_contract.get(name) != policy_contract[name]
+            }
+            if mismatches:
+                raise ValueError(f"Direct-launch policy contract differs from resolved configuration: {mismatches!r}.")
+        policy_record = {
+            "schema_version": SCHEMA_VERSION,
+            "record_kind": "policy_observation_contract",
+            "recorded_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+            **policy_contract,
+        }
+        _write_immutable_record(run_dir / POLICY_CONTRACT_RELATIVE_PATH, policy_record)
 
     command_record = {
         "schema_version": SCHEMA_VERSION,
@@ -1045,6 +1066,73 @@ def record_resolved_run_metadata(
     cohort_path = run_dir / COHORT_METADATA_RELATIVE_PATH
     _write_immutable_record(cohort_path, cohort_record)
     return command_path, cohort_path
+
+
+def resolve_policy_contract(
+    env_config: Mapping[str, Any],
+    agent_config: Mapping[str, Any],
+    policy_input_dimension: int,
+) -> dict[str, Any] | None:
+    """Resolve and validate the task-local policy observation contract.
+
+    Args:
+        env_config: Resolved environment configuration.
+        agent_config: Resolved RSL-RL agent configuration.
+        policy_input_dimension: Actor/critic policy input width.
+
+    Returns:
+        JSON-ready policy contract metadata, or ``None`` for unrelated tasks.
+    """
+    symmetry = _lookup(agent_config, "algorithm", "symmetry_cfg", default={})
+    if not isinstance(symmetry, Mapping):
+        return None
+    version_id = symmetry.get("observation_contract_version")
+    if version_id is None:
+        return None
+    if not isinstance(version_id, str) or not version_id:
+        raise ValueError("observation_contract_version must be a nonempty string.")
+
+    frame_dimension = symmetry.get("instantaneous_frame_dim")
+    history_enabled = symmetry.get("history_enabled")
+    history_length = symmetry.get("history_length")
+    history_packing = symmetry.get("history_packing")
+    history_trs_mode = symmetry.get("history_trs_mode")
+    if isinstance(frame_dimension, bool) or not isinstance(frame_dimension, int) or frame_dimension <= 0:
+        raise ValueError(f"instantaneous_frame_dim must be a positive integer; received {frame_dimension!r}.")
+    if not isinstance(history_enabled, bool):
+        raise ValueError(f"history_enabled must be boolean; received {history_enabled!r}.")
+    if isinstance(history_length, bool) or not isinstance(history_length, int) or history_length < 0:
+        raise ValueError(f"history_length must be a nonnegative integer; received {history_length!r}.")
+    if history_enabled != (history_length > 0):
+        raise ValueError("history_enabled must be true exactly when history_length is positive.")
+    if not isinstance(history_packing, str) or not history_packing:
+        raise ValueError("history_packing must be a nonempty string.")
+
+    env_history_length = _lookup(env_config, "observations", "policy", "history_length", default=None)
+    if env_history_length != history_length:
+        raise ValueError(
+            "Environment and algorithm policy-history settings differ: "
+            f"env history_length={env_history_length!r}, algorithm history_length={history_length!r}."
+        )
+    expected_width = frame_dimension * (history_length if history_enabled else 1)
+    if policy_input_dimension != expected_width:
+        required_flags = f"--history --history-length {history_length}" if history_enabled else "--no-history"
+        raise ValueError(
+            "Active policy observation width is incompatible with the resolved observation contract: "
+            f"expected {expected_width}, received {policy_input_dimension}. "
+            f"Use {required_flags} with contract {version_id!r}."
+        )
+    return {
+        "observation_contract_version": version_id,
+        "instantaneous_frame_dim": frame_dimension,
+        "history_enabled": history_enabled,
+        "history_length": history_length,
+        "history_packing": history_packing,
+        "history_trs_mode": history_trs_mode,
+        "policy_input_dim": policy_input_dimension,
+        "gait_phase_mapping_version": symmetry.get("gait_phase_mapping_version"),
+        "gait_library_version": symmetry.get("gait_library_version"),
+    }
 
 
 def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:

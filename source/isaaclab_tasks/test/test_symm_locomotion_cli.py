@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -267,9 +268,179 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
     assert "agent.algorithm.symmetry_cfg.rampup_iterations=0" in command
     assert "agent.algorithm.symmetry_cfg.ramp_shape=linear" in command
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+    assert "env.observations.policy.history_length=30" in command
+    assert "env.observations.policy.flatten_history_dim=true" in command
+    assert "agent.algorithm.symmetry_cfg.history_enabled=true" in command
+    assert "agent.algorithm.symmetry_cfg.history_length=30" in command
+    assert "agent.algorithm.symmetry_cfg.history_trs_mode=framewise_feature" in command
 
 
-def test_ramped_train_run_name_records_complete_schedule():
+@pytest.mark.parametrize("command", ["train", "play", "record", "evaluation", "ablation"])
+def test_history_defaults_are_shared_by_launcher_workflows(command):
+    symm_cli = _load_symm_cli()
+
+    args = symm_cli.build_parser().parse_args([command])
+
+    assert args.history_enabled is True
+    assert args.history_length == 30
+    assert symm_cli.resolve_policy_history(args) == (True, 30)
+
+
+@pytest.mark.parametrize("no_history_option", ["--no_history", "--no-history"])
+@pytest.mark.parametrize("length_option", ["--history_length", "--history-length"])
+def test_history_aliases_disable_history_and_force_zero(no_history_option, length_option):
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", no_history_option, length_option, "7", "--robot", "go2"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert symm_cli.resolve_policy_history(args) == (False, 0)
+    assert "env.observations.policy.history_length=0" in command
+    assert "agent.algorithm.symmetry_cfg.history_enabled=false" in command
+    assert "agent.algorithm.symmetry_cfg.history_length=0" in command
+    assert command[command.index("--run_name") + 1] == "go2_trs_m0p1_v0p05_h0_cur0_seeddefault"
+
+
+@pytest.mark.parametrize("history_length", [0, -1])
+def test_enabled_history_rejects_nonpositive_lengths(history_length, capsys):
+    symm_cli = _load_symm_cli()
+
+    result = symm_cli.main(["train", "--history-length", str(history_length), "--dry-run", "--no-conda-run"])
+
+    assert result == 2
+    assert "must be a positive integer when history is enabled" in capsys.readouterr().err
+
+
+def test_history_dry_run_prints_exact_hydra_overrides(capsys):
+    symm_cli = _load_symm_cli()
+
+    result = symm_cli.main(["train", "--no-history", "--smoke", "--dry-run", "--no-conda-run"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "env.observations.policy.history_length=0" in output
+    assert "agent.algorithm.symmetry_cfg.history_enabled=false" in output
+    assert "agent.algorithm.symmetry_cfg.history_length=0" in output
+    assert "agent.algorithm.symmetry_cfg.history_trs_mode=framewise_feature" in output
+
+
+def test_history_overrides_are_identical_for_play_record_and_evaluation(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "run" / "model_99.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    expected = symm_cli.policy_history_lab_args(symm_cli.build_parser().parse_args(["play", "--no-history"]))
+
+    commands = []
+    for launcher in ("play", "record", "evaluation"):
+        args = symm_cli.build_parser().parse_args([launcher, "--robot", "go2", "--no-history"])
+        args.robot_spec = symm_cli.get_robot(args.robot)
+        if launcher == "play":
+            commands.append(symm_cli.play_lab_args(args, []))
+        elif launcher == "record":
+            commands.append(symm_cli.record_lab_args(args, [])[0])
+        else:
+            commands.append(symm_cli.evaluation_lab_args(args, checkpoint, tmp_path / "study.json", []))
+
+    for command in commands:
+        assert all(override in command for override in expected)
+
+
+def test_train_direct_context_records_policy_contract_metadata():
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", "x1", "--history-length", "5", "--seed", "42"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+    context_index = command.index("--symm_direct_launch_context")
+    context = json.loads(command[context_index + 1])
+
+    assert context["policy_contract"] == {
+        "gait_library_version": "time_reversal_closed_v2",
+        "gait_phase_mapping_version": "same_gait_backward_duty_aware_integrated_reward_boundary_v4",
+        "history_enabled": True,
+        "history_length": 5,
+        "history_packing": "term_major_oldest_to_newest_flattened",
+        "history_trs_mode": "framewise_feature",
+        "instantaneous_frame_dim": 64,
+        "observation_contract_version": "hardware_proprio_history_64d_v1",
+    }
+
+
+def test_command_curriculum_flags_build_validated_overrides_and_run_name():
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(
+        [
+            "train",
+            "--robot",
+            "go2",
+            "--seed",
+            "42",
+            "--command-curriculum",
+            "--curriculum-velocity-bins",
+            "13",
+            "--curriculum-ewma",
+            "0.2",
+            "--curriculum-unlock-threshold",
+            "0.75",
+            "--curriculum-neighbor-increment",
+            "0.3",
+        ]
+    )
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert "env.commands.base_velocity.command_curriculum_mode='tr_orbit_reward_threshold_v1'" in command
+    assert "env.commands.base_velocity.curriculum_velocity_bin_count=13" in command
+    assert "env.commands.base_velocity.curriculum_ewma_coefficient=0.2" in command
+    assert "env.commands.base_velocity.curriculum_unlock_threshold=0.75" in command
+    assert "env.commands.base_velocity.curriculum_neighbor_increment=0.3" in command
+    assert "env.commands.base_velocity.curriculum_seed=42" in command
+    assert command[command.index("--run_name") + 1] == "go2_trs_m0p1_v0p05_h30_cur1_seed42"
+
+
+def test_disabled_command_curriculum_override_is_quoted_for_hydra():
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", "go2", "--seed", "42"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert "env.commands.base_velocity.command_curriculum_mode='none'" in command
+    assert "env.commands.base_velocity.command_curriculum_mode=none" not in command
+
+
+@pytest.mark.parametrize("option", ["--command_curriculum", "--command-curriculum"])
+def test_command_curriculum_underscore_and_hyphen_aliases(option):
+    symm_cli = _load_symm_cli()
+
+    args = symm_cli.build_parser().parse_args(["ablation", option])
+
+    assert args.command_curriculum_mode == "tr_orbit_reward_threshold_v1"
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        ("--curriculum-velocity-bins", "1", "greater than or equal to two"),
+        ("--curriculum-ewma", "0", "curriculum_ewma must be finite"),
+        ("--curriculum-unlock-threshold", "1.1", "curriculum_unlock_threshold must be finite"),
+        ("--curriculum-neighbor-increment", "-0.1", "curriculum_neighbor_increment must be finite"),
+    ],
+)
+def test_command_curriculum_rejects_invalid_values(option, value, message):
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", option, value])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    with pytest.raises(ValueError, match=message):
+        symm_cli.train_lab_args(args, [])
+
+
+def test_train_run_name_records_primary_history_and_curriculum_treatment():
     symm_cli = _load_symm_cli()
     args = symm_cli.build_parser().parse_args(
         [
@@ -295,7 +466,7 @@ def test_ramped_train_run_name_records_complete_schedule():
 
     command = symm_cli.train_lab_args(args, [])
 
-    assert command[command.index("--run_name") + 1] == "go2_trs_linear_m0p2_v0p1_w0_r2000_seed42"
+    assert command[command.index("--run_name") + 1] == "go2_trs_m0p2_v0p1_h30_cur0_seed42"
 
 
 def test_ablation_uses_shared_training_scale_defaults():
@@ -349,9 +520,9 @@ def test_schedule_ablation_dry_run_resolves_ramp_variants(capsys):
     assert result == 0
     command_lines = [line for line in captured.out.splitlines() if " --run_name " in line]
     assert len(command_lines) == 5
-    assert any("_w0_r2000_linear_seed42" in line for line in command_lines)
-    assert any("_w500_r1500_linear_seed42" in line for line in command_lines)
-    assert any("_w0_r2000_half_cosine_seed42" in line for line in command_lines)
+    assert any("_h30_cur0_seed42_linear_w0_r2000_linear" in line for line in command_lines)
+    assert any("_h30_cur0_seed42_delayed_linear_w500_r1500_linear" in line for line in command_lines)
+    assert any("_h30_cur0_seed42_half_cosine_w0_r2000_half_cosine" in line for line in command_lines)
 
 
 def test_no_trs_disables_every_auxiliary_symmetry_training_path():
