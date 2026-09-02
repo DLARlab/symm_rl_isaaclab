@@ -1162,8 +1162,9 @@ explicit `--baseline` is placed first in comparison tables and figures. The
 baseline is always black.
 
 The following command reproduces the five-run Go2 comparison. The resolver
-checks the normal experiment root first and then the curated `good_runs` root;
-this matters because the final run currently lives only in `good_runs`.
+checks the normal experiment root first and then the curated `good_runs` root,
+so the command remains valid if a retained run is later moved into the curated
+archive.
 
 ```powershell
 .\isaaclab.bat -p .\scripts\symm_locomotion\comparison.py `
@@ -1175,7 +1176,7 @@ this matters because the final run currently lives only in `good_runs`.
   --baseline NoTRS `
   --run_root .\logs\rsl_rl\unitree_go2_symm_flat `
   --run_root .\logs\rsl_rl\good_runs\unitree_go2_symm_flat `
-  --output_dir .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis
+  --output_dir .\logs\analysis\rsl_rl\unitree_go2_symm_flat\2026-09-01_09-33-57_gait_closure_parameter_v4_analysis
 ```
 
 The equivalent platform launchers are `comparison.ps1` on Windows and
@@ -1184,12 +1185,12 @@ The equivalent platform launchers are `comparison.ps1` on Windows and
 
 ```powershell
 .\scripts\symm_locomotion\comparison.ps1 --manifest `
-  .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis\study.json
+  .\logs\analysis\rsl_rl\unitree_go2_symm_flat\2026-09-01_09-33-57_gait_closure_parameter_v4_analysis\study.json
 ```
 
 ```bash
 bash scripts/symm_locomotion/comparison.sh --manifest \
-  logs/rsl_rl/unitree_go2_symm_flat/gait_closure_v4_analysis/study.json
+  logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-09-01_09-33-57_gait_closure_parameter_v4_analysis/study.json
 ```
 
 Do not confuse this analysis launcher family with the deprecated `compare.py`,
@@ -1270,10 +1271,10 @@ generated canonical study. Either entry point can regenerate the same analysis:
 
 ```powershell
 .\isaaclab.bat -p .\scripts\symm_locomotion\comparison.py `
-  --manifest .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis\study.json
+  --manifest .\logs\analysis\rsl_rl\unitree_go2_symm_flat\2026-09-01_09-33-57_gait_closure_parameter_v4_analysis\study.json
 
 .\isaaclab.bat -p `
-  .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis\reproduce.py
+  .\logs\analysis\rsl_rl\unitree_go2_symm_flat\2026-09-01_09-33-57_gait_closure_parameter_v4_analysis\reproduce.py
 ```
 
 In manifest mode, `--output_dir` defaults to the manifest's parent directory.

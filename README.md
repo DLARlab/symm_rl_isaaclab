@@ -378,7 +378,7 @@ They require the historical worktree recorded with each run; the current V5
 launcher intentionally rejects their 72D actors.
 
 ```powershell
-.\scripts\symm_locomotion\play.ps1 --robot go2 --run 2026-07-11_20-53-43_more_trs_lr1e4_fixed --model 9999
+.\scripts\symm_locomotion\play.ps1 --robot go2 --run 2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43 --model 19999
 .\scripts\symm_locomotion\play.ps1 --robot x1 --run 2026-07-11_20-53-48_more_trs_lr1e4_fixed --model 9999
 ```
 
