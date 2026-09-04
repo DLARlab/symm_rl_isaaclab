@@ -26,6 +26,9 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.flat
     make_play_physics_cfg,
     make_single_body_contact_sensor,
 )
+from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.observation_history import (
+    PolicyObservationHistoryCfg,
+)
 from isaaclab_tasks.manager_based.locomotion.velocity.mdp import go2_symm as go2_symm_mdp
 
 from isaaclab_assets import ISAACLAB_ASSETS_EXT_DIR
@@ -58,6 +61,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
 
     sim: SimulationCfg = SimulationCfg(physics=PhysicsCfg())
     rewards: SymmQuadrupedRewardsCfg = SymmQuadrupedRewardsCfg()
+    policy_observation_history: PolicyObservationHistoryCfg = PolicyObservationHistoryCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -131,7 +135,11 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         self.actions.joint_pos.preserve_order = True
         self.actions.joint_pos.scale = 0.25
 
-        self.commands.base_velocity = make_gait_velocity_command(go2_symm_mdp, base_height_range=(0.35, 0.45))
+        self.commands.base_velocity = make_gait_velocity_command(
+            go2_symm_mdp,
+            base_height_range=(0.35, 0.45),
+            curriculum_tracking_ang_vel_threshold=0.7,
+        )
 
         self._configure_go2_symm_observations()
         self._configure_go2_symm_rewards()
@@ -159,7 +167,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_go2_symm_observations(self) -> None:
-        """Configure the shared 72D Go2 policy observation."""
+        """Configure the shared 56D Go2 policy observation."""
         configure_policy_observations(self, go2_symm_mdp, _GO2_LEGGED_GYM_JOINT_ORDER)
 
     def _configure_go2_symm_rewards(self) -> None:

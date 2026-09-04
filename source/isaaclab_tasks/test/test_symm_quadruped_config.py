@@ -48,9 +48,11 @@ def _tensor_data(value: torch.Tensor) -> SimpleNamespace:
     return SimpleNamespace(torch=value)
 
 
-def test_training_physics_uses_proven_aggregate_pair_capacity():
+def test_training_physics_uses_proven_2048_env_pair_capacities():
     physics_cfg = SymmQuadrupedPhysicsCfg().physx
 
+    assert physics_cfg.gpu_found_lost_pairs_capacity == 2**22
+    assert physics_cfg.gpu_found_lost_aggregate_pairs_capacity == 2**27
     assert physics_cfg.gpu_total_aggregate_pairs_capacity == 2**22
 
 
@@ -90,9 +92,9 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
     )
 
     assert cfg.clip_actions is None
-    assert cfg.actor.distribution_cfg.init_std == 0.5
+    assert cfg.actor.distribution_cfg.init_std == 1.0
     assert cfg.algorithm.entropy_coef == 0.005
-    assert cfg.algorithm.symmetry_cfg.command_observation_index == 9
+    assert cfg.algorithm.symmetry_cfg.command_observation_index == 3
     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
 
 
@@ -177,18 +179,59 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
     assert calls == ["prepare_command", "reward", "apply_pending", "observation"]
 
 
-def test_policy_observations_include_velocity_and_zero_sagittal_state_placeholder():
-    env_cfg = UnitreeGo2SymmFlatEnvCfg()
+@pytest.mark.parametrize("env_cfg_cls", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
+def test_policy_observations_remove_constant_zero_dimensions(env_cfg_cls):
+    env_cfg = env_cfg_cls()
     policy = env_cfg.observations.policy
 
-    assert policy.base_lin_vel.func is base_mdp.base_lin_vel
-    assert policy.base_lin_vel.scale == (2.0, 2.0, 2.0)
-    assert policy.base_ang_vel.func is base_mdp.base_ang_vel
-    assert policy.base_ang_vel.scale == (0.25, 0.25, 0.25)
-    assert policy.velocity_commands.func is symm_quadruped.desired_base_twist
-    assert policy.velocity_commands.scale == (2.0, 2.0, 2.0, 0.25, 0.25, 0.25)
-    assert policy.sagittal_plane_state.func is symm_quadruped.sagittal_plane_state_zero
-    assert policy.sagittal_plane_state.params == {}
+    assert env_cfg.policy_observation_history.history_length == 20
+    assert env_cfg.policy_observation_history.group_name == "policy"
+    assert policy.base_lin_vel is None
+    assert policy.base_ang_vel is None
+    assert policy.velocity_commands.func is base_mdp.generated_commands
+    assert policy.velocity_commands.scale == (2.0, 2.0, 0.25)
+    assert policy.foot_theta.func is symm_quadruped.foot_theta
+    assert getattr(policy, "foot_theta_sin", None) is None
+    assert getattr(policy, "foot_theta_cos", None) is None
+    assert policy.sagittal_plane_state is None
+    observation_terms = [name for name, term in vars(policy).items() if hasattr(term, "func")]
+    assert observation_terms == [
+        "projected_gravity",
+        "velocity_commands",
+        "joint_pos",
+        "joint_vel",
+        "actions",
+        "foot_phase_sin",
+        "foot_phase_cos",
+        "foot_theta",
+        "phase_ratios",
+    ]
+
+
+def test_foot_theta_observation_uses_continuous_template_canonical_range():
+    gait_command = SimpleNamespace(
+        foot_thetas=torch.tensor(
+            [
+                [-0.13, 0.13, 0.50, 0.63],
+                [0.87, -0.63, 0.75, -0.25],
+            ]
+        )
+    )
+    env = SimpleNamespace(command_manager=SimpleNamespace(get_term=lambda _: gait_command))
+
+    theta = symm_quadruped.foot_theta(env, command_name="base_velocity")
+
+    assert torch.allclose(
+        theta,
+        torch.tensor(
+            [
+                [-0.13, 0.13, 0.50, 0.63],
+                [-0.13, 0.37, -0.25, -0.25],
+            ]
+        ),
+    )
+    assert torch.all(theta >= -0.25)
+    assert torch.all(theta < 0.75)
 
 
 def test_sagittal_plane_state_zero_preserves_three_zero_dimensions():
@@ -251,12 +294,14 @@ def test_deprecated_morphological_symmetry_function_forwards_to_leg_permutation(
             env,
             command_name="base_velocity",
             joint_cfg=joint_cfg,
+            phase_sync_tolerance=0.01,
         )
 
     assert result is expected
     assert captured["env"] is env
     assert captured["command_name"] == "base_velocity"
     assert captured["joint_cfg"] is joint_cfg
+    assert captured["phase_sync_tolerance"] == 0.01
 
 
 def test_x1_leg_permutation_adapter_uses_x1_joint_convention(monkeypatch):
@@ -276,16 +321,24 @@ def test_x1_leg_permutation_adapter_uses_x1_joint_convention(monkeypatch):
         env,
         command_name="base_velocity",
         joint_cfg=joint_cfg,
+        phase_sync_tolerance=0.01,
     )
 
     assert result is expected
     assert captured["logical_joint_signs"] == dobot_x1_symm.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS
     assert captured["joint_ranges"] == dobot_x1_symm.DOBOT_X1_SYMM_JOINT_RANGES
+    assert captured["phase_sync_tolerance"] == 0.01
 
 
 def test_deprecated_x1_morphological_symmetry_function_forwards(monkeypatch):
     expected = torch.tensor([-0.75])
-    monkeypatch.setattr(dobot_x1_symm, "leg_permutation_symmetry_penalty", lambda *_, **__: expected)
+    captured = {}
+
+    def fake_leg_permutation(*_, **kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(dobot_x1_symm, "leg_permutation_symmetry_penalty", fake_leg_permutation)
     monkeypatch.setattr(dobot_x1_symm, "_MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED", False)
 
     with pytest.warns(DeprecationWarning, match="leg_permutation_symmetry_penalty"):
@@ -293,9 +346,66 @@ def test_deprecated_x1_morphological_symmetry_function_forwards(monkeypatch):
             SimpleNamespace(),
             command_name="base_velocity",
             joint_cfg=SimpleNamespace(),
+            phase_sync_tolerance=0.01,
         )
 
     assert result is expected
+    assert captured["phase_sync_tolerance"] == 0.01
+
+
+def test_leg_permutation_penalty_only_uses_synchronous_pairs():
+    joint_pos = torch.zeros(2, 12)
+    joint_pos[:, 6:9] = 1.0
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(joint_pos=_tensor_data(joint_pos)))
+    gait_command = SimpleNamespace(
+        foot_thetas=torch.tensor(
+            [
+                [0.00, 0.50, 0.00, 0.50],
+                [0.00, 0.50, 0.03, 0.50],
+            ]
+        )
+    )
+    env = SimpleNamespace(
+        num_envs=2,
+        device="cpu",
+        scene=scene,
+        command_manager=SimpleNamespace(get_term=lambda _: gait_command),
+    )
+
+    penalty = symm_quadruped.leg_permutation_symmetry_penalty(
+        env,
+        command_name="base_velocity",
+        joint_cfg=SimpleNamespace(joint_ids=list(range(12))),
+        logical_joint_signs=((1.0, 1.0, 1.0),) * 4,
+        joint_ranges=(1.0, 1.0, 1.0),
+        leg_pairs=(("FL", "RL"),),
+        phase_sync_tolerance=0.02,
+    )
+
+    assert penalty[0].item() < -0.99
+    assert penalty[1].item() == 0.0
+
+
+@pytest.mark.parametrize("phase_sync_tolerance", [-0.01, 0.51])
+def test_leg_permutation_penalty_rejects_invalid_phase_tolerance(phase_sync_tolerance):
+    joint_pos = torch.zeros(1, 12)
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(joint_pos=_tensor_data(joint_pos)))
+    env = SimpleNamespace(
+        num_envs=1,
+        device="cpu",
+        scene=scene,
+        command_manager=SimpleNamespace(get_term=lambda _: SimpleNamespace(foot_thetas=torch.zeros(1, 4))),
+    )
+
+    with pytest.raises(ValueError, match="phase_sync_tolerance"):
+        symm_quadruped.leg_permutation_symmetry_penalty(
+            env,
+            command_name="base_velocity",
+            joint_cfg=SimpleNamespace(joint_ids=list(range(12))),
+            phase_sync_tolerance=phase_sync_tolerance,
+        )
 
 
 def test_joint_position_targets_are_clamped_to_soft_limits():
@@ -425,14 +535,14 @@ def test_gait_command_uses_planar_velocity_curriculum():
 
     assert not command_cfg.heading_command
     assert command_cfg.ranges.lin_vel_x == (-4.0, 4.0)
-    assert command_cfg.ranges.lin_vel_y == (-1.0, 1.0)
+    assert command_cfg.ranges.lin_vel_y == (-0.6, 0.6)
     assert command_cfg.ranges.ang_vel_z == (-4.0, 4.0)
     assert command_cfg.min_xy_command_norm == 0.1
     assert command_cfg.curriculum.enabled
     assert command_cfg.curriculum.initial_ranges.lin_vel_x == (-0.5, 0.5)
-    assert command_cfg.curriculum.initial_ranges.lin_vel_y == (-0.25, 0.25)
+    assert command_cfg.curriculum.initial_ranges.lin_vel_y == (-0.6, 0.6)
     assert command_cfg.curriculum.initial_ranges.ang_vel_z == (-0.5, 0.5)
-    assert command_cfg.curriculum.num_bins == (16, 8, 16)
+    assert command_cfg.curriculum.num_bins == (16, 1, 16)
     assert command_cfg.resampling_time_range == (10.0, 10.0)
     assert command_cfg.resampling_time_gait == 10.0
     assert command_cfg.resampling_transition_probabilities == pytest.approx((1.0 / 3.0,) * 3)
@@ -440,8 +550,8 @@ def test_gait_command_uses_planar_velocity_curriculum():
     assert not command_cfg.resample_gait_once_after_reset
     assert command_cfg.curriculum_tracking_lin_vel_sigma == 0.25
     assert command_cfg.curriculum_tracking_ang_vel_sigma == 0.25
-    assert command_cfg.curriculum_tracking_lin_vel_threshold == 0.8
-    assert command_cfg.curriculum_tracking_ang_vel_threshold == 0.8
+    assert command_cfg.curriculum_tracking_lin_vel_threshold == 0.9
+    assert command_cfg.curriculum_tracking_ang_vel_threshold == 0.9
 
 
 def test_gait_command_curriculum_expands_successful_bins():
@@ -455,9 +565,9 @@ def test_gait_command_curriculum_expands_successful_bins():
     curriculum.update(boundary_bin_id.unsqueeze(0), torch.tensor([True]))
 
     assert curriculum.active_bin_count > initial_active_bins
-    assert initial_max_command.tolist() == pytest.approx([0.5, 0.25, 0.5])
+    assert initial_max_command.tolist() == pytest.approx([0.5, 0.6, 0.5])
     assert curriculum.max_active_abs_command[0].item() == pytest.approx(initial_max_command[0].item() + 0.5)
-    assert curriculum.max_active_abs_command[1].item() == pytest.approx(initial_max_command[1].item() + 0.25)
+    assert curriculum.max_active_abs_command[1].item() == pytest.approx(initial_max_command[1].item())
     assert curriculum.max_active_abs_command[2].item() == pytest.approx(initial_max_command[2].item() + 0.5)
 
 
@@ -469,8 +579,8 @@ def test_gait_command_curriculum_samples_only_active_bins():
 
     assert torch.all(commands[:, 0] >= -0.5)
     assert torch.all(commands[:, 0] <= 0.5)
-    assert torch.all(commands[:, 1] >= -0.25)
-    assert torch.all(commands[:, 1] <= 0.25)
+    assert torch.all(commands[:, 1] >= -0.6)
+    assert torch.all(commands[:, 1] <= 0.6)
     assert torch.all(commands[:, 2] >= -0.5)
     assert torch.all(commands[:, 2] <= 0.5)
 
@@ -568,8 +678,12 @@ def test_gait_command_defers_expired_transition_until_after_reward():
     assert not torch.any(command._pending_transition_envs)
 
 
-def test_gait_command_curriculum_uses_walk_these_ways_reward_thresholds():
-    command_cfg = make_gait_velocity_command(symm_quadruped)
+def test_gait_command_curriculum_uses_configured_reward_thresholds():
+    command_cfg = make_gait_velocity_command(
+        symm_quadruped,
+        curriculum_tracking_lin_vel_threshold=0.85,
+        curriculum_tracking_ang_vel_threshold=0.85,
+    )
     curriculum_update = {}
     command = SimpleNamespace(
         cfg=command_cfg,
@@ -579,8 +693,8 @@ def test_gait_command_curriculum_uses_walk_these_ways_reward_thresholds():
             update=lambda bin_ids, success: curriculum_update.update(bin_ids=bin_ids.clone(), success=success.clone())
         ),
         _sampled_command_bins=torch.tensor([[1, 0, 0], [2, 0, 0], [3, 0, 0]]),
-        _command_tracking_lin_vel_reward_sum=torch.tensor([8.1, 7.9, 8.1]),
-        _command_tracking_ang_vel_reward_sum=torch.tensor([8.1, 9.0, 7.9]),
+        _command_tracking_lin_vel_reward_sum=torch.tensor([8.6, 8.4, 8.6]),
+        _command_tracking_ang_vel_reward_sum=torch.tensor([8.6, 10.0, 8.4]),
         _command_window_step_count=torch.full((3,), 10.0),
         _successful_command_window_count=torch.zeros(3),
         _completed_command_window_count=torch.zeros(3),
@@ -598,8 +712,8 @@ def test_gait_command_curriculum_uses_walk_these_ways_reward_thresholds():
 
     assert torch.equal(curriculum_update["bin_ids"], command._sampled_command_bins)
     assert torch.equal(curriculum_update["success"], torch.tensor([True, False, False]))
-    assert torch.allclose(command.metrics["tracking_reward_lin_vel"], torch.tensor([0.81, 0.79, 0.81]))
-    assert torch.allclose(command.metrics["tracking_reward_ang_vel"], torch.tensor([0.81, 0.9, 0.79]))
+    assert torch.allclose(command.metrics["tracking_reward_lin_vel"], torch.tensor([0.86, 0.84, 0.86]))
+    assert torch.allclose(command.metrics["tracking_reward_ang_vel"], torch.tensor([0.86, 1.0, 0.84]))
     assert torch.equal(command.metrics["success_rate"], torch.tensor([1.0, 0.0, 0.0]))
     assert torch.count_nonzero(command._command_tracking_lin_vel_reward_sum) == 0
     assert torch.count_nonzero(command._command_tracking_ang_vel_reward_sum) == 0
@@ -663,7 +777,7 @@ def test_gait_transition_blends_offsets_and_duty_factor_over_one_cycle():
     assert torch.equal(command.duty_factors, torch.tensor([0.5]))
 
 
-def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty():
+def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
     env_cfg = SimpleNamespace(rewards=SimpleNamespace())
 
     configure_rewards(
@@ -677,31 +791,24 @@ def test_rewards_use_straight_line_motion_reward_and_restore_hip_action_penalty(
     )
 
     assert env_cfg.rewards.hip_action_penalty.weight == 0.15
-    assert env_cfg.rewards.alive_bonus.weight == 0.20
+    assert env_cfg.rewards.alive_bonus.weight == 1.0
     assert env_cfg.rewards.cmd is None
     assert env_cfg.rewards.sagittal_plane is None
-    assert env_cfg.rewards.straight_line_motion.func is symm_quadruped.straight_line_motion_reward
-    assert env_cfg.rewards.straight_line_motion.weight == 1.0
-    assert env_cfg.rewards.straight_line_motion.params["command_name"] == "base_velocity"
-    assert env_cfg.rewards.straight_line_motion.params["min_base_height"] == 0.35
-    assert env_cfg.rewards.straight_line_motion.params["support_loss_weight"] == 0.25
-    assert env_cfg.rewards.straight_line_motion.params["lateral_position_scale"] == 0.35
-    assert env_cfg.rewards.straight_line_motion.params["heading_scale"] == 0.35
-    assert env_cfg.rewards.straight_line_motion.params["pose_weight"] == 0.0
-    assert env_cfg.rewards.straight_line_motion.params["pitch_scale"] == 0.50
+    assert env_cfg.rewards.straight_line_motion is None
     assert env_cfg.rewards.termination_penalty.func is base_mdp.is_terminated
     assert env_cfg.rewards.termination_penalty.weight == -200.0
     assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_target_limit_penalty
     assert env_cfg.rewards.joint_target_limits.weight == 0.05
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.30
+    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert env_cfg.rewards.foot_clearance.weight == 0.10
     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
     assert env_cfg.rewards.foot_clearance.params["min_command_speed"] == 0.20
 
 
-def test_rewards_use_independent_velocity_tracking_and_roll_terms():
+def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
     env_cfg = SimpleNamespace(rewards=SimpleNamespace())
 
     configure_rewards(
@@ -714,20 +821,18 @@ def test_rewards_use_independent_velocity_tracking_and_roll_terms():
         base_height_range=(0.35, 0.45),
     )
 
-    assert env_cfg.rewards.track_lin_vel_x_exp.func is symm_quadruped.track_lin_vel_x_exp
-    assert env_cfg.rewards.track_lin_vel_x_exp.weight == 0.5
-    assert env_cfg.rewards.track_lin_vel_x_exp.params["error_scale"] == 0.35
-    assert env_cfg.rewards.track_lin_vel_y_exp.func is symm_quadruped.track_lin_vel_y_exp
-    assert env_cfg.rewards.track_lin_vel_y_exp.weight == 0.5
-    assert env_cfg.rewards.track_lin_vel_y_exp.params["error_scale"] == 0.20
+    assert env_cfg.rewards.track_lin_vel_xy_exp.func is base_mdp.track_lin_vel_xy_exp
+    assert env_cfg.rewards.track_lin_vel_xy_exp.weight == 0.5
+    assert env_cfg.rewards.track_lin_vel_xy_exp.params["std"] == 0.5
+    assert env_cfg.rewards.track_lin_vel_x_exp is None
+    assert env_cfg.rewards.track_lin_vel_y_exp is None
     assert env_cfg.rewards.track_ang_vel_z_exp.func is symm_quadruped.track_ang_vel_z_exp
     assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.5
     assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
     assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp
     assert env_cfg.rewards.base_roll_exp.weight == 0.30
     assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
-    assert env_cfg.rewards.straight_line_motion.params["forward_weight"] == 0.0
-    assert env_cfg.rewards.straight_line_motion.params["straight_weight"] == 0.0
+    assert env_cfg.rewards.straight_line_motion is None
 
 
 def test_rewards_cfg_preserves_deprecated_morphological_symmetry_alias():
@@ -755,6 +860,12 @@ def test_robot_configs_use_robot_specific_foot_clearance_shaping():
     x1_cfg = DobotX1SymmFlatEnvCfg()
     go2_cfg = UnitreeGo2SymmFlatEnvCfg()
 
+    assert x1_cfg.rewards.leg_permutation_symmetry.func is dobot_x1_symm.leg_permutation_symmetry_penalty
+    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert go2_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
+    assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
+    assert go2_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
     assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.04
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
@@ -772,18 +883,17 @@ def test_play_configs_enable_ground_filtered_normal_and_friction_forces():
             assert sensor_cfg.track_friction_forces
 
 
-def test_robot_configs_use_requested_pitch_and_height_postures():
+def test_robot_configs_use_requested_height_ranges_and_orientation_terminations():
     x1_cfg = DobotX1SymmFlatEnvCfg()
     go2_cfg = UnitreeGo2SymmFlatEnvCfg()
 
-    assert go2_cfg.rewards.straight_line_motion.params["pitch_scale"] == 0.50
+    assert go2_cfg.rewards.straight_line_motion is None
     assert go2_cfg.terminations.base_orientation.params["max_pitch"] == 1.20
-    assert x1_cfg.rewards.straight_line_motion.params["pitch_scale"] == 0.35
+    assert x1_cfg.rewards.straight_line_motion is None
     assert x1_cfg.terminations.base_orientation.params["max_pitch"] == 0.70
 
     assert x1_cfg.commands.base_velocity.base_height_range == (0.45, 0.60)
     assert x1_cfg.rewards.base_height.params["height_range"] == (0.45, 0.60)
-    assert x1_cfg.rewards.straight_line_motion.params["min_base_height"] == 0.45
     assert x1_cfg.scene.robot.init_state.pos == (0.0, 0.0, 0.5)
     default_joint_pos = x1_cfg.scene.robot.init_state.joint_pos
     assert default_joint_pos["joint_front_left_abad"] == 0.0
@@ -792,6 +902,51 @@ def test_robot_configs_use_requested_pitch_and_height_postures():
     assert default_joint_pos["joint_rear_left_abad"] == 0.0
     assert default_joint_pos["joint_rear_left_thigh_pitch"] == -0.6983
     assert default_joint_pos["joint_rear_left_calf_pitch"] == 1.2842
+
+
+def test_x1_config_sets_branch_preserving_calf_limits_at_startup():
+    x1_cfg = DobotX1SymmFlatEnvCfg()
+
+    assert x1_cfg.actions.joint_pos.clip == {
+        "joint_front_.*_calf_pitch": (-2.3, -0.2),
+        "joint_rear_.*_calf_pitch": (0.2, 2.3),
+    }
+    expected_terms = {
+        "front_calf_joint_limits": {
+            "joint_names": ["joint_front_.*_calf_pitch"],
+            "lower_limit_distribution_params": (-2.3, -2.3),
+            "upper_limit_distribution_params": (-0.2, -0.2),
+        },
+        "rear_calf_joint_limits": {
+            "joint_names": ["joint_rear_.*_calf_pitch"],
+            "lower_limit_distribution_params": (0.2, 0.2),
+            "upper_limit_distribution_params": (2.3, 2.3),
+        },
+    }
+    for term_name, expected in expected_terms.items():
+        term = getattr(x1_cfg.events, term_name)
+        assert term.func is base_mdp.randomize_joint_parameters
+        assert term.mode == "startup"
+        assert term.params["asset_cfg"].name == "robot"
+        assert term.params["asset_cfg"].joint_names == expected["joint_names"]
+        assert term.params["lower_limit_distribution_params"] == expected["lower_limit_distribution_params"]
+        assert term.params["upper_limit_distribution_params"] == expected["upper_limit_distribution_params"]
+        assert term.params["operation"] == "abs"
+        assert term.params["distribution"] == "uniform"
+
+
+def test_x1_config_uses_reduced_command_curriculum_range_and_thresholds():
+    x1_command_cfg = DobotX1SymmFlatEnvCfg().commands.base_velocity
+    go2_command_cfg = UnitreeGo2SymmFlatEnvCfg().commands.base_velocity
+
+    assert x1_command_cfg.ranges.lin_vel_x == (-3.0, 3.0)
+    assert x1_command_cfg.ranges.ang_vel_z == (-2.0, 2.0)
+    assert x1_command_cfg.curriculum_tracking_lin_vel_threshold == 0.85
+    assert x1_command_cfg.curriculum_tracking_ang_vel_threshold == 0.7
+    assert go2_command_cfg.ranges.lin_vel_x == (-4.0, 4.0)
+    assert go2_command_cfg.ranges.ang_vel_z == (-4.0, 4.0)
+    assert go2_command_cfg.curriculum_tracking_lin_vel_threshold == 0.9
+    assert go2_command_cfg.curriculum_tracking_ang_vel_threshold == 0.7
 
 
 def test_x1_play_config_uses_exact_nominal_joint_posture():

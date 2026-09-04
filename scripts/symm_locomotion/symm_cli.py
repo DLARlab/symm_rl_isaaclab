@@ -24,6 +24,7 @@ DEFAULT_TR_WARMUP_ITERATIONS = 500
 DEFAULT_TR_MIN_ABS_CMD_VEL = 0.0
 DEFAULT_VIDEO_DURATION_S = 30.0
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
+TRACKING_ERROR_GRID_COMMAND_COUNT = 23
 
 
 @dataclass(frozen=True)
@@ -195,22 +196,29 @@ def checkpoint_output_name(checkpoint: Path) -> str:
     return checkpoint.stem
 
 
-def checkpoint_output_dir(checkpoint: Path) -> Path:
+def checkpoint_output_dir(checkpoint: Path, output_dir: str | Path | None = None) -> Path:
     """Return the shared output directory for a loaded checkpoint."""
-    return checkpoint.parent / "eval" / checkpoint_output_name(checkpoint)
+    if output_dir is None:
+        return checkpoint.parent / "eval" / checkpoint_output_name(checkpoint)
+    output_path = Path(output_dir)
+    return output_path if output_path.is_absolute() else repo_root() / output_path
 
 
-def play_video_snapshot(checkpoint: Path) -> dict[Path, tuple[int, int]]:
+def play_video_snapshot(checkpoint: Path, output_dir: str | Path | None = None) -> dict[Path, tuple[int, int]]:
     """Return modification-time and size signatures for existing checkpoint MP4s."""
-    output_dir = checkpoint_output_dir(checkpoint)
-    if not output_dir.exists():
+    resolved_output_dir = checkpoint_output_dir(checkpoint, output_dir)
+    if not resolved_output_dir.exists():
         return {}
-    return {path: (path.stat().st_mtime_ns, path.stat().st_size) for path in output_dir.glob("*.mp4")}
+    return {path: (path.stat().st_mtime_ns, path.stat().st_size) for path in resolved_output_dir.glob("*.mp4")}
 
 
-def latest_play_video(checkpoint: Path, previous_videos: dict[Path, tuple[int, int]] | None = None) -> Path | None:
+def latest_play_video(
+    checkpoint: Path,
+    previous_videos: dict[Path, tuple[int, int]] | None = None,
+    output_dir: str | Path | None = None,
+) -> Path | None:
     """Return the newest checkpoint MP4, optionally limited to new or modified files."""
-    current_videos = play_video_snapshot(checkpoint)
+    current_videos = play_video_snapshot(checkpoint, output_dir)
     videos = list(current_videos)
     if previous_videos is not None:
         videos = [path for path, signature in current_videos.items() if previous_videos.get(path) != signature]
@@ -245,8 +253,8 @@ def convert_latest_video(
     previous_videos: dict[Path, tuple[int, int]] | None = None,
 ) -> int:
     """Convert the newest newly recorded MP4 for the checkpoint run to GIF."""
-    output_dir = checkpoint_output_dir(checkpoint)
-    mp4_path = latest_play_video(checkpoint, previous_videos)
+    output_dir = checkpoint_output_dir(checkpoint, args.output_dir)
+    mp4_path = latest_play_video(checkpoint, previous_videos, args.output_dir)
     if mp4_path is None:
         if args.dry_run:
             print(
@@ -423,6 +431,12 @@ def add_play_args(parser: argparse.ArgumentParser) -> None:
     add_checkpoint_args(parser)
     add_rollout_plot_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
+    parser.add_argument(
+        "--output-dir",
+        "--output_dir",
+        default=None,
+        help="Override the directory shared by evaluation videos and rollout plots.",
+    )
     parser.add_argument("--rendering-mode", "--rendering_mode", default="balanced")
     parser.add_argument("--kit-args", "--kit_args", default=None)
     parser.add_argument("--disable-fabric", "--disable_fabric", action="store_true")
@@ -449,6 +463,7 @@ def add_play_args(parser: argparse.ArgumentParser) -> None:
         help="Override commands with a six-direction tracking-error sweep.",
     )
     parser.add_argument("--tracking-speed", "--tracking_speed", type=float, default=0.5)
+    parser.add_argument("--tracking-lateral-speed", "--tracking_lateral_speed", type=float, default=None)
     parser.add_argument("--tracking-yaw-rate", "--tracking_yaw_rate", type=float, default=0.5)
 
 
@@ -478,6 +493,8 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
         command.append("--disable_fabric")
     if kit_args:
         command += ["--kit_args", kit_args]
+    if args.output_dir:
+        command += ["--evaluation_output_dir", args.output_dir]
     if args.print_gait:
         command += ["--print_gait_info", "--print_gait_info_interval", str(args.print_gait_interval)]
     if args.tracking_test:
@@ -485,9 +502,10 @@ def play_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
             "--tracking_error_direction_test",
             "--tracking_error_direction_speed",
             str(args.tracking_speed),
-            "--tracking_error_direction_yaw_rate",
-            str(args.tracking_yaw_rate),
         ]
+        if args.tracking_lateral_speed is not None:
+            command += ["--tracking_error_direction_lateral_speed", str(args.tracking_lateral_speed)]
+        command += ["--tracking_error_direction_yaw_rate", str(args.tracking_yaw_rate)]
     return command + rollout_plot_lab_args(args) + extra
 
 
@@ -497,6 +515,12 @@ def add_record_args(parser: argparse.ArgumentParser) -> None:
     add_checkpoint_args(parser)
     add_rollout_plot_args(parser)
     parser.add_argument("--num-envs", "--num_envs", type=int, default=1)
+    parser.add_argument(
+        "--output-dir",
+        "--output_dir",
+        default=None,
+        help="Override the directory shared by evaluation videos and rollout plots.",
+    )
     parser.add_argument(
         "--video-length",
         "--video_length",
@@ -515,6 +539,7 @@ def add_record_args(parser: argparse.ArgumentParser) -> None:
         help="Override commands with a six-direction tracking-error sweep while recording.",
     )
     parser.add_argument("--tracking-speed", "--tracking_speed", type=float, default=0.5)
+    parser.add_argument("--tracking-lateral-speed", "--tracking_lateral_speed", type=float, default=None)
     parser.add_argument("--tracking-yaw-rate", "--tracking_yaw_rate", type=float, default=0.5)
     parser.add_argument("--gif", action="store_true", help="Convert the newest MP4 to GIF after recording.")
     parser.add_argument("--gif-fps", type=int, default=15)
@@ -554,12 +579,59 @@ def record_lab_args(args: argparse.Namespace, extra: list[str]) -> tuple[list[st
             "--tracking_error_direction_test",
             "--tracking_error_direction_speed",
             str(args.tracking_speed),
-            "--tracking_error_direction_yaw_rate",
-            str(args.tracking_yaw_rate),
         ]
+        if args.tracking_lateral_speed is not None:
+            command += ["--tracking_error_direction_lateral_speed", str(args.tracking_lateral_speed)]
+        command += ["--tracking_error_direction_yaw_rate", str(args.tracking_yaw_rate)]
     if kit_args:
         command += ["--kit_args", kit_args]
+    if args.output_dir:
+        command += ["--evaluation_output_dir", args.output_dir]
     return command + rollout_plot_lab_args(args) + extra, checkpoint
+
+
+def add_tracking_grid_args(parser: argparse.ArgumentParser) -> None:
+    """Add batched tracking-error grid options."""
+    add_common_args(parser)
+    add_checkpoint_args(parser)
+    parser.add_argument("--envs_per_command", "--envs-per-command", type=int, default=50)
+    parser.add_argument("--warmup_time", "--warmup-time", type=float, default=2.0)
+    parser.add_argument("--measurement_time", "--measurement-time", type=float, default=8.0)
+    parser.add_argument("--output", default="tracking_errors.csv")
+
+
+def tracking_grid_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
+    """Build Isaac Lab arguments for a headless batched tracking-error evaluation."""
+    if args.envs_per_command <= 0:
+        raise ValueError(f"Environments per command must be positive, received {args.envs_per_command}.")
+    if args.warmup_time < 0.0:
+        raise ValueError(f"Warmup time cannot be negative, received {args.warmup_time}.")
+    if args.measurement_time <= 0.0:
+        raise ValueError(f"Measurement time must be positive, received {args.measurement_time}.")
+
+    checkpoint = resolve_checkpoint(args)
+    print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
+    command = [
+        "play",
+        "--rl_library",
+        "rsl_rl",
+        "--task",
+        args.robot_spec.play_task,
+        "--num_envs",
+        str(TRACKING_ERROR_GRID_COMMAND_COUNT * args.envs_per_command),
+        "--checkpoint",
+        str(checkpoint),
+        "--tracking_error_grid_test",
+        "--tracking_error_grid_envs_per_command",
+        str(args.envs_per_command),
+        "--tracking_error_grid_warmup_time",
+        str(args.warmup_time),
+        "--tracking_error_grid_measurement_time",
+        str(args.measurement_time),
+        "--tracking_error_grid_output",
+        args.output,
+    ]
+    return command + extra
 
 
 def add_ablation_args(parser: argparse.ArgumentParser) -> None:
@@ -696,6 +768,11 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser = subparsers.add_parser("record", help="Record a checkpoint rollout.")
     add_record_args(record_parser)
 
+    tracking_grid_parser = subparsers.add_parser(
+        "tracking-grid", help="Evaluate a checkpoint on a batched velocity-command grid."
+    )
+    add_tracking_grid_args(tracking_grid_parser)
+
     ablation_parser = subparsers.add_parser("ablation", help="Run symmetry ablations.")
     add_ablation_args(ablation_parser)
 
@@ -722,14 +799,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_isaaclab(args, play_lab_args(args, extra))
         if args.command == "record":
             lab_args, checkpoint = record_lab_args(args, extra)
-            previous_videos = play_video_snapshot(checkpoint) if not args.dry_run else None
+            previous_videos = play_video_snapshot(checkpoint, args.output_dir) if not args.dry_run else None
             code = run_isaaclab(args, lab_args)
             if code != 0:
                 return code
-            if previous_videos is not None and latest_play_video(checkpoint, previous_videos) is None:
+            if previous_videos is not None and latest_play_video(checkpoint, previous_videos, args.output_dir) is None:
                 print(
                     f"{log_prefix(args)}ERROR: recording finished without a new or updated MP4 under "
-                    f"{checkpoint_output_dir(checkpoint)}",
+                    f"{checkpoint_output_dir(checkpoint, args.output_dir)}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -737,6 +814,8 @@ def main(argv: list[str] | None = None) -> int:
             if not args.gif:
                 return 0
             return convert_latest_video(args, checkpoint, previous_videos)
+        if args.command == "tracking-grid":
+            return run_isaaclab(args, tracking_grid_lab_args(args, extra))
         if args.command == "ablation":
             return run_ablation(args, extra)
         if args.command == "compare":

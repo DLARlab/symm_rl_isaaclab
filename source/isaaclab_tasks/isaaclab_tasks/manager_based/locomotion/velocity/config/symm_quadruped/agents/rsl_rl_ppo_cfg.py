@@ -39,7 +39,7 @@ def configure_symm_quadruped_ppo(
     cfg.clip_actions = None
     cfg.obs_groups = {"actor": ["policy"], "critic": ["policy"]}
     cfg.actor.hidden_dims = [512, 256, 128]
-    cfg.actor.distribution_cfg.init_std = 0.5
+    cfg.actor.distribution_cfg.init_std = 1.0
     cfg.critic.hidden_dims = [512, 256, 128]
     cfg.algorithm.class_name = (
         "isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.time_reversal_ppo:TimeReversalPPO"
@@ -54,6 +54,6 @@ def configure_symm_quadruped_ppo(
         value_loss_coeff=value_loss_coeff,
         min_abs_command_velocity=min_abs_command_velocity,
         warmup_iterations=warmup_iterations,
-        command_observation_index=9,
+        command_observation_index=3,
         command_observation_scale=2.0,
     )

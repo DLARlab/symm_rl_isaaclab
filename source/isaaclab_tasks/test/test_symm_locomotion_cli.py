@@ -107,6 +107,27 @@ def test_record_video_length_override_is_preserved(monkeypatch, tmp_path):
     assert command[video_length_index] == "400"
 
 
+def test_record_output_directory_is_shared_by_video_plots_and_gif_detection(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    output_dir = tmp_path / "eval" / "model_9999_trot_x2_y0.5_yaw1"
+    output_dir.mkdir(parents=True)
+    video = output_dir / "rl-video-step-0.mp4"
+    video.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+    args = parser.parse_args(["record", "--robot", "x1", "--output-dir", str(output_dir), "--no-conda-run"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command, _ = symm_cli.record_lab_args(args, [])
+
+    assert command[command.index("--evaluation_output_dir") + 1] == str(output_dir)
+    assert "--symm_rollout_plots_dir" not in command
+    assert symm_cli.checkpoint_output_dir(checkpoint, args.output_dir) == output_dir
+    assert symm_cli.latest_play_video(checkpoint, output_dir=args.output_dir) == video
+
+
 def test_record_tracking_direction_test_can_be_disabled(monkeypatch, tmp_path):
     symm_cli = _load_symm_cli()
     checkpoint = tmp_path / "model_9999.pt"
@@ -119,6 +140,36 @@ def test_record_tracking_direction_test_can_be_disabled(monkeypatch, tmp_path):
     command, _ = symm_cli.record_lab_args(args, [])
 
     assert "--tracking_error_direction_test" not in command
+
+
+def test_tracking_grid_runs_23_command_groups_headlessly(monkeypatch, tmp_path):
+    symm_cli = _load_symm_cli()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.touch()
+    monkeypatch.setattr(symm_cli, "resolve_checkpoint", lambda args: checkpoint)
+    parser = symm_cli.build_parser()
+    args = parser.parse_args(
+        [
+            "tracking-grid",
+            "--robot",
+            "x1",
+            "--envs_per_command",
+            "50",
+            "--output",
+            "tracking_errors.csv",
+            "--no-conda-run",
+        ]
+    )
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.tracking_grid_lab_args(args, [])
+
+    assert command[command.index("--num_envs") + 1] == "1150"
+    assert command[command.index("--tracking_error_grid_envs_per_command") + 1] == "50"
+    assert command[command.index("--tracking_error_grid_output") + 1] == "tracking_errors.csv"
+    assert "--video" not in command
+    assert "--viz" not in command
+    assert "--symm_rollout_plots" not in command
 
 
 def test_play_tracking_direction_test_is_opt_in(monkeypatch, tmp_path):
@@ -137,6 +188,8 @@ def test_play_tracking_direction_test_is_opt_in(monkeypatch, tmp_path):
             "--tracking-test",
             "--tracking-speed",
             "0.8",
+            "--tracking-lateral-speed",
+            "0.4",
             "--tracking-yaw-rate",
             "0.3",
             "--no-conda-run",
@@ -150,6 +203,7 @@ def test_play_tracking_direction_test_is_opt_in(monkeypatch, tmp_path):
     assert "--tracking_error_direction_test" not in default_command
     assert "--tracking_error_direction_test" in tracking_command
     assert tracking_command[tracking_command.index("--tracking_error_direction_speed") + 1] == "0.8"
+    assert tracking_command[tracking_command.index("--tracking_error_direction_lateral_speed") + 1] == "0.4"
     assert tracking_command[tracking_command.index("--tracking_error_direction_yaw_rate") + 1] == "0.3"
 
 

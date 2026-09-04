@@ -12,6 +12,10 @@ import torch
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.envs.common import VecEnvStepReturn
 
+from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.observation_history import (
+    FrameMajorObservationHistoryWrapper,
+)
+
 
 def _clip_reward_before_termination(
     total_reward: torch.Tensor,
@@ -69,6 +73,21 @@ def _soft_joint_limit_diagnostics(
 
 class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
     """Manager-based RL environment with symmetric locomotion update ordering."""
+
+    def load_managers(self) -> None:
+        """Load managers and add frame-major policy history when more than one frame is requested."""
+        super().load_managers()
+        history_cfg = self.cfg.policy_observation_history
+        if history_cfg.history_length == 1:
+            return
+        self.observation_manager = FrameMajorObservationHistoryWrapper(
+            self.observation_manager,
+            num_envs=self.num_envs,
+            device=self.device,
+            history_length=history_cfg.history_length,
+            group_name=history_cfg.group_name,
+        )
+        self._configure_gym_env_spaces()
 
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         """Execute one RL step using the symmetric quadruped update ordering."""

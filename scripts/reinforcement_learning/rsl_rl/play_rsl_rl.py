@@ -42,6 +42,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 # local imports
 import cli_args  # isort: skip
+from tracking_error_grid import TrackingErrorGridEvaluator  # isort: skip
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 with contextlib.suppress(ImportError):
@@ -91,6 +92,11 @@ parser.add_argument(
     help="Directory for symmetric rollout plots. Defaults to <run>/eval/<checkpoint>.",
 )
 parser.add_argument(
+    "--evaluation_output_dir",
+    default=None,
+    help="Directory for evaluation videos and default rollout plots. Defaults to <run>/eval/<checkpoint>.",
+)
+parser.add_argument(
     "--symm_rollout_plot_env_index",
     type=int,
     default=0,
@@ -112,13 +118,48 @@ parser.add_argument(
     "--tracking_error_direction_speed",
     type=float,
     default=0.5,
-    help="Linear speed [m/s] used by --tracking_error_direction_test.",
+    help="Forward speed [m/s] used by --tracking_error_direction_test.",
+)
+parser.add_argument(
+    "--tracking_error_direction_lateral_speed",
+    type=float,
+    default=None,
+    help="Lateral speed [m/s] used by --tracking_error_direction_test. Defaults to the forward speed.",
 )
 parser.add_argument(
     "--tracking_error_direction_yaw_rate",
     type=float,
     default=0.5,
     help="Yaw rate [rad/s] used by --tracking_error_direction_test.",
+)
+parser.add_argument(
+    "--tracking_error_grid_test",
+    action="store_true",
+    default=False,
+    help="Evaluate fixed velocity commands in parallel and save their tracking-error table.",
+)
+parser.add_argument(
+    "--tracking_error_grid_envs_per_command",
+    type=int,
+    default=50,
+    help="Number of parallel environments assigned to each tracking-error grid command.",
+)
+parser.add_argument(
+    "--tracking_error_grid_warmup_time",
+    type=float,
+    default=2.0,
+    help="Warmup duration [s] excluded from tracking-error grid statistics.",
+)
+parser.add_argument(
+    "--tracking_error_grid_measurement_time",
+    type=float,
+    default=8.0,
+    help="Measurement duration [s] included in tracking-error grid statistics.",
+)
+parser.add_argument(
+    "--tracking_error_grid_output",
+    default="tracking_errors.csv",
+    help="Output CSV path for the tracking-error grid table.",
 )
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
@@ -246,7 +287,11 @@ def _apply_tracking_error_direction_command(env, step: int, total_steps: int) ->
         device=command_term.vel_command_b.device,
     )
     command = command.clone()
-    command[:2] *= float(args_cli.tracking_error_direction_speed)
+    command[0] *= float(args_cli.tracking_error_direction_speed)
+    lateral_speed = args_cli.tracking_error_direction_lateral_speed
+    if lateral_speed is None:
+        lateral_speed = args_cli.tracking_error_direction_speed
+    command[1] *= float(lateral_speed)
     command[2] *= float(args_cli.tracking_error_direction_yaw_rate)
     command_term.vel_command_b[:] = command
     if hasattr(command_term, "time_left"):
@@ -259,7 +304,9 @@ def _apply_tracking_error_direction_command(env, step: int, total_steps: int) ->
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
-def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
+def main(  # noqa: C901
+    env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg
+):
     """Play with RSL-RL agent."""
     with launch_simulation(env_cfg, args_cli):
         # grab task name for checkpoint path
@@ -296,7 +343,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         log_dir = os.path.dirname(resume_path)
         checkpoint_output_name = os.path.splitext(os.path.basename(resume_path))[0]
-        checkpoint_eval_dir = os.path.join(log_dir, "eval", checkpoint_output_name)
+        checkpoint_eval_dir = (
+            os.path.abspath(args_cli.evaluation_output_dir)
+            if args_cli.evaluation_output_dir
+            else os.path.join(log_dir, "eval", checkpoint_output_name)
+        )
 
         # set the log directory for the environment
         env_cfg.log_dir = log_dir
@@ -329,6 +380,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # wrap around environment for rsl-rl
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
+        tracking_error_grid = None
+        if args_cli.tracking_error_grid_test:
+            if args_cli.tracking_error_direction_test:
+                raise ValueError("Direction and grid tracking-error tests cannot run at the same time.")
+            if args_cli.video or args_cli.symm_rollout_plots:
+                raise ValueError("Tracking-error grid evaluation does not support videos or rollout plots.")
+            dt = env.unwrapped.step_dt
+            warmup_steps = round(args_cli.tracking_error_grid_warmup_time / dt)
+            measurement_steps = round(args_cli.tracking_error_grid_measurement_time / dt)
+            tracking_error_grid = TrackingErrorGridEvaluator(
+                env.unwrapped,
+                envs_per_command=args_cli.tracking_error_grid_envs_per_command,
+                warmup_steps=warmup_steps,
+                measurement_steps=measurement_steps,
+                output_path=args_cli.tracking_error_grid_output,
+            )
+            tracking_error_grid.install_command_override()
+            print(
+                "[symm_locomotion] tracking-error grid: "
+                f"{env.num_envs} environments, {warmup_steps} warmup steps, "
+                f"{measurement_steps} measurement steps",
+                flush=True,
+            )
+
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         if agent_cfg.class_name == "OnPolicyRunner":
@@ -342,16 +417,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-        # export the trained policy to JIT and ONNX formats
-        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-
-        if version.parse(installed_version) >= version.parse("4.0.0"):
-            # use the new export functions for rsl-rl >= 4.0.0
-            runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
-            runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
-            policy_nn = None  # Not needed for rsl-rl >= 4.0.0
-        else:
-            # extract the neural network for rsl-rl < 4.0.0
+        policy_nn = None
+        normalizer = None
+        if version.parse(installed_version) < version.parse("4.0.0"):
             if version.parse(installed_version) >= version.parse("2.3.0"):
                 policy_nn = runner.alg.policy
             else:
@@ -365,9 +433,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             else:
                 normalizer = None
 
-            # export to JIT and ONNX
-            export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-            export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+        if tracking_error_grid is None:
+            # export the trained policy to JIT and ONNX formats during interactive playback
+            export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+            if version.parse(installed_version) >= version.parse("4.0.0"):
+                runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+                runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+            else:
+                export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+                export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
         dt = env.unwrapped.step_dt
         rollout_plotter = None
@@ -383,7 +457,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             )
 
         # reset environment
-        obs = env.get_observations()
+        if tracking_error_grid is None:
+            obs = env.get_observations()
+        else:
+            obs, _ = env.reset()
         timestep = 0
         gait_info_interval = max(args_cli.print_gait_info_interval, 1)
         tracking_error_direction_total_steps = (
@@ -410,6 +487,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     actions = policy(obs)
                     # env stepping
                     obs, _, dones, _ = env.step(actions)
+                    if tracking_error_grid is not None:
+                        tracking_error_grid.record(dones)
                     # reset recurrent states for episodes that have terminated
                     if version.parse(installed_version) >= version.parse("4.0.0"):
                         policy.reset(dones)
@@ -428,6 +507,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 if args_cli.video:
                     if timestep == args_cli.video_length:
                         break
+                if tracking_error_grid is not None and tracking_error_grid.is_complete:
+                    output_path = tracking_error_grid.write_csv()
+                    print(f"[symm_locomotion] saved tracking errors: {output_path}", flush=True)
+                    break
 
                 sleep_time = dt - (time.time() - start_time)
                 if args_cli.real_time and sleep_time > 0:

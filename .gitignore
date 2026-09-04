@@ -108,3 +108,5 @@ wandb/
 nohup.out
 .github/
 .vscode/
+.agents/
+.codex/

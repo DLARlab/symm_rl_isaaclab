@@ -16,8 +16,9 @@ from tensordict import TensorDict
 class TimeReversalPPO(PPO):
     """PPO with time-reversal warmup, action, and value losses."""
 
+    _OBSERVATION_FRAME_DIM = 56
     _MIN_ACTOR_STD = 1.0e-6
-    _MAX_ACTOR_STD = 1.0
+    _NONFINITE_ACTOR_STD_FALLBACK = 1.0
     _ACTOR_MEAN_BOUND = 10.0
     _ACTOR_MEAN_BOUND_LOSS_COEFF = 1.0e-2
     _ACTOR_MEAN_ABORT_BOUND = 50.0
@@ -39,6 +40,11 @@ class TimeReversalPPO(PPO):
         """Run PPO updates with optional time-reversal regularization."""
         time_reversal_enabled = self._time_reversal_enabled()
         time_reversal_active = time_reversal_enabled and self.current_learning_iteration >= self._warmup_iterations()
+        if time_reversal_enabled and self.symmetry["use_data_augmentation"]:
+            raise ValueError(
+                "Temporally aligned time reversal cannot reuse PPO advantages and returns as generic data "
+                "augmentation; set use_data_augmentation=False and use the actor/value consistency losses."
+            )
 
         mean_value_loss = 0
         mean_surrogate_loss = 0
@@ -47,32 +53,28 @@ class TimeReversalPPO(PPO):
         mean_rnd_loss = 0 if self.rnd else None
         mean_symmetry_loss = 0 if self.symmetry else None
         mean_tr_value_loss = 0 if time_reversal_enabled else None
+        time_reversal_pair_generator = None
+        time_reversal_valid_pair_fraction = 0.0
+        if time_reversal_active:
+            reversed_observations, reference_observations, time_reversal_pair_mask = self._time_reversal_pairs()
+            time_reversal_valid_pair_fraction = time_reversal_pair_mask.mean().item()
+            time_reversal_pair_generator = self._time_reversal_pair_mini_batch_generator(
+                reversed_observations,
+                reference_observations,
+                time_reversal_pair_mask,
+            )
 
         if self.actor.is_recurrent or self.critic.is_recurrent:
-            generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+            ppo_generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
-            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+            ppo_generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
-        for batch in generator:
+        for batch in ppo_generator:
             original_batch_size = batch.observations.batch_size[0]
 
             if self.normalize_advantage_per_mini_batch:
                 with torch.no_grad():
                     batch.advantages = (batch.advantages - batch.advantages.mean()) / (batch.advantages.std() + 1e-8)
-
-            use_data_augmentation = time_reversal_active and self.symmetry and self.symmetry["use_data_augmentation"]
-            if use_data_augmentation:
-                data_augmentation_func = self.symmetry["data_augmentation_func"]
-                batch.observations, batch.actions = data_augmentation_func(
-                    env=self.symmetry["_env"],
-                    obs=batch.observations,
-                    actions=batch.actions,
-                )
-                num_aug = int(batch.observations.batch_size[0] / original_batch_size)
-                batch.old_actions_log_prob = batch.old_actions_log_prob.repeat(num_aug, 1)
-                batch.values = batch.values.repeat(num_aug, 1)
-                batch.advantages = batch.advantages.repeat(num_aug, 1)
-                batch.returns = batch.returns.repeat(num_aug, 1)
 
             self._clamp_actor_std()
             self.actor(
@@ -131,31 +133,31 @@ class TimeReversalPPO(PPO):
             symmetry_loss = torch.zeros((), device=self.device)
             tr_value_loss = torch.zeros((), device=self.device)
             if time_reversal_active and self.symmetry:
+                if time_reversal_pair_generator is None:
+                    raise RuntimeError("Time-reversal pair generator was not initialized.")
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
-                augmented_observations = batch.observations
-                augmented_values = values
-                if not use_data_augmentation:
-                    augmented_observations, _ = data_augmentation_func(
-                        obs=batch.observations, actions=None, env=self.symmetry["_env"]
-                    )
-                    augmented_values = self.critic(augmented_observations)
-
-                mean_actions = self.actor(augmented_observations.detach().clone())
-                action_mean_orig = mean_actions[:original_batch_size]
-                _, actions_mean_symm = data_augmentation_func(
-                    obs=None, actions=action_mean_orig, env=self.symmetry["_env"]
+                reversed_batch, reference_batch, pair_mask = next(time_reversal_pair_generator)
+                reversed_action_mean = self.actor(reversed_batch)
+                with torch.no_grad():
+                    reference_action_mean = self.actor(reference_batch)
+                _, transformed_reference_action_mean = data_augmentation_func(
+                    obs=None,
+                    actions=reference_action_mean,
+                    env=self.symmetry["_env"],
                 )
-
-                time_reversal_mask = self._time_reversal_mask(augmented_observations[:original_batch_size])
+                reference_batch_size = reference_action_mean.shape[0]
                 symmetry_loss = self._masked_mse(
-                    mean_actions[original_batch_size:],
-                    actions_mean_symm.detach()[original_batch_size:],
-                    time_reversal_mask,
+                    reversed_action_mean,
+                    transformed_reference_action_mean[reference_batch_size:].detach(),
+                    pair_mask,
                 )
+                reversed_values = self.critic(reversed_batch)
+                with torch.no_grad():
+                    reference_values = self.critic(reference_batch)
                 tr_value_loss = self._masked_mse(
-                    augmented_values[original_batch_size:],
-                    augmented_values[:original_batch_size].detach(),
-                    time_reversal_mask,
+                    reversed_values,
+                    reference_values.detach(),
+                    pair_mask,
                 )
 
                 if self.symmetry["use_mirror_loss"]:
@@ -232,6 +234,8 @@ class TimeReversalPPO(PPO):
             loss_dict["symmetry"] = mean_symmetry_loss
         if mean_tr_value_loss is not None:
             loss_dict["tr_value"] = mean_tr_value_loss
+        if time_reversal_enabled:
+            loss_dict["trs/valid_pair_fraction"] = time_reversal_valid_pair_fraction
         loss_dict.update(action_diagnostics)
 
         return loss_dict
@@ -260,12 +264,116 @@ class TimeReversalPPO(PPO):
             return 0
         return int(self.symmetry.get("warmup_iterations", 0))
 
+    def _time_reversal_pairs(self) -> tuple[TensorDict, TensorDict, torch.Tensor]:
+        """Build temporally aligned reversed/reference pairs before PPO shuffles the rollout."""
+        if self.actor.is_recurrent or self.critic.is_recurrent:
+            raise ValueError(
+                "Historical time-reversal pairing currently supports feed-forward actors and critics only."
+            )
+
+        policy_obs = self.storage.observations["policy"]
+        frame_dim = int(self.symmetry.get("observation_frame_dim", self._OBSERVATION_FRAME_DIM))
+        if frame_dim < 1 or policy_obs.shape[-1] % frame_dim != 0:
+            raise ValueError(
+                f"Policy observation dimension {policy_obs.shape[-1]} must be a multiple of the configured "
+                f"frame dimension {frame_dim}."
+            )
+        history_length = policy_obs.shape[-1] // frame_dim
+        num_steps, num_envs = policy_obs.shape[:2]
+        if history_length >= num_steps:
+            raise ValueError(
+                f"Historical TRS requires num_steps_per_env ({num_steps}) to exceed the observation history length "
+                f"({history_length})."
+            )
+
+        num_pair_steps = num_steps - history_length
+        current_observations = self.storage.observations[history_length:].flatten(0, 1)
+        reference_observations = self.storage.observations[:-history_length].flatten(0, 1)
+        current_actions = self.storage.actions[history_length:].flatten(0, 1)
+        data_augmentation_func = self.symmetry["data_augmentation_func"]
+        augmented_observations, _ = data_augmentation_func(
+            env=self.symmetry["_env"],
+            obs=current_observations,
+            actions=current_actions,
+        )
+        pair_count = current_observations.batch_size[0]
+        reversed_observations = augmented_observations[pair_count:]
+
+        done_windows = self.storage.dones[:-1].squeeze(-1).bool().unfold(0, history_length, 1)
+        crosses_reset = done_windows.any(dim=-1)
+        current_frames = policy_obs[history_length:].reshape(
+            num_pair_steps,
+            num_envs,
+            history_length,
+            frame_dim,
+        )
+        reference_frames = policy_obs[:-history_length].reshape(
+            num_pair_steps,
+            num_envs,
+            history_length,
+            frame_dim,
+        )
+        current_history_is_full = current_frames[..., 0, :].ne(0.0).any(dim=-1)
+        reference_history_is_full = reference_frames[..., 0, :].ne(0.0).any(dim=-1)
+
+        command_index = int(self.symmetry.get("command_observation_index", 3))
+        command_end = command_index + 3
+        if command_index < 0 or command_end > frame_dim:
+            raise ValueError(
+                f"Velocity-command observation slice [{command_index}:{command_end}] is outside a {frame_dim}D frame."
+            )
+        reference_command = reference_frames[..., -1, command_index:command_end]
+        current_oldest_command = current_frames[..., 0, command_index:command_end]
+        command_is_continuous = torch.isclose(
+            reference_command,
+            current_oldest_command,
+            rtol=0.0,
+            atol=1.0e-6,
+        ).all(dim=-1)
+
+        valid_pair = (
+            ~crosses_reset & current_history_is_full & reference_history_is_full & command_is_continuous
+        ).reshape(-1, 1)
+        command_mask = self._time_reversal_mask(reference_observations).bool()
+        pair_mask = (valid_pair & command_mask).to(dtype=policy_obs.dtype)
+        return reversed_observations, reference_observations, pair_mask
+
+    def _time_reversal_pair_mini_batch_generator(
+        self,
+        reversed_observations: TensorDict,
+        reference_observations: TensorDict,
+        pair_mask: torch.Tensor,
+    ):
+        """Yield every temporal TRS pair once per PPO learning epoch."""
+        pair_count = reversed_observations.batch_size[0]
+        if pair_count < self.num_mini_batches:
+            raise ValueError(
+                f"Historical TRS produced {pair_count} pairs, fewer than {self.num_mini_batches} mini-batches."
+            )
+        for _ in range(self.num_learning_epochs):
+            indices = torch.randperm(pair_count, device=self.device)
+            for batch_indices in torch.tensor_split(indices, self.num_mini_batches):
+                yield (
+                    reversed_observations[batch_indices],
+                    reference_observations[batch_indices],
+                    pair_mask[batch_indices],
+                )
+
     def _time_reversal_mask(self, observations) -> torch.Tensor:
         policy_obs = observations["policy"]
-        command_index = int(self.symmetry.get("command_observation_index", 9))
+        frame_dim = int(self.symmetry.get("observation_frame_dim", self._OBSERVATION_FRAME_DIM))
+        if frame_dim < 1 or policy_obs.shape[-1] % frame_dim != 0:
+            raise ValueError(
+                f"Policy observation dimension {policy_obs.shape[-1]} must be a multiple of the configured "
+                f"frame dimension {frame_dim}."
+            )
+        command_index = int(self.symmetry.get("command_observation_index", 3))
+        if command_index < 0 or command_index >= frame_dim:
+            raise ValueError(f"Command observation index {command_index} is outside a {frame_dim}D frame.")
         command_scale = float(self.symmetry.get("command_observation_scale", 1.0))
         min_abs_command = float(self.symmetry.get("min_abs_command_velocity", 0.0))
-        command = policy_obs[:, command_index] / command_scale
+        latest_command_index = policy_obs.shape[-1] - frame_dim + command_index
+        command = policy_obs[:, latest_command_index] / command_scale
         return (torch.abs(command) >= min_abs_command).unsqueeze(-1).to(dtype=policy_obs.dtype)
 
     @staticmethod
@@ -281,8 +389,12 @@ class TimeReversalPPO(PPO):
         if std_param is None:
             return
         with torch.no_grad():
-            std_param.nan_to_num_(nan=self._MIN_ACTOR_STD, posinf=self._MAX_ACTOR_STD, neginf=self._MIN_ACTOR_STD)
-            std_param.clamp_(min=self._MIN_ACTOR_STD, max=self._MAX_ACTOR_STD)
+            std_param.nan_to_num_(
+                nan=self._MIN_ACTOR_STD,
+                posinf=self._NONFINITE_ACTOR_STD_FALLBACK,
+                neginf=self._MIN_ACTOR_STD,
+            )
+            std_param.clamp_min_(self._MIN_ACTOR_STD)
 
     @classmethod
     def _actor_mean_bound_loss(cls, actor_mean: torch.Tensor) -> torch.Tensor:

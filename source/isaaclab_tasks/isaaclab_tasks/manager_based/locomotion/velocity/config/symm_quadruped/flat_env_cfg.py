@@ -87,9 +87,9 @@ class SymmQuadrupedPhysicsCfg(PresetCfg):
 
     default = PhysxCfg(
         gpu_max_rigid_patch_count=10 * 2**15,
-        gpu_found_lost_pairs_capacity=2**24,
-        gpu_found_lost_aggregate_pairs_capacity=2**28,
-        gpu_total_aggregate_pairs_capacity=2**24,
+        gpu_found_lost_pairs_capacity=2**22,
+        gpu_found_lost_aggregate_pairs_capacity=2**27,
+        gpu_total_aggregate_pairs_capacity=2**22,
     )
     newton_mjwarp = NewtonCfg(
         solver_cfg=MJWarpSolverCfg(
@@ -136,8 +136,21 @@ def make_gait_velocity_command(
     mdp_module,
     *,
     base_height_range: tuple[float, float] = (0.35, 0.45),
+    lin_vel_x_range: tuple[float, float] = (-4.0, 4.0),
+    ang_vel_z_range: tuple[float, float] = (-4.0, 4.0),
+    curriculum_tracking_lin_vel_threshold: float = 0.9,
+    curriculum_tracking_ang_vel_threshold: float = 0.9,
 ):
-    """Create the shared gait command config with velocity-command curriculum."""
+    """Create the shared gait command config with velocity-command curriculum.
+
+    Args:
+        mdp_module: Robot-specific module that provides the gait command configuration.
+        base_height_range: Base-height range [m].
+        lin_vel_x_range: Linear X velocity range [m/s].
+        ang_vel_z_range: Yaw velocity range [rad/s].
+        curriculum_tracking_lin_vel_threshold: Linear tracking reward required for curriculum expansion.
+        curriculum_tracking_ang_vel_threshold: Yaw tracking reward required for curriculum expansion.
+    """
     return mdp_module.GaitVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
@@ -156,24 +169,24 @@ def make_gait_velocity_command(
         resample_gait_once_after_reset=False,
         curriculum_tracking_lin_vel_sigma=0.25,
         curriculum_tracking_ang_vel_sigma=0.25,
-        curriculum_tracking_lin_vel_threshold=0.8,
-        curriculum_tracking_ang_vel_threshold=0.8,
+        curriculum_tracking_lin_vel_threshold=curriculum_tracking_lin_vel_threshold,
+        curriculum_tracking_ang_vel_threshold=curriculum_tracking_ang_vel_threshold,
         base_height_range=base_height_range,
         ranges=mdp_module.GaitVelocityCommandCfg.Ranges(
-            lin_vel_x=(-4.0, 4.0),
-            lin_vel_y=(-1.0, 1.0),
-            ang_vel_z=(-4.0, 4.0),
+            lin_vel_x=lin_vel_x_range,
+            lin_vel_y=(-0.6, 0.6),
+            ang_vel_z=ang_vel_z_range,
             heading=(0.0, 0.0),
         ),
         curriculum=mdp_module.GaitVelocityCommandCfg.Curriculum(
             enabled=True,
             initial_ranges=mdp_module.GaitVelocityCommandCfg.Ranges(
                 lin_vel_x=(-0.5, 0.5),
-                lin_vel_y=(-0.25, 0.25),
+                lin_vel_y=(-0.6, 0.6),
                 ang_vel_z=(-0.5, 0.5),
                 heading=(0.0, 0.0),
             ),
-            num_bins=(16, 8, 16),
+            num_bins=(16, 1, 16),
             weight_update=0.2,
             max_weight=1.0,
             neighbor_distance=1,
@@ -182,28 +195,20 @@ def make_gait_velocity_command(
 
 
 def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str]) -> None:
-    """Configure the shared 72D symmetric quadruped policy observation."""
+    """Configure the shared 56D symmetric quadruped policy observation."""
     policy = env_cfg.observations.policy
     ordered_joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
 
-    policy.base_lin_vel = ObsTerm(
-        func=base_mdp.base_lin_vel,
-        noise=Unoise(n_min=-0.1, n_max=0.1),
-        scale=(2.0, 2.0, 2.0),
-    )
-    policy.base_ang_vel = ObsTerm(
-        func=base_mdp.base_ang_vel,
-        noise=Unoise(n_min=-0.2, n_max=0.2),
-        scale=(0.25, 0.25, 0.25),
-    )
+    policy.base_lin_vel = None
+    policy.base_ang_vel = None
     policy.projected_gravity = ObsTerm(
         func=base_mdp.projected_gravity,
         noise=Unoise(n_min=-0.05, n_max=0.05),
     )
     policy.velocity_commands = ObsTerm(
-        func=mdp_module.desired_base_twist,
+        func=base_mdp.generated_commands,
         params={"command_name": "base_velocity"},
-        scale=(2.0, 2.0, 2.0, 0.25, 0.25, 0.25),
+        scale=(2.0, 2.0, 0.25),
     )
     policy.joint_pos = ObsTerm(
         func=base_mdp.joint_pos_rel,
@@ -220,12 +225,9 @@ def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str
     policy.height_scan = None
     policy.foot_phase_sin = ObsTerm(func=mdp_module.foot_phase_sin, params={"command_name": "base_velocity"})
     policy.foot_phase_cos = ObsTerm(func=mdp_module.foot_phase_cos, params={"command_name": "base_velocity"})
-    policy.foot_theta_sin = ObsTerm(func=mdp_module.foot_theta_sin, params={"command_name": "base_velocity"})
-    policy.foot_theta_cos = ObsTerm(func=mdp_module.foot_theta_cos, params={"command_name": "base_velocity"})
+    policy.foot_theta = ObsTerm(func=mdp_module.foot_theta, params={"command_name": "base_velocity"})
     policy.phase_ratios = ObsTerm(func=mdp_module.phase_ratios, params={"command_name": "base_velocity"})
-    policy.sagittal_plane_state = ObsTerm(
-        func=mdp_module.sagittal_plane_state_zero,
-    )
+    policy.sagittal_plane_state = None
 
 
 def configure_rewards(
@@ -242,9 +244,14 @@ def configure_rewards(
     foot_clearance_mode: str = "phase_penalty",
     foot_clearance_weight: float = 0.10,
     pitch_scale: float = 0.50,
+    yaw_tracking_error_scale: float = 0.20,
 ) -> None:
     """Configure the shared symmetric quadruped reward layout."""
-    env_cfg.rewards.track_lin_vel_xy_exp = None
+    env_cfg.rewards.track_lin_vel_xy_exp = RewTerm(
+        func=base_mdp.track_lin_vel_xy_exp,
+        weight=0.5,
+        params={"command_name": "base_velocity", "std": 0.5},
+    )
     env_cfg.rewards.track_ang_vel_z_exp = None
     env_cfg.rewards.lin_vel_z_l2 = None
     env_cfg.rewards.ang_vel_xy_l2 = None
@@ -261,23 +268,15 @@ def configure_rewards(
 
     feet_cfg = SceneEntityCfg("robot", body_names=list(foot_body_names), preserve_order=True)
     joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
-    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=0.20)
+    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=1.0)
     env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=-200.0)
     env_cfg.rewards.cmd = None
-    env_cfg.rewards.track_lin_vel_x_exp = RewTerm(
-        func=mdp_module.track_lin_vel_x_exp,
-        weight=0.5,
-        params={"command_name": "base_velocity", "error_scale": 0.35},
-    )
-    env_cfg.rewards.track_lin_vel_y_exp = RewTerm(
-        func=mdp_module.track_lin_vel_y_exp,
-        weight=0.5,
-        params={"command_name": "base_velocity", "error_scale": 0.20},
-    )
+    env_cfg.rewards.track_lin_vel_x_exp = None
+    env_cfg.rewards.track_lin_vel_y_exp = None
     env_cfg.rewards.track_ang_vel_z_exp = RewTerm(
         func=mdp_module.track_ang_vel_z_exp,
         weight=0.5,
-        params={"command_name": "base_velocity", "error_scale": 0.20},
+        params={"command_name": "base_velocity", "error_scale": yaw_tracking_error_scale},
     )
     env_cfg.rewards.base_roll_exp = RewTerm(
         func=mdp_module.base_roll_exp,
@@ -343,33 +342,11 @@ def configure_rewards(
         params={"action_term_name": "joint_pos", "margin_fraction": 0.05},
     )
     env_cfg.rewards.sagittal_plane = None
-    env_cfg.rewards.straight_line_motion = RewTerm(
-        func=mdp_module.straight_line_motion_reward,
-        weight=1.0,
-        params={
-            "command_name": "base_velocity",
-            "forward_velocity_scale": 0.35,
-            "lateral_position_scale": 0.35,
-            "heading_scale": 0.35,
-            "lateral_velocity_scale": 0.20,
-            "yaw_rate_scale": 0.20,
-            "pose_weight": 0.0,
-            "roll_scale": 0.25,
-            "pitch_scale": pitch_scale,
-            "min_base_height": base_height_range[0],
-            "height_scale": 0.10,
-            "support_loss_weight": 0.25,
-            "forward_weight": 0.0,
-            "straight_weight": 0.0,
-            "posture_weight": 0.15,
-            "lateral_position_deadband": 0.05,
-            "heading_deadband": 0.05,
-        },
-    )
+    env_cfg.rewards.straight_line_motion = None
     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
         func=mdp_module.leg_permutation_symmetry_penalty,
-        weight=0.30,
-        params={"command_name": "base_velocity", "joint_cfg": joint_cfg},
+        weight=0.20,
+        params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
     )
     env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
 

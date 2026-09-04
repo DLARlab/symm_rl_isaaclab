@@ -7,6 +7,9 @@ import os
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import IdealPDActuatorCfg
+from isaaclab.envs import mdp as base_mdp
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.sim.converters import UrdfConverterCfg
 from isaaclab.utils.configclass import configclass
@@ -27,6 +30,9 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.flat
     make_gait_velocity_command,
     make_play_physics_cfg,
     make_single_body_contact_sensor,
+)
+from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.observation_history import (
+    PolicyObservationHistoryCfg,
 )
 from isaaclab_tasks.manager_based.locomotion.velocity.mdp import dobot_x1_symm as dobot_mdp
 
@@ -86,6 +92,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
 
     sim: SimulationCfg = SimulationCfg(physics=PhysicsCfg())
     rewards: SymmQuadrupedRewardsCfg = SymmQuadrupedRewardsCfg()
+    policy_observation_history: PolicyObservationHistoryCfg = PolicyObservationHistoryCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -159,10 +166,18 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         self.actions.joint_pos.joint_names = _DOBOT_X1_JOINT_ORDER
         self.actions.joint_pos.preserve_order = True
         self.actions.joint_pos.scale = 0.25
+        self.actions.joint_pos.clip = {
+            "joint_front_.*_calf_pitch": (-2.3, -0.2),
+            "joint_rear_.*_calf_pitch": (0.2, 2.3),
+        }
 
         self.commands.base_velocity = make_gait_velocity_command(
             dobot_mdp,
             base_height_range=_DOBOT_X1_BASE_HEIGHT_RANGE,
+            lin_vel_x_range=(-3.0, 3.0),
+            ang_vel_z_range=(-2.0, 2.0),
+            curriculum_tracking_lin_vel_threshold=0.85,
+            curriculum_tracking_ang_vel_threshold=0.7,
         )
 
         self._configure_dobot_x1_symm_observations()
@@ -191,7 +206,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_dobot_x1_symm_observations(self) -> None:
-        """Configure the 72D Dobot policy observation to match Go2 ordering."""
+        """Configure the 56D Dobot policy observation to match Go2 ordering."""
         configure_policy_observations(self, dobot_mdp, _DOBOT_X1_JOINT_ORDER)
 
     def _configure_dobot_x1_symm_rewards(self) -> None:
@@ -208,6 +223,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_clearance_height_scale=0.025,
             foot_clearance_mode="phase_penalty",
             pitch_scale=0.35,
+            yaw_tracking_error_scale=0.50,
         )
 
     def _configure_dobot_x1_symm_terminations(self) -> None:
@@ -224,8 +240,30 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         )
 
     def _configure_dobot_x1_symm_domain_randomization(self) -> None:
-        """Configure Dobot domain randomization values."""
+        """Configure Dobot domain randomization and runtime joint limits."""
         configure_domain_randomization(self, base_body_name="link_trunk")
+        self.events.front_calf_joint_limits = EventTerm(
+            func=base_mdp.randomize_joint_parameters,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_front_.*_calf_pitch"]),
+                "lower_limit_distribution_params": (-2.3, -2.3),
+                "upper_limit_distribution_params": (-0.2, -0.2),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
+        self.events.rear_calf_joint_limits = EventTerm(
+            func=base_mdp.randomize_joint_parameters,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_rear_.*_calf_pitch"]),
+                "lower_limit_distribution_params": (0.2, 0.2),
+                "upper_limit_distribution_params": (2.3, 2.3),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
 
 
 @configclass

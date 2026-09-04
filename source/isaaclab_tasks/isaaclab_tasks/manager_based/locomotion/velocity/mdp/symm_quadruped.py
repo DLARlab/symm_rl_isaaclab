@@ -785,6 +785,12 @@ def foot_phase_cos(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return torch.cos(2.0 * torch.pi * gait_command.foot_phases())
 
 
+def foot_theta(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Sampled foot phase offsets in the canonical ``[-0.25, 0.75)`` cycle range."""
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    return _canonicalize_foot_theta(gait_command.foot_thetas)
+
+
 def foot_theta_sin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Sine of the sampled foot phase offsets."""
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
@@ -846,7 +852,7 @@ def sagittal_plane_state(
 def sagittal_plane_state_zero(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Return a three-dimensional zero placeholder for the sagittal-plane state.
 
-    This preserves the 72-dimensional policy observation layout without exposing
+    This helper supports legacy padded observation layouts without exposing
     simulated world position or heading to the policy.
     """
     return torch.zeros((env.num_envs, 3), device=env.device)
@@ -1579,8 +1585,9 @@ def leg_permutation_symmetry_penalty(
     logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
+    phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
-    """Penalize phase-aligned joint differences under leg permutations.
+    """Penalize joint differences for leg pairs commanded in synchrony.
 
     Args:
         env: The environment instance.
@@ -1592,37 +1599,50 @@ def leg_permutation_symmetry_penalty(
         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
         joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
         leg_pairs: Logical leg pairs to compare.
+        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
-        The negative leg-permutation symmetry penalty.
+        The negative penalty after averaging over the active synchronous leg pairs.
     """
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
     joint_pos = asset.data.joint_pos.torch[:, joint_cfg.joint_ids]
     leg_joint_ids = leg_joint_ids or SYMM_QUADRUPED_LEG_JOINT_IDS
     leg_phase_index = leg_phase_index or SYMM_QUADRUPED_LEG_PHASE_INDEX
-    logical_signs = torch.tensor(logical_joint_signs, dtype=torch.float32, device=env.device)
+    logical_signs = torch.tensor(logical_joint_signs, dtype=joint_pos.dtype, device=joint_pos.device)
     joint_pos = joint_pos.reshape(joint_pos.shape[0], len(logical_joint_signs), -1) * logical_signs.unsqueeze(0)
     joint_pos = joint_pos.reshape(joint_pos.shape[0], -1)
-    joint_range = torch.tensor(joint_ranges, dtype=torch.float32, device=env.device)
+    joint_range = torch.tensor(joint_ranges, dtype=joint_pos.dtype, device=joint_pos.device)
 
-    def leg_permutation_error(tag_a: str, tag_b: str) -> torch.Tensor:
-        sign = torch.tensor([-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0], device=env.device)
+    if not 0.0 <= phase_sync_tolerance <= 0.5:
+        raise ValueError(f"Expected phase_sync_tolerance to be within [0.0, 0.5] cycles, got {phase_sync_tolerance}.")
+
+    def leg_permutation_error(tag_a: str, tag_b: str) -> tuple[torch.Tensor, torch.Tensor]:
+        sign = torch.tensor(
+            [-1.0, 1.0, 1.0] if tag_a[-1] != tag_b[-1] else [1.0, 1.0, 1.0],
+            dtype=joint_pos.dtype,
+            device=joint_pos.device,
+        )
         phase_a = gait_command.foot_thetas[:, leg_phase_index[tag_a]]
         phase_b = gait_command.foot_thetas[:, leg_phase_index[tag_b]]
-        phase_delta = torch.atan2(torch.sin(phase_a - phase_b), torch.cos(phase_a - phase_b))
-        phase_weight = torch.exp(-((phase_delta / 0.25) ** 2)).unsqueeze(-1)
+        phase_delta = phase_a - phase_b
+        phase_distance = torch.minimum(torch.remainder(phase_delta, 1.0), torch.remainder(-phase_delta, 1.0))
+        is_synchronous = phase_distance <= phase_sync_tolerance
         joint_a = joint_pos[:, leg_joint_ids[tag_a]]
         joint_b = joint_pos[:, leg_joint_ids[tag_b]]
         error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b) / (joint_range.unsqueeze(0) + 1.0e-6)
-        error = error * phase_weight
         weights = torch.softmax(error / 0.5, dim=-1)
-        return torch.sum(weights * error, dim=-1)
+        pair_error = torch.sum(weights * error, dim=-1)
+        return torch.where(is_synchronous, pair_error, 0.0), is_synchronous
 
-    error_sum = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    error_sum = torch.zeros(env.num_envs, dtype=joint_pos.dtype, device=joint_pos.device)
+    synchronous_pair_count = torch.zeros_like(error_sum)
     for tag_a, tag_b in leg_pairs:
-        error_sum += leg_permutation_error(tag_a, tag_b)
-    return -(1.0 - torch.exp(-5.0 * error_sum / max(len(leg_pairs), 1)))
+        pair_error, is_synchronous = leg_permutation_error(tag_a, tag_b)
+        error_sum += pair_error
+        synchronous_pair_count += is_synchronous
+    mean_error = error_sum / synchronous_pair_count.clamp_min(1.0)
+    return -(1.0 - torch.exp(-5.0 * mean_error))
 
 
 def morphological_symmetry_penalty(
@@ -1635,6 +1655,7 @@ def morphological_symmetry_penalty(
     logical_joint_signs: Sequence[Sequence[float]] = SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS,
     joint_ranges: Sequence[float] = SYMM_QUADRUPED_JOINT_RANGES,
     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
+    phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
     """Call :func:`leg_permutation_symmetry_penalty` through its deprecated name.
 
@@ -1648,6 +1669,7 @@ def morphological_symmetry_penalty(
         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
         joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
         leg_pairs: Logical leg pairs to compare.
+        phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
         The negative leg-permutation symmetry penalty.
@@ -1670,6 +1692,7 @@ def morphological_symmetry_penalty(
         logical_joint_signs=logical_joint_signs,
         joint_ranges=joint_ranges,
         leg_pairs=leg_pairs,
+        phase_sync_tolerance=phase_sync_tolerance,
     )
 
 
@@ -1803,21 +1826,31 @@ def compute_time_reversal_states(
     obs: TensorDict | None = None,
     actions: torch.Tensor | None = None,
 ):
-    """Augment states using the shared 72D quadruped time-reversal transform."""
+    """Augment temporally aligned histories and joint-position actions by time reversal.
+
+    A policy history contains frames from oldest to newest, and each frame contains the action applied immediately
+    before that frame. Reversing the history therefore also shifts the embedded actions by one step: the current
+    rollout action becomes the first reversed frame's previous action, while the oldest embedded action becomes the
+    action target for the reversed history.
+    """
     if obs is not None:
+        if actions is None:
+            raise ValueError("The current rollout actions are required to time-reverse policy observation histories.")
         batch_size = obs.batch_size[0]
         obs_aug = obs.repeat(2)
         obs_aug["policy"][:batch_size] = obs["policy"][:]
-        obs_aug["policy"][batch_size:] = time_reverse_observations(obs["policy"])
+        reversed_policy, reversed_actions = time_reverse_observation_history(obs["policy"], actions)
+        obs_aug["policy"][batch_size:] = reversed_policy
     else:
         obs_aug = None
+        reversed_actions = None
 
     if actions is not None:
         batch_size = actions.shape[0]
         repeat_dims = (2,) + (1,) * (actions.ndim - 1)
         actions_aug = actions.repeat(repeat_dims)
         actions_aug[:batch_size] = actions[:]
-        actions_aug[batch_size:] = time_reverse_actions(actions)
+        actions_aug[batch_size:] = time_reverse_actions(actions) if reversed_actions is None else reversed_actions
     else:
         actions_aug = None
 
@@ -1825,24 +1858,74 @@ def compute_time_reversal_states(
 
 
 def time_reverse_observations(obs: torch.Tensor) -> torch.Tensor:
-    """Time-reverse the shared 72D symmetric quadruped policy observation."""
-    if obs.shape[-1] != 72:
-        raise ValueError(f"Expected a 72D symmetric quadruped policy observation, got shape {tuple(obs.shape)}.")
+    """Apply time-reversal parity to every frame without changing temporal order."""
+    frame_dim = 56
+    if obs.shape[-1] == 0 or obs.shape[-1] % frame_dim != 0:
+        raise ValueError(
+            f"Expected a multiple of the 56D symmetric quadruped policy frame, got shape {tuple(obs.shape)}."
+        )
 
-    obs_tr = obs.clone()
-    obs_tr[:, 0:6] = -obs[:, 0:6]
-    obs_tr[:, 6:9] = obs[:, 6:9]
-    obs_tr[:, 9:15] = -obs[:, 9:15]
-    obs_tr[:, 15:27] = obs[:, 15:27]
-    obs_tr[:, 27:39] = -obs[:, 27:39]
-    obs_tr[:, 39:51] = obs[:, 39:51]
-    obs_tr[:, 51:55] = -obs[:, 51:55]
-    obs_tr[:, 55:59] = obs[:, 55:59]
-    obs_tr[:, 59:63] = -obs[:, 59:63]
-    obs_tr[:, 63:67] = obs[:, 63:67]
-    obs_tr[:, 67:69] = obs[:, 67:69]
-    obs_tr[:, 69:72] = obs[:, 69:72]
-    return obs_tr
+    obs_frames = obs.reshape(*obs.shape[:-1], -1, frame_dim)
+    obs_tr_frames = obs_frames.clone()
+    obs_tr_frames[..., 0:3] = obs_frames[..., 0:3]
+    obs_tr_frames[..., 3:6] = -obs_frames[..., 3:6]
+    obs_tr_frames[..., 6:18] = obs_frames[..., 6:18]
+    obs_tr_frames[..., 18:30] = -obs_frames[..., 18:30]
+    obs_tr_frames[..., 30:42] = obs_frames[..., 30:42]
+    # Reversing the frame order already reverses phase evolution, so the phase value is even at each paired state.
+    obs_tr_frames[..., 42:46] = obs_frames[..., 42:46]
+    obs_tr_frames[..., 46:50] = obs_frames[..., 46:50]
+    obs_tr_frames[..., 50:54] = _canonicalize_foot_theta(-obs_frames[..., 50:54])
+    obs_tr_frames[..., 54:56] = obs_frames[..., 54:56]
+    return obs_tr_frames.reshape_as(obs)
+
+
+def time_reverse_observation_history(
+    obs: torch.Tensor,
+    current_actions: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reverse a policy history and realign its embedded joint-position actions.
+
+    Args:
+        obs: Flattened frame-major policy histories, with the oldest frame first.
+        current_actions: Actions sampled from the policy for the newest frames.
+
+    Returns:
+        The reversed histories and their temporally aligned action targets.
+
+    Raises:
+        ValueError: If the observation or action dimensions are incompatible with the symmetric quadruped layout.
+    """
+    frame_dim = 56
+    action_start = 30
+    action_dim = 12
+    if obs.shape[-1] == 0 or obs.shape[-1] % frame_dim != 0:
+        raise ValueError(
+            f"Expected a multiple of the 56D symmetric quadruped policy frame, got shape {tuple(obs.shape)}."
+        )
+    if current_actions.shape[:-1] != obs.shape[:-1] or current_actions.shape[-1] != action_dim:
+        raise ValueError(
+            "Expected current actions to match the policy-history batch dimensions and contain "
+            f"{action_dim} joint-position actions, got observation shape {tuple(obs.shape)} and action shape "
+            f"{tuple(current_actions.shape)}."
+        )
+
+    obs_frames = obs.reshape(*obs.shape[:-1], -1, frame_dim)
+    history_length = obs_frames.shape[-2]
+    reversed_frames = obs_frames.flip(-2)
+    reversed_frames = time_reverse_observations(reversed_frames.reshape_as(obs)).reshape_as(obs_frames)
+
+    original_previous_actions = obs_frames[..., action_start : action_start + action_dim]
+    if history_length > 1:
+        reversed_previous_actions = torch.cat(
+            (current_actions.unsqueeze(-2), original_previous_actions[..., 1:, :].flip(-2)),
+            dim=-2,
+        )
+    else:
+        reversed_previous_actions = current_actions.unsqueeze(-2)
+    reversed_frames[..., action_start : action_start + action_dim] = time_reverse_actions(reversed_previous_actions)
+    reversed_action_targets = time_reverse_actions(original_previous_actions[..., 0, :])
+    return reversed_frames.reshape_as(obs), reversed_action_targets
 
 
 def time_reverse_actions(actions: torch.Tensor) -> torch.Tensor:
@@ -1856,6 +1939,10 @@ def time_reverse_actions(actions: torch.Tensor) -> torch.Tensor:
 
 def _wrap_phase(x: torch.Tensor) -> torch.Tensor:
     return torch.remainder(x, 1.0)
+
+
+def _canonicalize_foot_theta(theta: torch.Tensor) -> torch.Tensor:
+    return torch.remainder(theta + 0.25, 1.0) - 0.25
 
 
 def _smooth_swing_indicator(phi: torch.Tensor, duty_factor: torch.Tensor, kappa: torch.Tensor) -> torch.Tensor:
