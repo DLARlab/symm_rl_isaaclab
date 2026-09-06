@@ -1,0 +1,15 @@
+{
+  "analysis_method_version": "leg_usage_grid_full_v3",
+  "analyzer_path": "D:\\symm_rl_isaaclab\\scripts\\symm_locomotion\\evaluation.py",
+  "analyzer_sha256": "27262a94b37d30b7f65e15d8522374d2ef24e422ea051c305fea2dd18f98bbee",
+  "generated_at_utc": "2026-09-04T06:48:54.838900+00:00",
+  "git_branch": "jding/gait-closure-v4-archive",
+  "git_commit": "da361752654938efeea526098f30a008dd7320b5",
+  "input_study_identity_sha256": "f35dff8f6f579e831c64b8cc3f6efe4b424895a81a0d97c073a10dbbb0364a1a",
+  "input_study_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\\evaluations\\leg_usage_grid_full_v3\\study.json",
+  "input_study_sha256": "4ba59cbf6497892b1394ddcab21cae4654759a0bc2a9b2681cf84f037318cb00",
+  "metrics_path": "D:\\symm_rl_isaaclab\\scripts\\symm_locomotion\\_leg_usage_metrics.py",
+  "metrics_sha256": "deca1f51b63eceed0b6c536abf0dd12a51673a8fd157b05424c5b4f4e01a083b",
+  "record_sha256": "7f7383cd5bcb540fe9ff59003e14457008f7b0007c68b8638b6c68033b9dd829",
+  "schema_version": 1
+}

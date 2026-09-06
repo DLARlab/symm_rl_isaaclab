@@ -58,7 +58,7 @@
       "run_id": "go2_no_trs",
       "label": "No TRS",
       "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/gait_family_v2_analysis/2026-08-20_21-04-16_go2_72d_no_trs_gait_trclosed_v2",
-      "artifact_availability": "tracked",
+      "artifact_availability": "local_only",
       "design_role": "main",
       "classification": "eligible_main",
       "facts": {
@@ -88,7 +88,7 @@
       "run_id": "go2_trs_m0p1_v0p05_hard",
       "label": "TRS m0.1/v0.05, w500/r0 (hard)",
       "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_10-22-39_go2_72d_trs_m0p1_v0p05_w500_r0_gait_trclosed_v2",
-      "artifact_availability": "tracked",
+      "artifact_availability": "local_only",
       "design_role": "main",
       "classification": "eligible_main",
       "facts": {
@@ -117,7 +117,7 @@
     {
       "run_id": "go2_trs_m0p1_v0p05_ramp",
       "label": "TRS m0.1/v0.05, w500/r1000 (ramp)",
-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-22_10-35-25_go2_72d_trs_m0p1_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
+      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-22_10-35-25_go2_72d_trs_m0p1_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
       "artifact_availability": "local_only",
       "design_role": "main",
       "classification": "eligible_main",
@@ -148,7 +148,7 @@
       "run_id": "go2_trs_m0p2_v0p1_hard",
       "label": "TRS m0.2/v0.1, w500/r0 (hard)",
       "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/gait_family_v2_analysis/2026-08-21_22-50-01_go2_72d_trs_m0p2_v0p1_w500_r0_gait_trclosed_v2",
-      "artifact_availability": "tracked",
+      "artifact_availability": "local_only",
       "design_role": "main",
       "classification": "eligible_main",
       "facts": {
@@ -178,7 +178,7 @@
       "run_id": "go2_trs_m0p2_v0p1_ramp",
       "label": "TRS m0.2/v0.1, w500/r1000 (ramp)",
       "path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/gait_family_v2_analysis/2026-08-22_10-35-19_go2_72d_trs_m0p2_v0p1_w500_r1000_linear_gait_trclosed_v2",
-      "artifact_availability": "tracked",
+      "artifact_availability": "local_only",
       "design_role": "main",
       "classification": "eligible_main",
       "facts": {
@@ -207,7 +207,7 @@
     {
       "run_id": "go2_trs_m0p2_v0p1_w1000_r1000",
       "label": "TRS m0.2/v0.1, w1000/r1000",
-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-23_09-58-51_go2_72d_trs_m0p2_v0p1_w1000_r1000_linear_gait_trclosed_v2_seed42",
+      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-23_09-58-51_go2_72d_trs_m0p2_v0p1_w1000_r1000_linear_gait_trclosed_v2_seed42",
       "artifact_availability": "local_only",
       "design_role": "supplement",
       "classification": "eligible_supplement",
@@ -237,7 +237,7 @@
     {
       "run_id": "go2_trs_m0p15_v0p05_ramp",
       "label": "TRS m0.15/v0.05, w500/r1000",
-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-23_22-47-32_go2_72d_trs_m0p15_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
+      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-23_22-47-32_go2_72d_trs_m0p15_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
       "artifact_availability": "local_only",
       "design_role": "supplement",
       "classification": "eligible_supplement",
@@ -267,7 +267,7 @@
     {
       "run_id": "go2_trs_m0p15_v0p025_ramp",
       "label": "TRS m0.15/v0.025, w500/r1000",
-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-23_22-47-40_go2_72d_trs_m0p15_v0p025_w500_r1000_linear_gait_trclosed_v2_seed42",
+      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-23_22-47-40_go2_72d_trs_m0p15_v0p025_w500_r1000_linear_gait_trclosed_v2_seed42",
       "artifact_availability": "local_only",
       "design_role": "supplement",
       "classification": "eligible_supplement",

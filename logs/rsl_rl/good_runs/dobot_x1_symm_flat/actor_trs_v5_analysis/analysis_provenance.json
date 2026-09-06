@@ -1,0 +1,256 @@
+{
+  "comparison_launchers": {
+    "bash": {
+      "path": "scripts/symm_locomotion/comparison.sh",
+      "sha256": "f06d54c447f38d22dd1688550e49676744b0f955d7d13f4ddfaced4f8ea97d59"
+    },
+    "powershell": {
+      "path": "scripts/symm_locomotion/comparison.ps1",
+      "sha256": "b41accecd95d7f749197db3fcfcf9e6a7e9d4fe804df48ffa4c2e1c92a1b0637"
+    },
+    "python": {
+      "path": "scripts/symm_locomotion/comparison.py",
+      "sha256": "b86cf5120cee5cde73f651a8d0834c38c323da4375d784e461e40c7d13d773a8"
+    }
+  },
+  "comparison_script": {
+    "path": "scripts/symm_locomotion/comparison.py",
+    "sha256": "b86cf5120cee5cde73f651a8d0834c38c323da4375d784e461e40c7d13d773a8"
+  },
+  "evaluation_protocol_sha256": "354f6ddad6bb482a000f09b15c3742dd51c5166058a5119132a5be5e283ee094",
+  "generated_at_utc": "2026-09-05T13:20:41.523548+00:00",
+  "inputs": [
+    {
+      "abbreviation": "NoTRS",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/model_19999.pt",
+      "checkpoint_sha256": "fe03f6ad9097698cb19d6a7c525334c450e51d8a527e6ac8452fd8c7344b88cc",
+      "evaluation_analysis_record_sha256": "f8767d669000e4ab5b7bd2709740e68c1b9239a5317ec847ec1bfcf167df615d",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "cefb84e222db5c413b109a48d26f2c6273d158aa349cfd222aae0318b5a078e7"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "4bf4b2db7eda763967293649f1d241c25e85e6c03c445b379ec53a5fa763abcd"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "c2418374baa41e10ab3f55bd7be2c1c16c5c12c5f67aec55101ec7711a97c604"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "f0b5cdf9789517c3fac858b50c7f06d770056fdcc76d45feb5392aa5ff144e81"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "e3312d4bd150fc1fc56041d63af84e0841713611e8f8bcd69c89cc3ddeceeaa4"
+        }
+      },
+      "event_sha256": "c8231a7c3186d13b26bf79e165cc667cbebdd788b9c3cb8354236f222a52dad2",
+      "initialization_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/provenance/initialization.json",
+      "initialization_sha256": "d1c0850a11748961b2e05efe2ad0f7600657f7c77633affdfa708310a837fcb7",
+      "run_id": "run_00",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-08-25_06-08-02_notrs_x1def_s42/provenance/initialization.json",
+            "sha256": "d1c0850a11748961b2e05efe2ad0f7600657f7c77633affdfa708310a837fcb7"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "Actor-m0.1",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/model_19999.pt",
+      "checkpoint_sha256": "6b5d6bb8570bd4ef99eb7d9eca2c88add4c9ad0105903bc4c6d38c77c71b0401",
+      "evaluation_analysis_record_sha256": "2700d06635abf5e54c9f919055d00dbf2c03d7b1c75e60fee1bd9a711c9e39b2",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "221f01a540014565c5aa4adc3d69e76f169565b317316ba25762bff7dda53ffa"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "f6fd9b147a759a1e93c68fb2420071fb84ec5703e0da0e9be304de82a23e0d31"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "b242c840bffe98e2d93f51a0bb54a74ab455c78c74e549f2889a319e4c011c04"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "8b5ba763d1514d7cdf20e0c53df47f00c5e58782ca4fd9a8fce1ba20dd793417"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "370dcb9f4f0452f89d0f080c33461a4aa186c732575386da2e375017b33a68eb"
+        }
+      },
+      "event_sha256": "065720e9a8585fa2255e43332543f2db409c943efff27439f2fbc19ea8aa5eb9",
+      "initialization_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/provenance/initialization.json",
+      "initialization_sha256": "16a8d241150c1b6508a435b5d8532ace49d6c937ce7f80f5c7ef57ebe7cfc4c0",
+      "run_id": "run_01",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/provenance/initialization.json",
+            "sha256": "16a8d241150c1b6508a435b5d8532ace49d6c937ce7f80f5c7ef57ebe7cfc4c0"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "Actor-m0.2",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/model_19999.pt",
+      "checkpoint_sha256": "49cef518dd5485f35c6d2b021e671f7060d013d723eb0f53640509ed78209112",
+      "evaluation_analysis_record_sha256": "d80c928dcef72968febee04c4fb155db792ef25f3ba6a6eae991d05a11df826b",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "886db93a3be3e1e3a7e710ec3bd692f5a5b8be8126e5973d6e84f9d81ecdcc7c"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "11cec5a9849cb4ce562bcc331203d1be9f4d4ee48c4573eacbd54b2053e0a488"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "b02ec42099d363f825fd29e4f608354d1e7c49c7e32aa117691172ab8ff32f08"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "249483430fda882e0c0c8b7177998543274cf42f64124aa0d82275552b06e95f"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "b65df158f4161520e33cc0125021a44687c81b7146f544731b346ef0542cc290"
+        }
+      },
+      "event_sha256": "997f839e5bc268e269b0245001f184110588ca058ced52c19d716d18fd3e2488",
+      "initialization_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/provenance/initialization.json",
+      "initialization_sha256": "7f1bc24d81987dc580a5fe2fde64e0e3e3ddbe9e6f388ba36fd70db21ed7bf00",
+      "run_id": "run_02",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_11-19-54_m5_x1_actor_only_trs_m0p2_v0_w500_r0_x1def_s42/provenance/initialization.json",
+            "sha256": "7f1bc24d81987dc580a5fe2fde64e0e3e3ddbe9e6f388ba36fd70db21ed7bf00"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    },
+    {
+      "abbreviation": "Actor-m0.3",
+      "checkpoint_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/model_19999.pt",
+      "checkpoint_sha256": "cf22bcdfe21feecce5c4fb936bc574420bcfe0339fdf9e145634db178387b97f",
+      "evaluation_analysis_record_sha256": "3403d4b60f5b06fe49dac9f803bd0d1563ddc4e48aeab18075dce096ce2ea123",
+      "evaluation_files": {
+        "analysis_provenance": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/analysis_provenance.json",
+          "sha256": "05b7fc787b3e38eadc3043c25573dd7643893a03d83de5afffa848abe4f3d3af"
+        },
+        "cell_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/cell_metrics.csv",
+          "sha256": "39b05182a899ab729dfe5ac60f8abd6bc67347153ff456c2af7cabb248aaa33c"
+        },
+        "overall_metrics": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/metrics/overall_metrics.json",
+          "sha256": "a24e1224db2873a4b45f98b9be516268d35a24842e54592db7bc0582b307fccc"
+        },
+        "progress": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/progress.json",
+          "sha256": "8556edb460a137e6af75610f180a9fab20f1ecaa7bc8f70e38cd0b4e3f798c68"
+        },
+        "study": {
+          "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/evaluations/leg_usage_grid_full_v3/study.json",
+          "sha256": "8ec766c2b39a34d12e1874ed90696e60dff756b1cf1a29d8415b4a4e8f939a46"
+        }
+      },
+      "event_sha256": "a9954864426d2839779b392258abf8f36c69671739778dd0685b2694939fb966",
+      "initialization_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/provenance/initialization.json",
+      "initialization_sha256": "3b594a0f18f431bd555fed08542b070eb06544bda1d9f508a164f9cf18d85c8f",
+      "run_id": "run_03",
+      "run_path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42",
+      "training_metadata": {
+        "files": [
+          {
+            "path": "logs/rsl_rl/good_runs/dobot_x1_symm_flat/2026-09-03_23-50-10_m5_x1_actor_only_trs_m0p3_v0_w500_r0_x1def_s42/provenance/initialization.json",
+            "sha256": "3b594a0f18f431bd555fed08542b070eb06544bda1d9f508a164f9cf18d85c8f"
+          }
+        ],
+        "source": "pre_first_rollout_initialization"
+      }
+    }
+  ],
+  "method_version": "gait_closure_comparison_v1",
+  "outputs": {
+    "REPORT.md": "515582bd81962b630011ba8c1c35efdf8736ed080f793c0c7cc8179a50333897",
+    "evaluation_cells.csv": "db006e6ad257220c4000679149451ca65a0da4cb1e678739040dd120de5dca9c",
+    "fig01_training_efficiency.png": "5febd7121a4b1715fa0caff29422b9a0462faa6bd5ce17d597069720cbcb568b",
+    "fig01_training_efficiency.svg": "c184167b66f1186e4cf2626bd121c64328b1e0361b85f5447ae55da95040d6a1",
+    "fig02_velocity_tracking_overall_direction.png": "e5c684d73590202d11a5e7161ffb65f46f5b403e5fb7a1233eb8bafad7bb23ae",
+    "fig02_velocity_tracking_overall_direction.svg": "0f05f35f3fae8e67d4bf3c2931d340df8001b9a25193635fac5e5040ba80b7a2",
+    "fig03_01_velocity_tracking_by_family_all.png": "24d6fc1474231aaccb8beaaae8b4c5fa46a852756ca96622ced3407b0456c4f4",
+    "fig03_01_velocity_tracking_by_family_all.svg": "b594f86d92a5ba1dfb445513cba7f61fa845256aba749a7453dd8b9dc6e0ee03",
+    "fig03_02_velocity_tracking_by_family_negative.png": "73cddb87dc4fc331bdfaec0b077f89b865d3bc4677bde2b59225e87b96a3c454",
+    "fig03_02_velocity_tracking_by_family_negative.svg": "105167685cb458514acb49b00fd4870523bd5af7f580e92a4892eca6e17f7d4f",
+    "fig03_03_velocity_tracking_by_family_positive.png": "3d6cca7366413ffc3e22f87d5e9998397da62a30adb159c96be6f786131ee034",
+    "fig03_03_velocity_tracking_by_family_positive.svg": "96c3ce29efce2b15c91ef66c95f55a706979048e49aa0f3a8f015fea4dfeda46",
+    "fig03_velocity_tracking_by_family_combined.png": "ca97215654d77c04b356e91b1a606e0a62aca88e2e306ac043cc63ace52e9368",
+    "fig03_velocity_tracking_by_family_combined.svg": "e11192dfd741ae2310739594f98e9e6d0d0c580a2b0e21246fb48085c842d558",
+    "fig04_leg_usage_overall_direction.png": "e39a16f6bbcd8cd1f561d8860e333e8df90b05442ecb82972c6b6caec86197ca",
+    "fig04_leg_usage_overall_direction.svg": "5fb54103ca523efbc5a81824a58082b83589eae9fcf315eecdd1070ae635bde3",
+    "fig05_01_leg_usage_by_family_all.png": "26fc2b4b8bc0ede9a5f8108ee784ad5a9c9860878b3dd1a1b5b3da9cdecd6c4c",
+    "fig05_01_leg_usage_by_family_all.svg": "dd4cfe8b1e0c371862ee2db8d98e64227409819e0110e281315f2bbfc3a15581",
+    "fig05_02_leg_usage_by_family_negative.png": "4575ad9a4fa82387506e3f950957bed9b0425e416bd8f990c00bf795d3bcf7db",
+    "fig05_02_leg_usage_by_family_negative.svg": "841380d59c927087cc97476b523ccf0e5a300427b59428388c5a31755a8dbb72",
+    "fig05_03_leg_usage_by_family_positive.png": "edcbf78b7ee8c75a6bdfe85cf36c88b951678b43007a55d425bc28b1ffda5fa3",
+    "fig05_03_leg_usage_by_family_positive.svg": "98ccf2bd231d4254afb332c3a8861d2000f0b5dc23743739e3f260abc00dc0e6",
+    "fig05_leg_usage_by_family_combined.png": "a81c4c9a520dafd3e9f3a500c1f1a61ea3432bb58487f9c983d5fb225319bb1a",
+    "fig05_leg_usage_by_family_combined.svg": "96afdf1de3116f7e65bed54b14ed4068e898decf307ee7526632f37f140a4681",
+    "fig06_gait_fidelity_overall_direction.png": "7268f4bde46aecfd416d407e68fc04628f8789115a47d9aa37ad13b64d5cb623",
+    "fig06_gait_fidelity_overall_direction.svg": "85f7559efa7a7bd3a1507838ee7bb9f4236163d24712f03fd20ae2ea84e09755",
+    "fig07_01_gait_fidelity_by_family_all.png": "3e02060756a7a47c510c9a0c27f7ed9208cdeb3430f08543715c2d687b643487",
+    "fig07_01_gait_fidelity_by_family_all.svg": "1dd65c92a57bf0ec48d27889d94e986365411ebca0798696b3ed0888e6718ada",
+    "fig07_02_gait_fidelity_by_family_negative.png": "1298c6a34427ce9c82f8835c11db5119a9a520d2886154a992594edeb740b878",
+    "fig07_02_gait_fidelity_by_family_negative.svg": "5a9ec670480713dec044ffe5ea2a6805818f99c642456f16f37bfdd05f87ba0a",
+    "fig07_03_gait_fidelity_by_family_positive.png": "fecc84f154a012f6967d7316689c27d302a5287b7f70cc3221c0471ada63c47e",
+    "fig07_03_gait_fidelity_by_family_positive.svg": "6abcfb6ef8f35d24d491be8c4f432b3449949fca3cdb2dbd90b1a6c482e8a053",
+    "fig07_gait_fidelity_by_family_combined.png": "26aebf3f9db85f715d2e818922c99651a74586f1233030f0c46ee576602e9ee7",
+    "fig07_gait_fidelity_by_family_combined.svg": "94258f0332f54835ece8498851e9c9b2551dbfd7686a9c77fbbeec5e00eab42a",
+    "figure_manifest.json": "aaf27240e2651f8c0d5a90a64d42a23c3e2dea86866e1bf498620e609abf2f3b",
+    "gait_fidelity_summary.csv": "81192fa0adffe2cfc5ec96deea0fc73cfe0884428df644658633aa3ef16a9d03",
+    "learning_curve_points.csv": "3a05cc6b919e4ea17088ba70e7c336bf8c0362f86135a6bc625d44cd5c1260a6",
+    "leg_usage_summary.csv": "0097cc74e194bd24888e4083287d8f585e7f3fea6c8ddd61e32307866f7326bf",
+    "reproduce.py": "12913efb1024a37c53e63426be840b6fa8eb41b5eb949451e32b673a46b16f3d",
+    "source_manifest_snapshot.json": "85b65183552d446af70ce04e65168505be91ed82c84c9c409a3f06db44732e48",
+    "study.json": "85b65183552d446af70ce04e65168505be91ed82c84c9c409a3f06db44732e48",
+    "style.json": "26215d3ea08d56707fb928bfdb211d4697e1dafa1517ae89f42b3fdf5c81885a",
+    "summary.json": "b503bb2ada23e964775eea32dbb96dcd852f57b3039aad5438be318fd7246317",
+    "training_efficiency.csv": "094e8a71103f96146fa879cafe783614e01e4240487bd3f9710ba66de7f1a889",
+    "velocity_tracking_summary.csv": "0413264ec0ad1053c78b0d14a1b32f10c554952506b6ba3ef02bdcb2e3701d7a"
+  },
+  "plot_script": {
+    "path": "scripts/symm_locomotion/comparison.py",
+    "sha256": "b86cf5120cee5cde73f651a8d0834c38c323da4375d784e461e40c7d13d773a8"
+  },
+  "record_sha256": "de0b479d8ba2f0c292c549a0728f4b2e57d75751ffdbbe4b02b1c005b4ad8125",
+  "schema_version": 1,
+  "source_manifest": null,
+  "study_sha256": "85b65183552d446af70ce04e65168505be91ed82c84c9c409a3f06db44732e48",
+  "style_sha256": "26215d3ea08d56707fb928bfdb211d4697e1dafa1517ae89f42b3fdf5c81885a",
+  "tensorboard_scalar_parser": {
+    "path": "scripts/symm_locomotion/_tensorboard_scalars.py",
+    "sha256": "3cb2833b71bdb260e896903a5adbb6de49e2fb2f9649cf26fe91abdd26151d44"
+  },
+  "warnings": [
+    "Training source provenance differs across runs; baseline deltas are descriptive rather than a strict single-factor causal contrast."
+  ]
+}

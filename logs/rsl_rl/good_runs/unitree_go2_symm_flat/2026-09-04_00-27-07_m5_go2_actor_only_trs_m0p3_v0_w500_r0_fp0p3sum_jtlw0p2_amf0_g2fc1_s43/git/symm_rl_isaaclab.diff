@@ -1,0 +1,907 @@
+--- git commit ---
+da361752654938efeea526098f30a008dd7320b5
+
+
+--- git status ---
+On branch jding/gait-closure-v4-archive
+Your branch is up to date with 'origin/jding/gait-closure-v4-archive'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   logs/rsl_rl/good_runs/README.md
+	modified:   scripts/symm_locomotion/study_registry/go2_gait_v2_development_sweep.json
+	modified:   scripts/symm_locomotion/study_registry/go2_v4_main_development.json
+	modified:   scripts/symm_locomotion/symm_cli.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_core.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
+	modified:   source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_config.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_training.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	logs/rsl_rl/good_runs/MILESTONE_5_TR_VALUE_DEFAULT_AUDIT.md
+	scripts/symm_locomotion/analyze_tr_value_consistency.ps1
+	scripts/symm_locomotion/analyze_tr_value_consistency.py
+	scripts/symm_locomotion/test/test_analyze_tr_value_consistency.py
+	source/isaaclab_tasks/changelog.d/jding-tr-value-default.minor.rst
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/logs/rsl_rl/good_runs/README.md b/logs/rsl_rl/good_runs/README.md
+index 914bb111e..814b17b8f 100644
+--- a/logs/rsl_rl/good_runs/README.md
++++ b/logs/rsl_rl/good_runs/README.md
+@@ -15,6 +15,7 @@ grids, tables, figures, and reports.
+ | [2: Phase Mapping V2 and leg-permutation fix](MILESTONE_2_PHASE_MAPPING_V2_AND_LEG_PERMUTATION_FIX.md) | 2026-08-03 to 2026-08-21 | Separated command direction from time reversal, added the duty-aware TR map, and later restricted the leg-permutation reward to truly synchronous pairs. |
+ | [3: Gait-family V2](MILESTONE_3_GAIT_FAMILY_V2.md) | 2026-08-24 | Introduced the closed ten-gait family, family-balanced sampling, and the fixed 10-gait by 6-speed evaluation. |
+ | [4: Gait-closure parameter V4](MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md) | 2026-08-25 to 2026-09-01 | Screened hard and ramped TRS schedules, added the full-V3 comparison, and recovered Go2 reward under the documented recovery profile. |
++| [5: TR value default audit](MILESTONE_5_TR_VALUE_DEFAULT_AUDIT.md) | 2026-09-02 | Made actor-only TRS the default, retained critic consistency as an optional ablation, and documented the value-theory boundary and four-condition experiment. |
+ 
+ Every milestone states what changed, what remained stable, which evidence
+ supports the result, and which limitations prevent a broader claim.
+@@ -23,7 +24,7 @@ supports the result, and which limitations prevent a broader claim.
+ 
+ ```text
+ good_runs/
+-  MILESTONE_1_*.md ... MILESTONE_4_*.md
++  MILESTONE_1_*.md ... MILESTONE_5_*.md
+   dobot_x1_symm_flat/
+     2026-08-25_* ... 2026-08-27_*       # current V4 training cohort
+     gait_closure_parameter_v4_analysis/ # current comparison
+diff --git a/scripts/symm_locomotion/study_registry/go2_gait_v2_development_sweep.json b/scripts/symm_locomotion/study_registry/go2_gait_v2_development_sweep.json
+index 68b7a09a8..d87fa217d 100644
+--- a/scripts/symm_locomotion/study_registry/go2_gait_v2_development_sweep.json
++++ b/scripts/symm_locomotion/study_registry/go2_gait_v2_development_sweep.json
+@@ -117,7 +117,7 @@
+     {
+       "run_id": "go2_trs_m0p1_v0p05_ramp",
+       "label": "TRS m0.1/v0.05, w500/r1000 (ramp)",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-22_10-35-25_go2_72d_trs_m0p1_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-22_10-35-25_go2_72d_trs_m0p1_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
+       "artifact_availability": "local_only",
+       "design_role": "main",
+       "classification": "eligible_main",
+@@ -207,7 +207,7 @@
+     {
+       "run_id": "go2_trs_m0p2_v0p1_w1000_r1000",
+       "label": "TRS m0.2/v0.1, w1000/r1000",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-23_09-58-51_go2_72d_trs_m0p2_v0p1_w1000_r1000_linear_gait_trclosed_v2_seed42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-23_09-58-51_go2_72d_trs_m0p2_v0p1_w1000_r1000_linear_gait_trclosed_v2_seed42",
+       "artifact_availability": "local_only",
+       "design_role": "supplement",
+       "classification": "eligible_supplement",
+@@ -237,7 +237,7 @@
+     {
+       "run_id": "go2_trs_m0p15_v0p05_ramp",
+       "label": "TRS m0.15/v0.05, w500/r1000",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-23_22-47-32_go2_72d_trs_m0p15_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-23_22-47-32_go2_72d_trs_m0p15_v0p05_w500_r1000_linear_gait_trclosed_v2_seed42",
+       "artifact_availability": "local_only",
+       "design_role": "supplement",
+       "classification": "eligible_supplement",
+@@ -267,7 +267,7 @@
+     {
+       "run_id": "go2_trs_m0p15_v0p025_ramp",
+       "label": "TRS m0.15/v0.025, w500/r1000",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-23_22-47-40_go2_72d_trs_m0p15_v0p025_w500_r1000_linear_gait_trclosed_v2_seed42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/2026-08-24_22-08-37_gait_family_v2_analysis/runs/2026-08-23_22-47-40_go2_72d_trs_m0p15_v0p025_w500_r1000_linear_gait_trclosed_v2_seed42",
+       "artifact_availability": "local_only",
+       "design_role": "supplement",
+       "classification": "eligible_supplement",
+diff --git a/scripts/symm_locomotion/study_registry/go2_v4_main_development.json b/scripts/symm_locomotion/study_registry/go2_v4_main_development.json
+index 1780b7001..9ed2813a1 100644
+--- a/scripts/symm_locomotion/study_registry/go2_v4_main_development.json
++++ b/scripts/symm_locomotion/study_registry/go2_v4_main_development.json
+@@ -67,7 +67,7 @@
+     {
+       "run_id": "go2_v4_no_trs",
+       "label": "No TRS",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-25_06-07-30_d1_go2_dev_main_notrs_g2fc1_s42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/development_archive/runs/2026-08-25_06-07-30_d1_go2_dev_main_notrs_g2fc1_s42",
+       "artifact_availability": "local_only",
+       "design_role": "main",
+       "classification": "eligible_main",
+@@ -99,7 +99,7 @@
+     {
+       "run_id": "go2_v4_trs_m0p1_v0p05_hard",
+       "label": "TRS m0.1/v0.05, w500/r0",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-25_16-56-59_d1_go2_dev_main_m0p1_v0p05_w500_r0_g2fc1_s42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/development_archive/runs/2026-08-25_16-56-59_d1_go2_dev_main_m0p1_v0p05_w500_r0_g2fc1_s42",
+       "artifact_availability": "local_only",
+       "design_role": "main",
+       "classification": "eligible_main",
+@@ -131,7 +131,7 @@
+     {
+       "run_id": "go2_v4_trs_m0p1_v0p05_ramp",
+       "label": "TRS m0.1/v0.05, w500/r1000",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-26_05-11-28_d2_go2_dev_main_m0p1_v0p05_w500_r1000_g2fc1_s42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/development_archive/runs/2026-08-26_05-11-28_d2_go2_dev_main_m0p1_v0p05_w500_r1000_g2fc1_s42",
+       "artifact_availability": "local_only",
+       "design_role": "main",
+       "classification": "eligible_main",
+@@ -163,7 +163,7 @@
+     {
+       "run_id": "go2_v4_trs_m0p2_v0p1_hard",
+       "label": "TRS m0.2/v0.1, w500/r0",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-27_00-44-04_d2_go2_dev_main_m0p2_v0p1_w500_r0_g2fc1_s42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/development_archive/runs/2026-08-27_00-44-04_d2_go2_dev_main_m0p2_v0p1_w500_r0_g2fc1_s42",
+       "artifact_availability": "local_only",
+       "design_role": "main",
+       "classification": "eligible_main",
+@@ -195,7 +195,7 @@
+     {
+       "run_id": "go2_v4_trs_m0p2_v0p1_ramp",
+       "label": "TRS m0.2/v0.1, w500/r1000",
+-      "path": "logs/rsl_rl/unitree_go2_symm_flat/2026-08-27_23-34-32_d3_go2_dev_main_m0p2_v0p1_w500_r1000_g2fc1_s42",
++      "path": "logs/analysis/rsl_rl/unitree_go2_symm_flat/development_archive/runs/2026-08-27_23-34-32_d3_go2_dev_main_m0p2_v0p1_w500_r1000_g2fc1_s42",
+       "artifact_availability": "local_only",
+       "design_role": "main",
+       "classification": "eligible_main",
+diff --git a/scripts/symm_locomotion/symm_cli.py b/scripts/symm_locomotion/symm_cli.py
+index 6bc010a6a..5a3b67660 100644
+--- a/scripts/symm_locomotion/symm_cli.py
++++ b/scripts/symm_locomotion/symm_cli.py
+@@ -23,7 +23,7 @@ CONDA_ENV = "symm_rl_isaaclab"
+ DEFAULT_NUM_ENVS = 512
+ DEFAULT_TRAINING_ITERATIONS = 20000
+ DEFAULT_MIRROR_LOSS_COEFF = 0.1
+-DEFAULT_TR_VALUE_COEFF = 0.05
++DEFAULT_TR_VALUE_COEFF = 0.0
+ DEFAULT_TR_WARMUP_ITERATIONS = 500
+ DEFAULT_TR_RAMPUP_ITERATIONS = 0
+ DEFAULT_TR_RAMP_SHAPE = "linear"
+@@ -447,6 +447,11 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
+         dest="tr_value_coeff",
+         type=float,
+         default=DEFAULT_TR_VALUE_COEFF,
++        help=(
++            "Optional coefficient for the time-reversal critic-consistency ablation. Default: 0.0. "
++            "This is not the standard PPO value-loss coefficient. A positive value explicitly enables "
++            "the optional value-consistency hypothesis."
++        ),
+     )
+     parser.add_argument(
+         "--tr-warmup-iterations",
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+index 96ad7d261..60fc00da6 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/agents/rsl_rl_ppo_cfg.py
+@@ -26,5 +26,5 @@ class DobotX1SymmFlatPPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
+             experiment_name="dobot_x1_symm_flat",
+             use_data_augmentation=False,
+             data_augmentation_func=dobot_mdp.compute_time_reversal_states,
+-            value_loss_coeff=0.05,
++            value_loss_coeff=0.0,
+         )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
+index 845ebbe54..73b793470 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/agents/rsl_rl_ppo_cfg.py
+@@ -26,5 +26,5 @@ class UnitreeGo2SymmFlatPPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
+             experiment_name="unitree_go2_symm_flat",
+             use_data_augmentation=False,
+             data_augmentation_func=go2_symm_mdp.compute_time_reversal_states,
+-            value_loss_coeff=0.05,
++            value_loss_coeff=0.0,
+         )
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+index 84dc7a45e..880d1ce33 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/agents/rsl_rl_ppo_cfg.py
+@@ -18,7 +18,7 @@ def configure_symm_quadruped_ppo(
+     experiment_name: str,
+     data_augmentation_func: Callable,
+     use_data_augmentation: bool,
+-    value_loss_coeff: float,
++    value_loss_coeff: float = 0.0,
+     mirror_loss_coeff: float = 0.1,
+     min_abs_command_velocity: float = 0.0,
+     warmup_iterations: int = 500,
+@@ -33,7 +33,10 @@ def configure_symm_quadruped_ppo(
+         data_augmentation_func: Time-reversal data augmentation function.
+         use_data_augmentation: Whether to duplicate mini-batch samples with time-reversed states. This legacy
+             compatibility path is deprecated; prefer the filtered ``tr_augmentation`` configuration.
+-        value_loss_coeff: Weight for the value-function TRS consistency loss.
++        value_loss_coeff: An optional time-reversal value-consistency ablation coefficient. It is zero by default
++            because temporal reversal does not generally imply invariance of a forward-looking discounted state
++            value. This controls the optional time-reversal critic-consistency ablation, not standard PPO value
++            regression.
+         mirror_loss_coeff: Weight for the policy mirror loss.
+         min_abs_command_velocity: Minimum forward command velocity [m/s] for TRS losses.
+         warmup_iterations: Number of fully unregularized PPO updates before applying TRS losses.
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_cfg.py
+index 508a25a23..bbbe6782f 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_cfg.py
+@@ -319,17 +319,28 @@ class TimeReversalSymmetryCfg(RslRlSymmetryCfg):
+     """Project-local extension of RSL-RL symmetry configuration.
+ 
+     The inherited RSL-RL fields remain accepted as deprecated aliases. The
+-    global RSL-RL symmetry implementation is not modified.
++    global RSL-RL symmetry implementation is not modified. Time-reversal
++    policy consistency is independent of the optional time-reversal
++    critic-consistency ablation.
+     """
+ 
+     use_tr_policy_consistency: bool | None = None
+     """Canonical policy-consistency switch, or ``None`` to inherit :attr:`use_mirror_loss`."""
+ 
+     use_tr_value_consistency: bool | None = None
+-    """Canonical value-consistency switch, or ``None`` to infer it from the legacy value coefficient."""
++    """Canonical switch for the optional time-reversal critic-consistency ablation.
++
++    ``None`` preserves legacy enablement inference from a positive
++    :attr:`value_loss_coeff`; zero therefore disables the value schedule while
++    historical positive-coefficient configurations remain reproducible.
++    """
+ 
+     log_disabled_raw_consistency: bool = False
+-    """Whether to compute raw consistency losses for explicitly disabled terms."""
++    """Whether to compute raw diagnostics for explicitly disabled consistency terms.
++
++    Diagnostic-only critic evaluation is detached and cannot affect standard
++    PPO optimization.
++    """
+ 
+     tr_policy_output_space: Literal["raw_action_mean", "normalized_requested_joint_target"] = "raw_action_mean"
+     """Policy output space used by the optimized time-reversal consistency loss.
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_core.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_core.py
+index c57fa24e7..dde568768 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_core.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_core.py
+@@ -145,7 +145,13 @@ def time_reversal_schedule_scale(
+ 
+ 
+ def resolve_time_reversal_schedule(symmetry: Mapping, term: str) -> ResolvedTimeReversalSchedule:
+-    """Resolve a canonical policy, value, or augmentation schedule with aliases."""
++    """Resolve a canonical policy, value-ablation, or augmentation schedule with aliases.
++
++    For the optional time-reversal critic-consistency ablation, a canonical
++    enable flag of ``None`` deliberately infers enablement from the legacy
++    value coefficient so archived positive-coefficient runs remain
++    reproducible.
++    """
+     if term not in {"policy", "value", "augmentation"}:
+         raise ValueError(f"term must be 'policy', 'value', or 'augmentation'; received {term!r}.")
+ 
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
+index f7d36119c..13b7493ce 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/time_reversal_ppo.py
+@@ -96,7 +96,12 @@ def time_reversal_weighted_losses(
+ 
+ 
+ class TimeReversalPPO(PPO):
+-    """PPO with scheduled auxiliary time-reversal policy and value losses."""
++    """PPO with scheduled time-reversal policy consistency and an optional
++    time-reversal value-consistency ablation.
++
++    The value term is an optional time-reversal critic-consistency ablation;
++    the standard PPO critic and its return-regression loss are always retained.
++    """
+ 
+     _MIN_ACTOR_STD = 1.0e-6
+     _MAX_ACTOR_STD = 1.0
+@@ -289,6 +294,9 @@ class TimeReversalPPO(PPO):
+             augmentation_diagnostic_minibatch = augmentation_gradient_update and batch_index == 0
+             need_policy_raw = compute_policy_raw or (diagnostic_minibatch and policy_schedule.enabled)
+             need_value_raw = compute_value_raw or (diagnostic_minibatch and value_schedule.enabled)
++            value_gradients_required = effective_tr_value_coeff > 0.0 or (
++                diagnostic_minibatch and value_schedule.enabled
++            )
+             if self.symmetry and (need_policy_raw or need_value_raw):
+                 data_augmentation_func = self.symmetry["data_augmentation_func"]
+                 if legacy_data_augmentation_active:
+@@ -371,11 +379,22 @@ class TimeReversalPPO(PPO):
+                     else:
+                         raise ValueError(f"Unsupported tr_policy_output_space: {output_space!r}.")
+                 if need_value_raw:
+-                    transformed_values = (
+-                        values[original_batch_size:]
+-                        if legacy_data_augmentation_active
+-                        else self.critic(transformed_observations)
+-                    )
++                    if value_gradients_required:
++                        transformed_values = (
++                            values[original_batch_size:]
++                            if legacy_data_augmentation_active
++                            else self.critic(transformed_observations)
++                        )
++                    else:
++                        # Diagnostic-only evaluation for the optional
++                        # time-reversal critic-consistency ablation must not
++                        # retain a graph or affect the standard PPO critic update.
++                        with torch.no_grad():
++                            transformed_values = (
++                                values[original_batch_size:].detach()
++                                if legacy_data_augmentation_active
++                                else self.critic(transformed_observations)
++                            )
+                     tr_value_loss = self._masked_mse(
+                         transformed_values,
+                         values[:original_batch_size].detach(),
+@@ -772,6 +791,18 @@ class TimeReversalPPO(PPO):
+         for term in ("policy", "value", "augmentation"):
+             schedule = resolve_time_reversal_schedule(self.symmetry, term)
+             schedule.scale(0)
++            if (
++                term == "value"
++                and self.symmetry.get("use_tr_value_consistency") is True
++                and schedule.target_coeff == 0.0
++            ):
++                warnings.warn(
++                    "use_tr_value_consistency=True enables the optional time-reversal critic-consistency "
++                    "ablation, but its resolved coefficient is zero; it will make no contribution to the "
++                    "optimization loss.",
++                    UserWarning,
++                    stacklevel=2,
++                )
+ 
+         if augmentation_cfg.get("enabled", False):
+             if augmentation_cfg.get("mode") != "dynamics_filtered_reverse_action_supervision":
+diff --git a/source/isaaclab_tasks/test/test_symm_locomotion_cli.py b/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+index e3f879fac..578ffd450 100644
+--- a/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
++++ b/source/isaaclab_tasks/test/test_symm_locomotion_cli.py
+@@ -257,6 +257,8 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
+ 
+     assert args.num_envs == 512
+     assert args.iterations == 20000
++    assert args.mirror_loss_coeff == pytest.approx(0.1)
++    assert args.tr_value_coeff == 0.0
+     assert args.tr_rampup_iterations == 0
+     assert args.tr_ramp_shape == "linear"
+     assert command[command.index("--num_envs") + 1] == "512"
+@@ -264,11 +266,38 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
+     assert args.tr_min_abs_cmd_vel == 0.0
+     assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
+     assert "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false" in command
++    assert "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.1" in command
++    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0" in command
+     assert "agent.algorithm.symmetry_cfg.rampup_iterations=0" in command
+     assert "agent.algorithm.symmetry_cfg.ramp_shape=linear" in command
+     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+ 
+ 
++@pytest.mark.parametrize("robot", ["go2", "x1"])
++def test_train_explicit_positive_tr_value_coefficient_is_forwarded(robot):
++    symm_cli = _load_symm_cli()
++    args = symm_cli.build_parser().parse_args(["train", "--robot", robot, "--tr-value-coef", "0.05", "--no-conda-run"])
++    args.robot_spec = symm_cli.get_robot(args.robot)
++
++    command = symm_cli.train_lab_args(args, [])
++
++    assert args.tr_value_coeff == pytest.approx(0.05)
++    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.05" in command
++
++
++def test_train_tr_value_help_distinguishes_optional_ablation_from_ppo_critic():
++    symm_cli = _load_symm_cli()
++    parser = symm_cli.build_parser()
++    subcommands = next(action for action in parser._actions if action.dest == "command")
++    train_parser = subcommands.choices["train"]
++    help_text = next(action.help for action in train_parser._actions if action.dest == "tr_value_coeff")
++
++    assert "Optional coefficient for the time-reversal critic-consistency ablation" in help_text
++    assert "Default: 0.0" in help_text
++    assert "not the standard PPO value-loss coefficient" in help_text
++    assert "positive value explicitly enables" in help_text
++
++
+ def test_ramped_train_run_name_records_complete_schedule():
+     symm_cli = _load_symm_cli()
+     args = symm_cli.build_parser().parse_args(
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_config.py b/source/isaaclab_tasks/test/test_symm_quadruped_config.py
+index 908a50864..4e6105457 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_config.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_config.py
+@@ -95,13 +95,13 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
+         experiment_name="test",
+         data_augmentation_func=lambda **_: None,
+         use_data_augmentation=False,
+-        value_loss_coeff=0.0,
+     )
+ 
+     assert cfg.max_iterations == 20000
+     assert cfg.clip_actions is None
+     assert cfg.actor.distribution_cfg.init_std == 0.5
+     assert cfg.algorithm.entropy_coef == 0.005
++    assert cfg.algorithm.symmetry_cfg.value_loss_coeff == 0.0
+     assert cfg.algorithm.symmetry_cfg.command_observation_index == 9
+     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
+ 
+@@ -231,9 +231,11 @@ def test_robot_ppo_time_reversal_configuration_is_stable(runner_cfg_type):
+     assert symmetry_cfg.use_time_reversal_regularization
+     assert symmetry_cfg.use_mirror_loss
+     assert symmetry_cfg.mirror_loss_coeff == 0.1
+-    assert symmetry_cfg.value_loss_coeff == 0.05
++    assert symmetry_cfg.value_loss_coeff == 0.0
+     assert symmetry_cfg.min_abs_command_velocity == 0.0
+     assert symmetry_cfg.warmup_iterations == 500
++    assert runner_cfg.algorithm.value_loss_coef == 1.0
++    assert runner_cfg.algorithm.use_clipped_value_loss is True
+ 
+ 
+ def test_running_reward_is_clipped_before_terminal_penalty_is_added():
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py b/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
+index 57dbe402e..700cf8e95 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_ppo.py
+@@ -151,6 +151,129 @@ class _SingleBatchStorage:
+         self.cleared = True
+ 
+ 
++class _TrackingRegressionCritic(_LegacyRegressionCritic):
++    """Record critic inputs and autograd state without changing its predictions."""
++
++    def __init__(self):
++        super().__init__()
++        self.forward_inputs = []
++        self.forward_grad_enabled = []
++
++    def forward(self, observations, **kwargs):
++        self.forward_inputs.append(observations["policy"].detach().clone())
++        self.forward_grad_enabled.append(torch.is_grad_enabled())
++        return super().forward(observations, **kwargs)
++
++
++def _regression_time_reversal_transform(*, obs=None, actions=None, env=None):
++    del env
++    augmented_observations = None
++    augmented_actions = None
++    if obs is not None:
++        transformed_policy = obs["policy"].detach().clone()
++        transformed_policy[:, 1].neg_()
++        augmented_observations = TensorDict(
++            {"policy": torch.cat((obs["policy"], transformed_policy))},
++            batch_size=[2 * obs.batch_size[0]],
++        )
++    if actions is not None:
++        augmented_actions = torch.cat((actions, -actions))
++    return augmented_observations, augmented_actions
++
++
++def _run_regression_update(
++    *,
++    value_loss_coeff: float,
++    use_tr_value_consistency: bool | None,
++    log_disabled_raw_consistency: bool = False,
++    mirror_loss_coeff: float = 0.0,
++    use_tr_policy_consistency: bool | None = False,
++):
++    """Run one deterministic PPO update with independently controlled TR terms."""
++    actor = _LegacyRegressionActor()
++    critic = _TrackingRegressionCritic()
++    observations = torch.zeros(4, 72)
++    observations[:, 0] = torch.tensor([-1.0, 0.0, 1.0, 2.0])
++    observations[:, 1] = torch.tensor([0.5, -1.0, 2.0, -0.5])
++    observations = TensorDict({"policy": observations}, batch_size=[4])
++    actions = torch.zeros(4, 12)
++    actions[:, 0] = torch.tensor([-0.5, 0.25, 1.0, -1.5])
++    batch = SimpleNamespace(
++        observations=observations,
++        actions=actions,
++        old_actions_log_prob=torch.tensor([-0.25, -0.05, 0.1, -0.2]),
++        values=torch.tensor([[0.1], [-0.2], [0.4], [-0.1]]),
++        advantages=torch.tensor([[1.2], [-0.7], [0.5], [-1.1]]),
++        returns=torch.tensor([[0.4], [-0.3], [1.2], [-0.8]]),
++        masks=None,
++        hidden_states=(None, None),
++        old_distribution_params=(),
++    )
++    with torch.no_grad():
++        rollout_means = actor(observations)
++    storage = _SingleBatchStorage(batch, rollout_means)
++    parameters = tuple(actor.parameters()) + tuple(critic.parameters())
++    optimizer = torch.optim.SGD(parameters, lr=0.03, momentum=0.9)
++
++    algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
++    algorithm.symmetry = {
++        "use_time_reversal_regularization": True,
++        "use_data_augmentation": False,
++        "use_mirror_loss": mirror_loss_coeff > 0.0,
++        "mirror_loss_coeff": mirror_loss_coeff,
++        "value_loss_coeff": value_loss_coeff,
++        "use_tr_policy_consistency": use_tr_policy_consistency,
++        "use_tr_value_consistency": use_tr_value_consistency,
++        "log_disabled_raw_consistency": log_disabled_raw_consistency,
++        "warmup_iterations": 0,
++        "rampup_iterations": 0,
++        "ramp_shape": "linear",
++        "tr_gradient_diagnostics": {"enabled": False},
++        "tr_augmentation": {
++            "enabled": False,
++            "coefficient": 0.0,
++            "schedule": {"enabled": False, "target_coeff": 0.0},
++        },
++        "data_augmentation_func": _regression_time_reversal_transform,
++        "_env": None,
++    }
++    algorithm.actor = actor
++    algorithm.critic = critic
++    algorithm.storage = storage
++    algorithm.optimizer = optimizer
++    algorithm.rnd = None
++    algorithm.rnd_optimizer = None
++    algorithm.num_mini_batches = 1
++    algorithm.num_learning_epochs = 1
++    algorithm.normalize_advantage_per_mini_batch = False
++    algorithm.desired_kl = None
++    algorithm.schedule = "fixed"
++    algorithm.use_clipped_value_loss = True
++    algorithm.value_loss_coef = 0.7
++    algorithm.entropy_coef = 0.05
++    algorithm.clip_param = 0.2
++    algorithm.max_grad_norm = 100.0
++    algorithm.device = "cpu"
++    algorithm.is_multi_gpu = False
++    algorithm._actor_mean_abort_count = 0
++    algorithm._time_reversal_update_count = 0
++    algorithm.current_learning_iteration = 0
++    algorithm._tr_augmentation = None
++    initial_actor = tuple(parameter.detach().clone() for parameter in actor.parameters())
++    initial_critic = tuple(parameter.detach().clone() for parameter in critic.parameters())
++
++    losses = algorithm.update()
++    return SimpleNamespace(
++        actor=actor,
++        critic=critic,
++        initial_actor=initial_actor,
++        initial_critic=initial_critic,
++        losses=losses,
++        optimizer=optimizer,
++        storage=storage,
++    )
++
++
+ def _schedule_algorithm(
+     iteration: int,
+     *,
+@@ -341,6 +464,93 @@ def test_zero_scale_has_exactly_zero_weighted_auxiliary_objective():
+     assert weighted == (0.0, 0.0, 0.0)
+ 
+ 
++def test_actor_only_trs_does_not_evaluate_critic_on_transformed_observations():
++    result = _run_regression_update(
++        value_loss_coeff=0.0,
++        use_tr_value_consistency=None,
++        mirror_loss_coeff=0.1,
++        use_tr_policy_consistency=None,
++    )
++
++    assert result.losses["effective_tr_policy_coeff"] == pytest.approx(0.1)
++    assert result.losses["effective_tr_value_coeff"] == 0.0
++    assert result.losses["tr_value_consistency"] == 0.0
++    assert result.losses["weighted_tr_value"] == 0.0
++    assert len(result.critic.forward_inputs) == 1
++    assert result.critic.forward_grad_enabled == [True]
++
++
++def test_disabled_value_diagnostic_is_detached_and_preserves_ppo_outputs():
++    disabled = _run_regression_update(
++        value_loss_coeff=0.0,
++        use_tr_value_consistency=None,
++        log_disabled_raw_consistency=False,
++        mirror_loss_coeff=0.1,
++        use_tr_policy_consistency=None,
++    )
++    diagnostic = _run_regression_update(
++        value_loss_coeff=0.0,
++        use_tr_value_consistency=None,
++        log_disabled_raw_consistency=True,
++        mirror_loss_coeff=0.1,
++        use_tr_policy_consistency=None,
++    )
++
++    assert disabled.critic.forward_grad_enabled == [True]
++    assert diagnostic.critic.forward_grad_enabled == [True, False]
++    assert diagnostic.losses["tr_value_consistency"] == pytest.approx(0.495)
++    assert diagnostic.losses["tr_value"] == diagnostic.losses["tr_value_consistency"]
++    assert diagnostic.losses["effective_tr_value_coeff"] == 0.0
++    assert diagnostic.losses["weighted_tr_value"] == 0.0
++    for key in ("value", "surrogate", "entropy", "actor_bound", "weighted_tr_policy", "weighted_tr_total"):
++        assert diagnostic.losses[key] == pytest.approx(disabled.losses[key], abs=1.0e-8)
++    for disabled_parameter, diagnostic_parameter in zip(
++        (*disabled.actor.parameters(), *disabled.critic.parameters()),
++        (*diagnostic.actor.parameters(), *diagnostic.critic.parameters()),
++    ):
++        torch.testing.assert_close(diagnostic_parameter, disabled_parameter, rtol=0.0, atol=1.0e-8)
++        torch.testing.assert_close(diagnostic_parameter.grad, disabled_parameter.grad, rtol=0.0, atol=1.0e-8)
++
++
++def test_positive_value_coefficient_preserves_legacy_ablation_enablement():
++    inferred = _run_regression_update(value_loss_coeff=0.05, use_tr_value_consistency=None)
++    disabled = _run_regression_update(value_loss_coeff=0.05, use_tr_value_consistency=False)
++    explicit = _run_regression_update(value_loss_coeff=0.05, use_tr_value_consistency=True)
++
++    for enabled in (inferred, explicit):
++        assert enabled.critic.forward_grad_enabled == [True, True]
++        assert enabled.losses["effective_tr_value_coeff"] == pytest.approx(0.05)
++        assert enabled.losses["tr_value_consistency"] == pytest.approx(0.495)
++        assert enabled.losses["weighted_tr_value"] == pytest.approx(0.02475)
++        assert enabled.losses["tr_value"] == enabled.losses["tr_value_consistency"]
++        assert enabled.losses["effective_mirror_coeff"] == enabled.losses["effective_tr_policy_coeff"]
++        assert enabled.losses["weighted_trs_total"] == enabled.losses["weighted_tr_total"]
++
++    assert disabled.critic.forward_grad_enabled == [True]
++    assert disabled.losses["effective_tr_value_coeff"] == 0.0
++    assert disabled.losses["tr_value_consistency"] == 0.0
++    assert disabled.losses["weighted_tr_value"] == 0.0
++    torch.testing.assert_close(
++        torch.stack(tuple(inferred.critic.parameters())),
++        torch.stack(tuple(explicit.critic.parameters())),
++        rtol=0.0,
++        atol=1.0e-8,
++    )
++    # Frozen gradient result for (V(T(o)) - stop_gradient(V(o)))^2. If the
++    # original value target were not detached, both the weight and bias
++    # updates would differ from these values.
++    torch.testing.assert_close(
++        torch.stack(tuple(inferred.critic.parameters())),
++        torch.tensor([0.3145875036716461, -0.18432500958442688]),
++        rtol=0.0,
++        atol=1.0e-7,
++    )
++    assert not torch.equal(
++        torch.stack(tuple(inferred.critic.parameters())),
++        torch.stack(tuple(disabled.critic.parameters())),
++    )
++
++
+ def test_deprecated_data_augmentation_still_duplicates_ppo_minibatches():
+     events = []
+     actor = _CountingActor(events)
+@@ -491,6 +701,7 @@ def test_all_additive_options_disabled_preserve_frozen_legacy_ppo_update():
+         rollout_means = actor(observations)
+     storage = _SingleBatchStorage(batch, rollout_means)
+     parameters = tuple(actor.parameters()) + tuple(critic.parameters())
++    initial_critic_parameters = tuple(parameter.detach().clone() for parameter in critic.parameters())
+     optimizer = torch.optim.SGD(parameters, lr=0.03, momentum=0.9)
+     algorithm.actor = actor
+     algorithm.critic = critic
+@@ -527,6 +738,15 @@ def test_all_additive_options_disabled_preserve_frozen_legacy_ppo_update():
+     assert losses["trs_scale"] == 0.0
+     assert losses["weighted_tr_total"] == 0.0
+     assert losses["weighted_tr_augmentation"] == 0.0
++    assert algorithm.value_loss_coef == 0.7
++    assert all(parameter.grad is not None and torch.any(parameter.grad != 0.0) for parameter in critic.parameters())
++    assert all(
++        parameter.grad is not None and torch.all(torch.isfinite(parameter.grad)) for parameter in critic.parameters()
++    )
++    assert any(
++        not torch.equal(parameter, initial)
++        for parameter, initial in zip(critic.parameters(), initial_critic_parameters)
++    )
+     torch.testing.assert_close(
+         torch.stack(tuple(parameters)),
+         torch.tensor([0.20821358263492584, -0.09954308718442917, 0.31706249713897705, -0.18477500975131989]),
+@@ -696,6 +916,31 @@ def _time_reversal_checkpoint(algorithm, completed_iteration):
+     }
+ 
+ 
++def test_archived_positive_coefficient_checkpoint_remains_loadable(monkeypatch):
++    checkpoint_path = (
++        Path(__file__).resolve().parents[3]
++        / "logs"
++        / "rsl_rl"
++        / "good_runs"
++        / "unitree_go2_symm_flat"
++        / "2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43"
++        / "model_19999.pt"
++    )
++    archived_bytes = checkpoint_path.read_bytes()
++    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
++    algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
++    algorithm.symmetry["mirror_loss_coeff"] = 0.1
++    algorithm.symmetry["value_loss_coeff"] = 0.05
++    monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: True)
++
++    loaded_iteration = algorithm.load(checkpoint, load_cfg=None, strict=True)
++
++    assert loaded_iteration is True
++    assert algorithm.current_learning_iteration == 20_000
++    assert algorithm._effective_time_reversal_coefficients() == pytest.approx((1.0, 0.1, 0.05))
++    assert checkpoint_path.read_bytes() == archived_bytes
++
++
+ def test_checkpoint_schema_accepts_exact_schedule_at_hard_step_boundary(monkeypatch):
+     algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
+     checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=499)
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_training.py b/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_training.py
+index 8923e74b1..88c12aa01 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_training.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_time_reversal_training.py
+@@ -9,12 +9,16 @@ from __future__ import annotations
+ 
+ import copy
+ from dataclasses import replace
++from pathlib import Path
+ from types import SimpleNamespace
+ 
+ import pytest
+ import torch
++from rsl_rl.models import MLPModel
+ from tensordict import TensorDict
+ 
++from isaaclab.utils.io import load_yaml
++
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.agents.rsl_rl_ppo_cfg import (
+     DobotX1SymmFlatPPORunnerCfg,
+ )
+@@ -244,6 +248,9 @@ def test_default_agent_legacy_projection_hash_is_unchanged(config_type, expected
+     symmetry = resolved["algorithm"]["symmetry_cfg"]
+     for field in (*_PUBLICATION_SYMMETRY_FIELDS, *_SATURATION_SYMMETRY_FIELDS):
+         symmetry.pop(field)
++    # Normalize the one deliberately changed field so the frozen projection
++    # continues to guard every other historical runner default.
++    symmetry["value_loss_coeff"] = 0.05
+     assert sha256_value(resolved) == expected_sha256
+ 
+ 
+@@ -349,6 +356,157 @@ def test_canonical_policy_and_value_switches_are_independent(policy_enabled, val
+     assert (policy_coefficient, value_coefficient) == expected
+ 
+ 
++@pytest.mark.parametrize(
++    "runner_cfg_type",
++    [UnitreeGo2SymmFlatPPORunnerCfg, DobotX1SymmFlatPPORunnerCfg],
++    ids=("go2", "x1"),
++)
++def test_robot_defaults_resolve_actor_only_trs_schedule(runner_cfg_type):
++    runner_cfg = runner_cfg_type()
++    symmetry = runner_cfg.algorithm.symmetry_cfg.to_dict()
++    policy_schedule = resolve_time_reversal_schedule(symmetry, "policy")
++    value_schedule = resolve_time_reversal_schedule(symmetry, "value")
++
++    assert symmetry["mirror_loss_coeff"] == pytest.approx(0.1)
++    assert symmetry["value_loss_coeff"] == 0.0
++    assert policy_schedule.enabled is True
++    assert policy_schedule.coefficient(499) == 0.0
++    assert policy_schedule.coefficient(500) == pytest.approx(0.1)
++    assert value_schedule.enabled is False
++    assert all(value_schedule.coefficient(iteration) == 0.0 for iteration in (0, 499, 500, 20_000))
++    assert symmetry["tr_augmentation"]["enabled"] is False
++
++
++@pytest.mark.parametrize(
++    ("canonical_flag", "coefficient", "expected_enabled"),
++    [
++        (None, 0.0, False),
++        (None, 0.05, True),
++        (False, 0.05, False),
++        (True, 0.0, True),
++        (True, 0.05, True),
++    ],
++)
++def test_value_consistency_enablement_preserves_legacy_inference(canonical_flag, coefficient, expected_enabled):
++    symmetry = TimeReversalSymmetryCfg(
++        use_data_augmentation=False,
++        use_mirror_loss=True,
++        data_augmentation_func=lambda **_kwargs: (None, None),
++        use_time_reversal_regularization=True,
++        mirror_loss_coeff=0.1,
++        value_loss_coeff=coefficient,
++        use_tr_value_consistency=canonical_flag,
++        warmup_iterations=0,
++        rampup_iterations=0,
++    ).to_dict()
++
++    schedule = resolve_time_reversal_schedule(symmetry, "value")
++
++    assert schedule.enabled is expected_enabled
++    assert schedule.target_coeff == pytest.approx(coefficient)
++    expected_coefficient = coefficient if expected_enabled else 0.0
++    assert schedule.coefficient(0) == pytest.approx(expected_coefficient)
++
++
++def test_explicitly_enabled_zero_value_ablation_warns_clearly():
++    algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
++    algorithm.symmetry = UnitreeGo2SymmFlatPPORunnerCfg().algorithm.symmetry_cfg.to_dict()
++    algorithm.symmetry["use_tr_value_consistency"] = True
++
++    with pytest.warns(UserWarning, match="critic-consistency ablation.*coefficient is zero"):
++        algorithm._validate_time_reversal_configuration()
++
++
++@pytest.mark.parametrize(
++    ("runner_cfg_type", "relative_agent_path"),
++    [
++        (
++            UnitreeGo2SymmFlatPPORunnerCfg,
++            "logs/rsl_rl/good_runs/unitree_go2_symm_flat/"
++            "2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/params/agent.yaml",
++        ),
++        (
++            DobotX1SymmFlatPPORunnerCfg,
++            "logs/rsl_rl/good_runs/dobot_x1_symm_flat/"
++            "2026-08-25_16-56-41_trs_m0p1_v0p05_w500_r0_x1def_s42/params/agent.yaml",
++        ),
++    ],
++    ids=("go2", "x1"),
++)
++def test_archived_positive_value_coefficient_agent_yaml_remains_loadable(runner_cfg_type, relative_agent_path):
++    agent_path = Path(__file__).resolve().parents[3] / relative_agent_path
++    archived_bytes = agent_path.read_bytes()
++
++    archived = load_yaml(str(agent_path))
++    runner_cfg = runner_cfg_type()
++    runner_cfg.from_dict(archived)
++
++    symmetry = runner_cfg.algorithm.symmetry_cfg
++    value_schedule = resolve_time_reversal_schedule(symmetry.to_dict(), "value")
++    assert symmetry.value_loss_coeff == pytest.approx(0.05)
++    assert symmetry.use_tr_value_consistency is None
++    assert value_schedule.enabled is True
++    assert value_schedule.coefficient(500) == pytest.approx(0.05)
++    assert symmetry.tr_augmentation.enabled is False
++    assert agent_path.read_bytes() == archived_bytes
++
++
++@pytest.mark.parametrize(
++    ("runner_cfg_type", "relative_checkpoint_path"),
++    [
++        (
++            UnitreeGo2SymmFlatPPORunnerCfg,
++            "logs/rsl_rl/good_runs/unitree_go2_symm_flat/"
++            "2026-08-30_09-45-19_trs_m0p1_v0p05_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
++        ),
++        (
++            DobotX1SymmFlatPPORunnerCfg,
++            "logs/rsl_rl/good_runs/dobot_x1_symm_flat/"
++            "2026-08-25_16-56-41_trs_m0p1_v0p05_w500_r0_x1def_s42/model_19999.pt",
++        ),
++    ],
++    ids=("go2", "x1"),
++)
++def test_archived_positive_value_coefficient_checkpoint_remains_loadable(runner_cfg_type, relative_checkpoint_path):
++    checkpoint_path = Path(__file__).resolve().parents[3] / relative_checkpoint_path
++    archived_bytes = checkpoint_path.read_bytes()
++
++    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
++    runner_cfg = runner_cfg_type()
++    observations = TensorDict({"policy": torch.zeros(1, 72)}, batch_size=[1])
++    actor = MLPModel(
++        observations,
++        runner_cfg.obs_groups,
++        "actor",
++        12,
++        hidden_dims=runner_cfg.actor.hidden_dims,
++        activation=runner_cfg.actor.activation,
++        obs_normalization=runner_cfg.actor.obs_normalization,
++        distribution_cfg=runner_cfg.actor.distribution_cfg.to_dict(),
++    )
++    critic = MLPModel(
++        observations,
++        runner_cfg.obs_groups,
++        "critic",
++        1,
++        hidden_dims=runner_cfg.critic.hidden_dims,
++        activation=runner_cfg.critic.activation,
++        obs_normalization=runner_cfg.critic.obs_normalization,
++    )
++    actor.load_state_dict(checkpoint["actor_state_dict"])
++    critic.load_state_dict(checkpoint["critic_state_dict"])
++    optimizer = torch.optim.Adam((*actor.parameters(), *critic.parameters()))
++    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
++
++    assert checkpoint["iter"] == 19999
++    assert torch.all(torch.isfinite(actor(observations)))
++    assert torch.all(torch.isfinite(critic(observations)))
++    assert len(optimizer.state) == len(checkpoint["optimizer_state_dict"]["state"])
++    assert checkpoint["time_reversal_state"]["value_schedule"]["enabled"] is True
++    assert checkpoint["time_reversal_state"]["value_schedule"]["target_coeff"] == pytest.approx(0.05)
++    assert checkpoint_path.read_bytes() == archived_bytes
++
++
+ def test_shared_agent_config_emits_project_local_symmetry_schema():
+     symmetry = UnitreeGo2SymmFlatPPORunnerCfg().algorithm.symmetry_cfg
+     serialized = symmetry.to_dict()

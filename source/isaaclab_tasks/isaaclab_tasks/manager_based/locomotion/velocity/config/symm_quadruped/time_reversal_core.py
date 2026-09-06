@@ -145,7 +145,13 @@ def time_reversal_schedule_scale(
 
 
 def resolve_time_reversal_schedule(symmetry: Mapping, term: str) -> ResolvedTimeReversalSchedule:
-    """Resolve a canonical policy, value, or augmentation schedule with aliases."""
+    """Resolve a canonical policy, value-ablation, or augmentation schedule with aliases.
+
+    For the optional time-reversal critic-consistency ablation, a canonical
+    enable flag of ``None`` deliberately infers enablement from the legacy
+    value coefficient so archived positive-coefficient runs remain
+    reproducible.
+    """
     if term not in {"policy", "value", "augmentation"}:
         raise ValueError(f"term must be 'policy', 'value', or 'augmentation'; received {term!r}.")
 

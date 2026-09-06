@@ -319,17 +319,28 @@ class TimeReversalSymmetryCfg(RslRlSymmetryCfg):
     """Project-local extension of RSL-RL symmetry configuration.
 
     The inherited RSL-RL fields remain accepted as deprecated aliases. The
-    global RSL-RL symmetry implementation is not modified.
+    global RSL-RL symmetry implementation is not modified. Time-reversal
+    policy consistency is independent of the optional time-reversal
+    critic-consistency ablation.
     """
 
     use_tr_policy_consistency: bool | None = None
     """Canonical policy-consistency switch, or ``None`` to inherit :attr:`use_mirror_loss`."""
 
     use_tr_value_consistency: bool | None = None
-    """Canonical value-consistency switch, or ``None`` to infer it from the legacy value coefficient."""
+    """Canonical switch for the optional time-reversal critic-consistency ablation.
+
+    ``None`` preserves legacy enablement inference from a positive
+    :attr:`value_loss_coeff`; zero therefore disables the value schedule while
+    historical positive-coefficient configurations remain reproducible.
+    """
 
     log_disabled_raw_consistency: bool = False
-    """Whether to compute raw consistency losses for explicitly disabled terms."""
+    """Whether to compute raw diagnostics for explicitly disabled consistency terms.
+
+    Diagnostic-only critic evaluation is detached and cannot affect standard
+    PPO optimization.
+    """
 
     tr_policy_output_space: Literal["raw_action_mean", "normalized_requested_joint_target"] = "raw_action_mean"
     """Policy output space used by the optimized time-reversal consistency loss.

@@ -269,10 +269,10 @@ optimizer settings.
 
 ## Matched empirical studies
 
-The detailed, machine-readable reports and plots are archived here:
-
-- [Go2 four-run study](unitree_go2_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward/REPORT.md)
-- [X1 four-run study](dobot_x1_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward/REPORT.md)
+The tables below are the canonical published summaries of the historical Go2
+and X1 four-run studies. Their raw report and reproduction folders were retired
+from the published `good_runs` tree in Milestone 5; they remain available only
+in the original detached revision named in the reproduction note below.
 
 Each comparison uses four seed-42 runs, 20,000 PPO iterations, 512 environments,
 the same initial checkpoint within the robot study, and a final-policy 30-second
@@ -351,12 +351,11 @@ latest-only archive, and rejects a partially present set.
 
 ## Archived analysis layout
 
-The manifest-driven analyzer used for the two Phase Mapping V2 studies has
-been retired from the current checkout. The preserved reports, tables, figures,
-manifests, and machine-readable summaries remain at
-`logs/rsl_rl/good_runs/<robot>/legacy/phase_mapping_v2_legacy_permutation_reward/`.
-Their `reproduce.py` files now fail fast with archival guidance instead of
-implying that the current checkout can regenerate these results.
+The manifest-driven analyzer used for the two Phase Mapping V2 studies and its
+raw reports, figures, manifests, and machine-readable summaries were retired
+from the published `good_runs` tree in Milestone 5. This milestone's tables and
+validation record remain the canonical summary; the unpublished local legacy
+folders are not required by the current Actor TRS V5 archive.
 
 For exact historical reproduction, use detached commit
 `5546e5ca3fa4c9268ed3e2c0c78a2a73b6b0056e`. In that checkout, run the
@@ -366,14 +365,11 @@ wrapper invokes `scripts/symm_locomotion/analyze_matched_trs_study.py`. The
 archived `summary.json` files record the original analysis-method and manifest
 hashes for auditability.
 
-The committed `good_runs` tree contains the training event logs, resolved
-configuration snapshots, provenance diffs, rollout inputs, plots, recordings,
-deployment exports, reports, tables, manifests, and archival notices.
-Each training folder retains exactly one terminal `model_<iteration>.pt`
-checkpoint; intermediate and initial training checkpoints remain local and are
-excluded from version control. Exact numerical regeneration requires the
-historical detached commit named above; the current checkout intentionally does
-not carry that retired analyzer.
+The historical detached commit contains the original training event logs,
+resolved configuration snapshots, provenance diffs, rollout inputs, plots,
+recordings, deployment exports, reports, tables, and manifests. Exact numerical
+regeneration requires that revision; the current checkout intentionally does not
+publish the retired study folders or analyzer inputs.
 
 ## Publication validation record
 

@@ -2,13 +2,13 @@
 
 - Robot: `x1`
 - Protocol: `full` (`leg_usage_grid_full_v3`)
-- Checkpoint: `D:\symm_rl_isaaclab\logs\rsl_rl\dobot_x1_symm_flat\2026-08-31_23-23-31_d1_x1_dev_main_notrs_x1def_s42\model_19999.pt` (SHA-256 `fe03f6ad9097698cb19d6a7c525334c450e51d8a527e6ac8452fd8c7344b88cc`)
+- Checkpoint: `D:\symm_rl_isaaclab\logs\rsl_rl\dobot_x1_symm_flat\2026-08-25_06-08-02_notrs_x1def_s42\model_19999.pt` (SHA-256 `fe03f6ad9097698cb19d6a7c525334c450e51d8a527e6ac8452fd8c7344b88cc`)
 - Grid: 60 planned protocol cells (10 available gait rows, 6 available velocities)
 - Window: 5 s settling, then 10 s measurement
 - Coverage: 60/60 valid cells (100.0%)
 - Domain coverage: velocity 60/60, heading 60/60, gait 60/60, raw load 60/60, GRF load 60/60, normalized load 60/60
 - Tracking quality: 39/60 velocity-domain cells pass both `planar RMSE <= 0.05 + 0.25 * abs(vx)` [m/s] and `yaw RMSE <= 0.05` [rad/s]
-- Analysis provenance: `analysis_provenance.json` (record `f0dbe200716aa905c49c1418ef6a5b3e85af10096742c1dd6b7bf56cc97e800f`)
+- Analysis provenance: `analysis_provenance.json` (record `f8767d669000e4ab5b7bd2709740e68c1b9239a5317ec847ec1bfcf167df615d`)
 
 Primary balance is the mean of per-cell absolute front/hind imbalance. Signed imbalance is retained in `cell_metrics.csv` and `family_metrics.csv`, but opposite signs never cancel in the primary score. The overall score gives each of trot, bound, half-bound, and gallop equal weight.
 

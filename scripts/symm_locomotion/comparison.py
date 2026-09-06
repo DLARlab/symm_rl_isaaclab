@@ -1833,9 +1833,6 @@ def _validate_evaluation_completeness(
         "status": "complete",
         "total_cells": expected_cells,
         "completed_cells": expected_cells,
-        "successful_cells": expected_cells,
-        "skipped_cells": 0,
-        "terminated_cells": 0,
     }
     mismatches = {
         key: (progress.get(key), expected)
@@ -1844,6 +1841,20 @@ def _validate_evaluation_completeness(
     }
     if mismatches:
         raise ValueError(f"Incomplete full-v3 evaluation progress for {label}: {mismatches}.")
+    progress_counts = {
+        key: _integer(progress.get(key), key, f"{label} evaluation progress")
+        for key in ("completed_cells", "successful_cells", "skipped_cells", "terminated_cells")
+    }
+    invalid_counts = {key: value for key, value in progress_counts.items() if value < 0}
+    if progress_counts["successful_cells"] + progress_counts["terminated_cells"] != expected_cells:
+        invalid_counts["successful_cells + terminated_cells"] = (
+            progress_counts["successful_cells"] + progress_counts["terminated_cells"],
+            expected_cells,
+        )
+    if progress_counts["skipped_cells"] > expected_cells:
+        invalid_counts["skipped_cells"] = (progress_counts["skipped_cells"], f"<= {expected_cells}")
+    if invalid_counts:
+        raise ValueError(f"Inconsistent full-v3 evaluation progress for {label}: {invalid_counts}.")
     coverage = overall.get("coverage", {})
     required_counts = {
         "expected_cells": expected_cells,
@@ -1865,6 +1876,17 @@ def _validate_evaluation_completeness(
         metric = overall.get("metrics", {}).get(source_metric, {})
         if metric.get("complete") is not True or metric.get("valid_cells") != expected_cells:
             raise ValueError(f"Incomplete {source_metric} metric domain for {label}.")
+
+
+def _validated_cell_outcome_status(cell: Mapping[str, Any], context: str) -> str:
+    """Validate an analyzed cell outcome that has complete metric domains."""
+    status = str(cell.get("status", ""))
+    if status not in {"valid", "terminated"}:
+        raise ValueError(f"Full-v3 cell has no metric-complete outcome: {context} ({status!r}).")
+    terminated = _boolean(cell.get("terminated"), "terminated", context)
+    if terminated != (status == "terminated"):
+        raise ValueError(f"Full-v3 cell outcome fields disagree for {context}.")
+    return status
 
 
 def _resolved_agent(initialization: Mapping[str, Any], label: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
@@ -2261,11 +2283,11 @@ def _load_evaluation(run: Mapping[str, Any], evaluation_subdir: str) -> dict[str
         "sentinel_rejection_threshold_nm",
         label,
     )
+    cell_status_counts: Counter[str] = Counter()
     for cell in cells:
         context = f"{label}/{cell.get('cell_id')}"
         _validate_cell_plan_row(cell, planned_by_id[str(cell["cell_id"])], context)
-        if cell.get("status") != "valid":
-            raise ValueError(f"Full-v3 cell is not valid: {context}.")
+        cell_status_counts[_validated_cell_outcome_status(cell, context)] += 1
         for field in (
             "velocity_metric_valid",
             "heading_metric_valid",
@@ -2290,6 +2312,16 @@ def _load_evaluation(run: Mapping[str, Any], evaluation_subdir: str) -> dict[str
         effort_max_nm = _finite_float(cell.get("effort_limit_max_nm"), "effort_limit_max_nm", context)
         if not 0.0 < effort_min_nm <= effort_max_nm < sentinel_threshold_nm:
             raise ValueError(f"Effort-limit bounds are not finite physical values for {context}.")
+    expected_status_counts = {
+        "valid": _integer(progress.get("successful_cells"), "successful_cells", f"{label} evaluation progress"),
+        "terminated": _integer(progress.get("terminated_cells"), "terminated_cells", f"{label} evaluation progress"),
+    }
+    observed_status_counts = {status: cell_status_counts[status] for status in ("valid", "terminated")}
+    if observed_status_counts != expected_status_counts:
+        raise ValueError(
+            f"Full-v3 analyzed cell outcomes disagree with evaluation progress for {label}: "
+            f"{observed_status_counts} != {expected_status_counts}."
+        )
     return {
         "run": run,
         "study": study,
@@ -2459,6 +2491,8 @@ def _build_evaluation_cells(evaluations: Sequence[Mapping[str, Any]]) -> list[di
                 **{key: run[key] for key in ("run_id", "abbreviation", "color", "is_baseline")},
                 "run": run["run_path"],
                 "cell_id": str(source["cell_id"]),
+                "status": str(source["status"]),
+                "terminated": _boolean(source.get("terminated"), "terminated", context),
                 "gait_index": _integer(source.get("gait_index"), "gait_index", context),
                 "gait_name": str(source.get("gait_name", "")),
                 "family": str(source.get("family", "")),
@@ -3204,6 +3238,27 @@ def _comparability_warnings(training_metadata: Mapping[str, Mapping[str, Any]]) 
     return warnings
 
 
+def _evaluation_outcome_warnings(evaluations: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Describe metric-complete terminated cells retained by outcome-free aggregation."""
+    warnings: list[str] = []
+    for evaluation in evaluations:
+        terminated_cell_ids = [
+            str(cell["cell_id"]) for cell in evaluation["cells"] if str(cell.get("status")) == "terminated"
+        ]
+        if not terminated_cell_ids:
+            continue
+        run = evaluation["run"]
+        count = len(terminated_cell_ids)
+        noun = "cell" if count == 1 else "cells"
+        rendered_ids = ", ".join(f"`{cell_id}`" for cell_id in terminated_cell_ids)
+        warnings.append(
+            f"{run['abbreviation']} contains {count} metric-complete terminated evaluation {noun}. "
+            "The available post-settle samples are retained by the declared outcome-free aggregation: "
+            f"{rendered_ids}."
+        )
+    return warnings
+
+
 def _serializable_study(
     runs: Sequence[Mapping[str, Any]],
     run_roots: Sequence[Path],
@@ -3492,7 +3547,7 @@ def run_comparison(
     evaluation_cells = _build_evaluation_cells(evaluations)
     _validate_aggregate_coverage(evaluation_cells, runs)
     velocity_rows, leg_rows, gait_rows = aggregate_summaries(evaluation_cells, runs)
-    warnings = _comparability_warnings(training_metadata)
+    warnings = [*_comparability_warnings(training_metadata), *_evaluation_outcome_warnings(evaluations)]
     study = _serializable_study(
         runs,
         resolved_roots,

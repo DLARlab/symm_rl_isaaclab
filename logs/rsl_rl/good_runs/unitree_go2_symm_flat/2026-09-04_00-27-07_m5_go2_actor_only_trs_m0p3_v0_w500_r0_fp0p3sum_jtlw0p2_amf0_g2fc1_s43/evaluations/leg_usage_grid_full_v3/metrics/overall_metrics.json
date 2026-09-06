@@ -1,0 +1,399 @@
+{
+  "aggregation": {
+    "overall": "equal mean of trot, bound, half_bound, and gallop family means",
+    "primary_balance_metric": "mean absolute per-cell front/hind imbalance; signed values never cancel",
+    "tracking_qualified": "reported alongside all valid cells using the declared per-cell tracking threshold",
+    "within_family": "equal mean across selected gait rows and velocities"
+  },
+  "analysis_provenance": {
+    "analyzer_sha256": "27262a94b37d30b7f65e15d8522374d2ef24e422ea051c305fea2dd18f98bbee",
+    "input_study_sha256": "8c85c2f053450bd252e033f194a31fb2fcf81b99d993fcedbb36743b8b32fc08",
+    "metrics_sha256": "deca1f51b63eceed0b6c536abf0dd12a51673a8fd157b05424c5b4f4e01a083b",
+    "path": "metrics/analysis_provenance.json",
+    "record_sha256": "40842b8c1a067de6d49b7f8d799f891ab089675040bd28daea8261dcc755b578"
+  },
+  "coverage": {
+    "complete": true,
+    "coverage_fraction": 1.0,
+    "expected_cells": 60,
+    "failed_or_missing_cells": 0,
+    "gait_only_success_cells": 25,
+    "gait_only_success_coverage_fraction": 1.0,
+    "gait_only_success_domain_cells": 60,
+    "gait_only_success_fraction_of_domain": 0.4166666666666667,
+    "gait_valid_cells": 60,
+    "grf_load_valid_cells": 60,
+    "heading_valid_cells": 60,
+    "joint_success_cells": 7,
+    "joint_velocity_and_gait_success_cells": 7,
+    "joint_velocity_and_gait_success_coverage_fraction": 1.0,
+    "joint_velocity_and_gait_success_domain_cells": 60,
+    "joint_velocity_and_gait_success_fraction_of_domain": 0.11666666666666667,
+    "load_valid_cells": 60,
+    "normalized_load_valid_cells": 60,
+    "raw_load_valid_cells": 60,
+    "status_counts": {
+      "valid": 60
+    },
+    "tracking_success_cells": 7,
+    "tracking_success_fraction_of_valid": 0.11666666666666667,
+    "valid_cells": 60,
+    "velocity_only_success_cells": 7,
+    "velocity_only_success_coverage_fraction": 1.0,
+    "velocity_only_success_domain_cells": 60,
+    "velocity_only_success_fraction_of_domain": 0.11666666666666667,
+    "velocity_valid_cells": 60
+  },
+  "gait_classification": {
+    "coverage_fraction": 1.0,
+    "domain_cells": 60,
+    "family_accuracy": 0.4666666666666667,
+    "family_correct_cells": 28,
+    "row_accuracy": 0.4666666666666667,
+    "row_correct_cells": 28,
+    "unclassified_cells": 5
+  },
+  "method_version": "leg_usage_grid_full_v3",
+  "metrics": {
+    "absolute_work": {
+      "complete": true,
+      "coverage_fraction": 1.0,
+      "domain_key": "raw_load_metric_valid",
+      "expected_cells": 60,
+      "family_balanced_mean_abs_imbalance_percent": 14.907779887181984,
+      "family_balanced_mean_total_integral": 2005.7964172638506,
+      "family_balanced_mean_total_per_directed_m": 232.53256667649893,
+      "family_balanced_mean_total_per_s": 207.46568387737184,
+      "family_mean_abs_imbalance_percent": {
+        "bound": 16.55237535882625,
+        "gallop": 19.83022704660946,
+        "half_bound": 18.378977850445747,
+        "trot": 4.869539292846482
+      },
+      "family_mean_signed_imbalance_percent": {
+        "bound": -16.55237535882625,
+        "gallop": -19.17111721387186,
+        "half_bound": -16.100466467281247,
+        "trot": 4.869539292846482
+      },
+      "family_mean_total_integral": {
+        "bound": 2638.4033787425624,
+        "gallop": 2143.8312780420138,
+        "half_bound": 2450.220606490768,
+        "trot": 790.7304057800579
+      },
+      "family_mean_total_per_directed_m": {
+        "bound": 312.2126857605361,
+        "gallop": 249.0479173901025,
+        "half_bound": 288.3889712686952,
+        "trot": 80.48069228666196
+      },
+      "family_mean_total_per_s": {
+        "bound": 272.8133275768159,
+        "gallop": 221.73838423801203,
+        "half_bound": 253.42460702868377,
+        "trot": 81.8864166659757
+      },
+      "integral_unit": "J",
+      "label": "Absolute mechanical work",
+      "observed_family_balanced_mean_abs_imbalance_percent": 14.907779887181984,
+      "observed_family_balanced_mean_total_integral": 2005.7964172638506,
+      "observed_family_balanced_mean_total_per_directed_m": 232.53256667649893,
+      "observed_family_balanced_mean_total_per_s": 207.46568387737184,
+      "tracking_qualified_complete": false,
+      "tracking_qualified_family_balanced_mean_abs_imbalance_percent": null,
+      "tracking_qualified_family_balanced_mean_total_integral": null,
+      "tracking_qualified_family_balanced_mean_total_per_directed_m": null,
+      "tracking_qualified_family_balanced_mean_total_per_s": null,
+      "tracking_qualified_family_mean_abs_imbalance_percent": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_integral": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_directed_m": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_s": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_observed_family_balanced_mean_abs_imbalance_percent": 7.445813550085927,
+      "tracking_qualified_observed_family_balanced_mean_total_integral": 1508.873568687517,
+      "tracking_qualified_observed_family_balanced_mean_total_per_directed_m": 215.23196399812332,
+      "tracking_qualified_observed_family_balanced_mean_total_per_s": 155.4452485581981,
+      "valid_cells": 60
+    },
+    "normalized_torque_utilization": {
+      "complete": true,
+      "coverage_fraction": 1.0,
+      "domain_key": "normalized_load_metric_valid",
+      "expected_cells": 60,
+      "family_balanced_mean_abs_imbalance_percent": 25.82628518552589,
+      "family_balanced_mean_total_integral": 5.435396813077865,
+      "family_balanced_mean_total_per_directed_m": 0.6698857224738847,
+      "family_balanced_mean_total_per_s": 0.5620374921747778,
+      "family_mean_abs_imbalance_percent": {
+        "bound": 23.73272598641536,
+        "gallop": 24.562131287065856,
+        "half_bound": 25.926728915480226,
+        "trot": 29.08355455314211
+      },
+      "family_mean_signed_imbalance_percent": {
+        "bound": 21.548310890711686,
+        "gallop": 21.536610065145833,
+        "half_bound": 20.859657916332413,
+        "trot": 28.30836570144187
+      },
+      "family_mean_total_integral": {
+        "bound": 6.698782843227547,
+        "gallop": 5.689846623425691,
+        "half_bound": 6.457675069337085,
+        "trot": 2.895282716321141
+      },
+      "family_mean_total_per_directed_m": {
+        "bound": 0.835367992654627,
+        "gallop": 0.7083324229026055,
+        "half_bound": 0.8085202362736029,
+        "trot": 0.32732223806470345
+      },
+      "family_mean_total_per_s": {
+        "bound": 0.6925934854178522,
+        "gallop": 0.5883350087817701,
+        "half_bound": 0.6676636430703672,
+        "trot": 0.29955783142912185
+      },
+      "integral_unit": "s",
+      "label": "Normalized torque squared",
+      "observed_family_balanced_mean_abs_imbalance_percent": 25.82628518552589,
+      "observed_family_balanced_mean_total_integral": 5.435396813077865,
+      "observed_family_balanced_mean_total_per_directed_m": 0.6698857224738847,
+      "observed_family_balanced_mean_total_per_s": 0.5620374921747778,
+      "tracking_qualified_complete": false,
+      "tracking_qualified_family_balanced_mean_abs_imbalance_percent": null,
+      "tracking_qualified_family_balanced_mean_total_integral": null,
+      "tracking_qualified_family_balanced_mean_total_per_directed_m": null,
+      "tracking_qualified_family_balanced_mean_total_per_s": null,
+      "tracking_qualified_family_mean_abs_imbalance_percent": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_integral": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_directed_m": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_s": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_observed_family_balanced_mean_abs_imbalance_percent": 28.861924079753372,
+      "tracking_qualified_observed_family_balanced_mean_total_integral": 4.448900141697469,
+      "tracking_qualified_observed_family_balanced_mean_total_per_directed_m": 0.6708500111753504,
+      "tracking_qualified_observed_family_balanced_mean_total_per_s": 0.4587461114125998,
+      "valid_cells": 60
+    },
+    "torque_squared": {
+      "complete": true,
+      "coverage_fraction": 1.0,
+      "domain_key": "raw_load_metric_valid",
+      "expected_cells": 60,
+      "family_balanced_mean_abs_imbalance_percent": 22.019273895530013,
+      "family_balanced_mean_total_integral": 4631.045378860661,
+      "family_balanced_mean_total_per_directed_m": 575.4950058140158,
+      "family_balanced_mean_total_per_s": 478.8165699184407,
+      "family_mean_abs_imbalance_percent": {
+        "bound": 20.141275227364925,
+        "gallop": 21.17649039681084,
+        "half_bound": 22.063357754615172,
+        "trot": 24.69597220332912
+      },
+      "family_mean_signed_imbalance_percent": {
+        "bound": 18.396894980628225,
+        "gallop": 17.361313629787812,
+        "half_bound": 18.211895394777898,
+        "trot": 21.167067466154972
+      },
+      "family_mean_total_integral": {
+        "bound": 5779.429008278901,
+        "gallop": 4873.659726035367,
+        "half_bound": 5476.434602139502,
+        "trot": 2394.658178988873
+      },
+      "family_mean_total_per_directed_m": {
+        "bound": 727.1583589133296,
+        "gallop": 609.9235883344298,
+        "half_bound": 689.4282262811802,
+        "trot": 275.46984972712386
+      },
+      "family_mean_total_per_s": {
+        "bound": 597.4738848194695,
+        "gallop": 503.89093481324113,
+        "half_bound": 566.1617225704496,
+        "trot": 247.73973747060248
+      },
+      "integral_unit": "N^2 m^2 s",
+      "label": "Raw torque squared",
+      "observed_family_balanced_mean_abs_imbalance_percent": 22.019273895530013,
+      "observed_family_balanced_mean_total_integral": 4631.045378860661,
+      "observed_family_balanced_mean_total_per_directed_m": 575.4950058140158,
+      "observed_family_balanced_mean_total_per_s": 478.8165699184407,
+      "tracking_qualified_complete": false,
+      "tracking_qualified_family_balanced_mean_abs_imbalance_percent": null,
+      "tracking_qualified_family_balanced_mean_total_integral": null,
+      "tracking_qualified_family_balanced_mean_total_per_directed_m": null,
+      "tracking_qualified_family_balanced_mean_total_per_s": null,
+      "tracking_qualified_family_mean_abs_imbalance_percent": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_integral": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_directed_m": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_s": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_observed_family_balanced_mean_abs_imbalance_percent": 25.966716388780533,
+      "tracking_qualified_observed_family_balanced_mean_total_integral": 3907.035830772931,
+      "tracking_qualified_observed_family_balanced_mean_total_per_directed_m": 580.9602337912222,
+      "tracking_qualified_observed_family_balanced_mean_total_per_s": 402.67969998077126,
+      "valid_cells": 60
+    },
+    "vertical_grf_impulse": {
+      "complete": true,
+      "coverage_fraction": 1.0,
+      "domain_key": "grf_load_metric_valid",
+      "expected_cells": 60,
+      "family_balanced_mean_abs_imbalance_percent": 23.47277779478683,
+      "family_balanced_mean_total_integral": 1448.833458764405,
+      "family_balanced_mean_total_per_directed_m": 185.3168774454213,
+      "family_balanced_mean_total_per_s": 149.77855473476828,
+      "family_mean_abs_imbalance_percent": {
+        "bound": 26.146609925352816,
+        "gallop": 24.503266966500785,
+        "half_bound": 26.09864622929757,
+        "trot": 17.142588057996146
+      },
+      "family_mean_signed_imbalance_percent": {
+        "bound": 24.04263223112891,
+        "gallop": 22.851867317756035,
+        "half_bound": 24.1424236660969,
+        "trot": 17.142588057996146
+      },
+      "family_mean_total_integral": {
+        "bound": 1430.7806987065626,
+        "gallop": 1444.0136024029523,
+        "half_bound": 1434.3107741520816,
+        "trot": 1486.2287597960233
+      },
+      "family_mean_total_per_directed_m": {
+        "bound": 182.68509592003943,
+        "gallop": 184.97628274540602,
+        "half_bound": 183.02873432408487,
+        "trot": 190.5773967921549
+      },
+      "family_mean_total_per_s": {
+        "bound": 147.9040282284312,
+        "gallop": 149.28319098439866,
+        "half_bound": 148.27790754993163,
+        "trot": 153.6490921763116
+      },
+      "integral_unit": "N s",
+      "label": "Vertical GRF impulse",
+      "observed_family_balanced_mean_abs_imbalance_percent": 23.47277779478683,
+      "observed_family_balanced_mean_total_integral": 1448.833458764405,
+      "observed_family_balanced_mean_total_per_directed_m": 185.3168774454213,
+      "observed_family_balanced_mean_total_per_s": 149.77855473476828,
+      "tracking_qualified_complete": false,
+      "tracking_qualified_family_balanced_mean_abs_imbalance_percent": null,
+      "tracking_qualified_family_balanced_mean_total_integral": null,
+      "tracking_qualified_family_balanced_mean_total_per_directed_m": null,
+      "tracking_qualified_family_balanced_mean_total_per_s": null,
+      "tracking_qualified_family_mean_abs_imbalance_percent": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_integral": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_directed_m": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_family_mean_total_per_s": {
+        "bound": null,
+        "gallop": null,
+        "half_bound": null,
+        "trot": null
+      },
+      "tracking_qualified_observed_family_balanced_mean_abs_imbalance_percent": 21.03032438596707,
+      "tracking_qualified_observed_family_balanced_mean_total_integral": 1461.6215915582627,
+      "tracking_qualified_observed_family_balanced_mean_total_per_directed_m": 217.25633857032244,
+      "tracking_qualified_observed_family_balanced_mean_total_per_s": 150.69498218045112,
+      "valid_cells": 60
+    }
+  },
+  "paired_tr_consistency": {
+    "analyzed_rows": 60,
+    "method_version": "paired_tr_consistency_phase_v1",
+    "outputs": {
+      "record": "metrics/paired_tr_consistency.json",
+      "rows": "metrics/paired_tr_consistency.csv",
+      "rows_sha256": "metrics/1a516d4ce33afc0f1acc45c2c3788080d12c227458f2bb280caf1830ef124328",
+      "summaries": "metrics/paired_tr_consistency_summary.csv",
+      "summaries_sha256": "metrics/c19ed897f1789752f3cb672b4e9552a705337f8b35aa33c415597bedacede6c0"
+    },
+    "record_sha256": "623bc0420bc0721a954f5575d674771c05df6dcbd15dda993acf9492c5fcd13e",
+    "rows": 60
+  },
+  "protocol": "full",
+  "schema_version": 1,
+  "tracking_qualification": {
+    "planar": "tracking_rmse_mps <= 0.05 + 0.25 * abs(velocity_mps)",
+    "vx_relative": "velocity_vx_relative_rmse <= 0.2",
+    "yaw": "yaw_tracking_rmse_radps <= 0.05"
+  }
+}

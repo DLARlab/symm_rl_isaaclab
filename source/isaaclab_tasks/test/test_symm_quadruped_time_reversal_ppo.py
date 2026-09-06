@@ -151,6 +151,129 @@ class _SingleBatchStorage:
         self.cleared = True
 
 
+class _TrackingRegressionCritic(_LegacyRegressionCritic):
+    """Record critic inputs and autograd state without changing its predictions."""
+
+    def __init__(self):
+        super().__init__()
+        self.forward_inputs = []
+        self.forward_grad_enabled = []
+
+    def forward(self, observations, **kwargs):
+        self.forward_inputs.append(observations["policy"].detach().clone())
+        self.forward_grad_enabled.append(torch.is_grad_enabled())
+        return super().forward(observations, **kwargs)
+
+
+def _regression_time_reversal_transform(*, obs=None, actions=None, env=None):
+    del env
+    augmented_observations = None
+    augmented_actions = None
+    if obs is not None:
+        transformed_policy = obs["policy"].detach().clone()
+        transformed_policy[:, 1].neg_()
+        augmented_observations = TensorDict(
+            {"policy": torch.cat((obs["policy"], transformed_policy))},
+            batch_size=[2 * obs.batch_size[0]],
+        )
+    if actions is not None:
+        augmented_actions = torch.cat((actions, -actions))
+    return augmented_observations, augmented_actions
+
+
+def _run_regression_update(
+    *,
+    value_loss_coeff: float,
+    use_tr_value_consistency: bool | None,
+    log_disabled_raw_consistency: bool = False,
+    mirror_loss_coeff: float = 0.0,
+    use_tr_policy_consistency: bool | None = False,
+):
+    """Run one deterministic PPO update with independently controlled TR terms."""
+    actor = _LegacyRegressionActor()
+    critic = _TrackingRegressionCritic()
+    observations = torch.zeros(4, 72)
+    observations[:, 0] = torch.tensor([-1.0, 0.0, 1.0, 2.0])
+    observations[:, 1] = torch.tensor([0.5, -1.0, 2.0, -0.5])
+    observations = TensorDict({"policy": observations}, batch_size=[4])
+    actions = torch.zeros(4, 12)
+    actions[:, 0] = torch.tensor([-0.5, 0.25, 1.0, -1.5])
+    batch = SimpleNamespace(
+        observations=observations,
+        actions=actions,
+        old_actions_log_prob=torch.tensor([-0.25, -0.05, 0.1, -0.2]),
+        values=torch.tensor([[0.1], [-0.2], [0.4], [-0.1]]),
+        advantages=torch.tensor([[1.2], [-0.7], [0.5], [-1.1]]),
+        returns=torch.tensor([[0.4], [-0.3], [1.2], [-0.8]]),
+        masks=None,
+        hidden_states=(None, None),
+        old_distribution_params=(),
+    )
+    with torch.no_grad():
+        rollout_means = actor(observations)
+    storage = _SingleBatchStorage(batch, rollout_means)
+    parameters = tuple(actor.parameters()) + tuple(critic.parameters())
+    optimizer = torch.optim.SGD(parameters, lr=0.03, momentum=0.9)
+
+    algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
+    algorithm.symmetry = {
+        "use_time_reversal_regularization": True,
+        "use_data_augmentation": False,
+        "use_mirror_loss": mirror_loss_coeff > 0.0,
+        "mirror_loss_coeff": mirror_loss_coeff,
+        "value_loss_coeff": value_loss_coeff,
+        "use_tr_policy_consistency": use_tr_policy_consistency,
+        "use_tr_value_consistency": use_tr_value_consistency,
+        "log_disabled_raw_consistency": log_disabled_raw_consistency,
+        "warmup_iterations": 0,
+        "rampup_iterations": 0,
+        "ramp_shape": "linear",
+        "tr_gradient_diagnostics": {"enabled": False},
+        "tr_augmentation": {
+            "enabled": False,
+            "coefficient": 0.0,
+            "schedule": {"enabled": False, "target_coeff": 0.0},
+        },
+        "data_augmentation_func": _regression_time_reversal_transform,
+        "_env": None,
+    }
+    algorithm.actor = actor
+    algorithm.critic = critic
+    algorithm.storage = storage
+    algorithm.optimizer = optimizer
+    algorithm.rnd = None
+    algorithm.rnd_optimizer = None
+    algorithm.num_mini_batches = 1
+    algorithm.num_learning_epochs = 1
+    algorithm.normalize_advantage_per_mini_batch = False
+    algorithm.desired_kl = None
+    algorithm.schedule = "fixed"
+    algorithm.use_clipped_value_loss = True
+    algorithm.value_loss_coef = 0.7
+    algorithm.entropy_coef = 0.05
+    algorithm.clip_param = 0.2
+    algorithm.max_grad_norm = 100.0
+    algorithm.device = "cpu"
+    algorithm.is_multi_gpu = False
+    algorithm._actor_mean_abort_count = 0
+    algorithm._time_reversal_update_count = 0
+    algorithm.current_learning_iteration = 0
+    algorithm._tr_augmentation = None
+    initial_actor = tuple(parameter.detach().clone() for parameter in actor.parameters())
+    initial_critic = tuple(parameter.detach().clone() for parameter in critic.parameters())
+
+    losses = algorithm.update()
+    return SimpleNamespace(
+        actor=actor,
+        critic=critic,
+        initial_actor=initial_actor,
+        initial_critic=initial_critic,
+        losses=losses,
+        optimizer=optimizer,
+        storage=storage,
+    )
+
+
 def _schedule_algorithm(
     iteration: int,
     *,
@@ -341,6 +464,93 @@ def test_zero_scale_has_exactly_zero_weighted_auxiliary_objective():
     assert weighted == (0.0, 0.0, 0.0)
 
 
+def test_actor_only_trs_does_not_evaluate_critic_on_transformed_observations():
+    result = _run_regression_update(
+        value_loss_coeff=0.0,
+        use_tr_value_consistency=None,
+        mirror_loss_coeff=0.1,
+        use_tr_policy_consistency=None,
+    )
+
+    assert result.losses["effective_tr_policy_coeff"] == pytest.approx(0.1)
+    assert result.losses["effective_tr_value_coeff"] == 0.0
+    assert result.losses["tr_value_consistency"] == 0.0
+    assert result.losses["weighted_tr_value"] == 0.0
+    assert len(result.critic.forward_inputs) == 1
+    assert result.critic.forward_grad_enabled == [True]
+
+
+def test_disabled_value_diagnostic_is_detached_and_preserves_ppo_outputs():
+    disabled = _run_regression_update(
+        value_loss_coeff=0.0,
+        use_tr_value_consistency=None,
+        log_disabled_raw_consistency=False,
+        mirror_loss_coeff=0.1,
+        use_tr_policy_consistency=None,
+    )
+    diagnostic = _run_regression_update(
+        value_loss_coeff=0.0,
+        use_tr_value_consistency=None,
+        log_disabled_raw_consistency=True,
+        mirror_loss_coeff=0.1,
+        use_tr_policy_consistency=None,
+    )
+
+    assert disabled.critic.forward_grad_enabled == [True]
+    assert diagnostic.critic.forward_grad_enabled == [True, False]
+    assert diagnostic.losses["tr_value_consistency"] == pytest.approx(0.495)
+    assert diagnostic.losses["tr_value"] == diagnostic.losses["tr_value_consistency"]
+    assert diagnostic.losses["effective_tr_value_coeff"] == 0.0
+    assert diagnostic.losses["weighted_tr_value"] == 0.0
+    for key in ("value", "surrogate", "entropy", "actor_bound", "weighted_tr_policy", "weighted_tr_total"):
+        assert diagnostic.losses[key] == pytest.approx(disabled.losses[key], abs=1.0e-8)
+    for disabled_parameter, diagnostic_parameter in zip(
+        (*disabled.actor.parameters(), *disabled.critic.parameters()),
+        (*diagnostic.actor.parameters(), *diagnostic.critic.parameters()),
+    ):
+        torch.testing.assert_close(diagnostic_parameter, disabled_parameter, rtol=0.0, atol=1.0e-8)
+        torch.testing.assert_close(diagnostic_parameter.grad, disabled_parameter.grad, rtol=0.0, atol=1.0e-8)
+
+
+def test_positive_value_coefficient_preserves_legacy_ablation_enablement():
+    inferred = _run_regression_update(value_loss_coeff=0.05, use_tr_value_consistency=None)
+    disabled = _run_regression_update(value_loss_coeff=0.05, use_tr_value_consistency=False)
+    explicit = _run_regression_update(value_loss_coeff=0.05, use_tr_value_consistency=True)
+
+    for enabled in (inferred, explicit):
+        assert enabled.critic.forward_grad_enabled == [True, True]
+        assert enabled.losses["effective_tr_value_coeff"] == pytest.approx(0.05)
+        assert enabled.losses["tr_value_consistency"] == pytest.approx(0.495)
+        assert enabled.losses["weighted_tr_value"] == pytest.approx(0.02475)
+        assert enabled.losses["tr_value"] == enabled.losses["tr_value_consistency"]
+        assert enabled.losses["effective_mirror_coeff"] == enabled.losses["effective_tr_policy_coeff"]
+        assert enabled.losses["weighted_trs_total"] == enabled.losses["weighted_tr_total"]
+
+    assert disabled.critic.forward_grad_enabled == [True]
+    assert disabled.losses["effective_tr_value_coeff"] == 0.0
+    assert disabled.losses["tr_value_consistency"] == 0.0
+    assert disabled.losses["weighted_tr_value"] == 0.0
+    torch.testing.assert_close(
+        torch.stack(tuple(inferred.critic.parameters())),
+        torch.stack(tuple(explicit.critic.parameters())),
+        rtol=0.0,
+        atol=1.0e-8,
+    )
+    # Frozen gradient result for (V(T(o)) - stop_gradient(V(o)))^2. If the
+    # original value target were not detached, both the weight and bias
+    # updates would differ from these values.
+    torch.testing.assert_close(
+        torch.stack(tuple(inferred.critic.parameters())),
+        torch.tensor([0.3145875036716461, -0.18432500958442688]),
+        rtol=0.0,
+        atol=1.0e-7,
+    )
+    assert not torch.equal(
+        torch.stack(tuple(inferred.critic.parameters())),
+        torch.stack(tuple(disabled.critic.parameters())),
+    )
+
+
 def test_deprecated_data_augmentation_still_duplicates_ppo_minibatches():
     events = []
     actor = _CountingActor(events)
@@ -491,6 +701,7 @@ def test_all_additive_options_disabled_preserve_frozen_legacy_ppo_update():
         rollout_means = actor(observations)
     storage = _SingleBatchStorage(batch, rollout_means)
     parameters = tuple(actor.parameters()) + tuple(critic.parameters())
+    initial_critic_parameters = tuple(parameter.detach().clone() for parameter in critic.parameters())
     optimizer = torch.optim.SGD(parameters, lr=0.03, momentum=0.9)
     algorithm.actor = actor
     algorithm.critic = critic
@@ -527,6 +738,15 @@ def test_all_additive_options_disabled_preserve_frozen_legacy_ppo_update():
     assert losses["trs_scale"] == 0.0
     assert losses["weighted_tr_total"] == 0.0
     assert losses["weighted_tr_augmentation"] == 0.0
+    assert algorithm.value_loss_coef == 0.7
+    assert all(parameter.grad is not None and torch.any(parameter.grad != 0.0) for parameter in critic.parameters())
+    assert all(
+        parameter.grad is not None and torch.all(torch.isfinite(parameter.grad)) for parameter in critic.parameters()
+    )
+    assert any(
+        not torch.equal(parameter, initial)
+        for parameter, initial in zip(critic.parameters(), initial_critic_parameters)
+    )
     torch.testing.assert_close(
         torch.stack(tuple(parameters)),
         torch.tensor([0.20821358263492584, -0.09954308718442917, 0.31706249713897705, -0.18477500975131989]),
@@ -694,6 +914,20 @@ def _time_reversal_checkpoint(algorithm, completed_iteration):
             "augmentation_schedule": vars(algorithm._resolved_time_reversal_augmentation_schedule()),
         },
     }
+
+
+def test_positive_coefficient_checkpoint_remains_loadable(monkeypatch):
+    algorithm = _schedule_algorithm(0, warmup_iterations=500, rampup_iterations=0)
+    algorithm.symmetry["mirror_loss_coeff"] = 0.1
+    algorithm.symmetry["value_loss_coeff"] = 0.05
+    checkpoint = _time_reversal_checkpoint(algorithm, completed_iteration=19_999)
+    monkeypatch.setattr(PPO, "load", lambda *_args, **_kwargs: True)
+
+    loaded_iteration = algorithm.load(checkpoint, load_cfg=None, strict=True)
+
+    assert loaded_iteration is True
+    assert algorithm.current_learning_iteration == 20_000
+    assert algorithm._effective_time_reversal_coefficients() == pytest.approx((1.0, 0.1, 0.05))
 
 
 def test_checkpoint_schema_accepts_exact_schedule_at_hard_step_boundary(monkeypatch):

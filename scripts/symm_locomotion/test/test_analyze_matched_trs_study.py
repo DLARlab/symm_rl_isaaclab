@@ -27,21 +27,85 @@ def _load_analysis_module():
 
 
 study_analysis = _load_analysis_module()
-REPO_ROOT = Path(__file__).resolve().parents[3]
-MANIFESTS = {
-    "go2": REPO_ROOT
-    / "logs/rsl_rl/good_runs/unitree_go2_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward/study.json",
-    "x1": REPO_ROOT
-    / "logs/rsl_rl/good_runs/dobot_x1_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward/study.json",
-}
+
+
+def _manifest_payload(robot: str) -> dict:
+    """Return a minimal valid matched-study manifest for ``robot``."""
+    display_name = "Unitree Go2" if robot == "go2" else "Dobot X1"
+    return {
+        "schema_version": 1,
+        "analysis_method_version": study_analysis.ANALYSIS_METHOD_VERSION,
+        "robot": robot,
+        "display_name": display_name,
+        "short_name": robot.upper(),
+        "run_root": f"synthetic/{robot}",
+        "training": {
+            "seed": 42,
+            "num_envs": 512,
+            "num_steps_per_env": 24,
+            "max_iterations": 20000,
+        },
+        "windows_s": {"backward": [0.5, 9.5], "forward": [10.5, 29.5]},
+        "balance_y_range": [-90.0, 90.0],
+        "balance_y_ticks": [-80.0, -40.0, 0.0, 40.0, 80.0],
+        "runs": [
+            {
+                "label": "No TRS",
+                "slug": "no_trs",
+                "folder": "no_trs",
+                "mirror_coeff": 0.0,
+                "value_coeff": 0.0,
+                "warmup_iterations": None,
+                "trs_enabled": False,
+            },
+            {
+                "label": "TRS 0.10/0.05",
+                "slug": "trs_0p10_0p05",
+                "folder": "trs_0p10_0p05",
+                "mirror_coeff": 0.1,
+                "value_coeff": 0.05,
+                "warmup_iterations": 500,
+                "trs_enabled": True,
+            },
+            {
+                "label": "TRS 0.20/0.10",
+                "slug": "trs_0p20_0p10",
+                "folder": "trs_0p20_0p10",
+                "mirror_coeff": 0.2,
+                "value_coeff": 0.1,
+                "warmup_iterations": 500,
+                "trs_enabled": True,
+            },
+            {
+                "label": "TRS 0.30/0.15",
+                "slug": "trs_0p30_0p15",
+                "folder": "trs_0p30_0p15",
+                "mirror_coeff": 0.3,
+                "value_coeff": 0.15,
+                "warmup_iterations": 500,
+                "trs_enabled": True,
+            },
+        ],
+    }
 
 
 class TestMatchedTrsStudyManifest(unittest.TestCase):
-    """Validate the stable study schema and the two milestone manifests."""
+    """Validate the stable matched-study manifest schema for both robots."""
+
+    def setUp(self) -> None:
+        """Create manifests without depending on unpublished legacy artifacts."""
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        root = Path(temporary_directory.name)
+        self.manifests = {}
+        for robot in ("go2", "x1"):
+            path = root / f"{robot}_study.json"
+            path.write_text(json.dumps(_manifest_payload(robot)), encoding="utf-8")
+            self.manifests[robot] = path
 
     def test_milestone_manifests_define_matched_four_run_studies(self) -> None:
-        """Load both robot studies with unique runs and the canonical coefficients."""
-        for robot, path in MANIFESTS.items():
+        """Load both robot schemas with unique runs and canonical coefficients."""
+        for robot, path in self.manifests.items():
             with self.subTest(robot=robot):
                 study = study_analysis.load_study_manifest(path)
                 self.assertEqual(study["robot"], robot)
@@ -81,7 +145,7 @@ class TestMatchedTrsStudyManifest(unittest.TestCase):
 
     def test_duplicate_run_slug_is_rejected(self) -> None:
         """Reject ambiguous manifests before reading expensive run artifacts."""
-        payload = json.loads(MANIFESTS["go2"].read_text(encoding="utf-8"))
+        payload = json.loads(self.manifests["go2"].read_text(encoding="utf-8"))
         payload["runs"][1]["slug"] = payload["runs"][0]["slug"]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "study.json"
@@ -91,7 +155,7 @@ class TestMatchedTrsStudyManifest(unittest.TestCase):
 
     def test_method_version_mismatch_is_rejected(self) -> None:
         """Prevent silent reinterpretation by a future analysis implementation."""
-        payload = json.loads(MANIFESTS["x1"].read_text(encoding="utf-8"))
+        payload = json.loads(self.manifests["x1"].read_text(encoding="utf-8"))
         payload["analysis_method_version"] = "unknown"
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "study.json"
@@ -101,7 +165,7 @@ class TestMatchedTrsStudyManifest(unittest.TestCase):
 
     def test_inconsistent_no_trs_baseline_is_rejected(self) -> None:
         """Require one baseline-first zero-coefficient no-TRS condition."""
-        payload = json.loads(MANIFESTS["go2"].read_text(encoding="utf-8"))
+        payload = json.loads(self.manifests["go2"].read_text(encoding="utf-8"))
         payload["runs"][0]["mirror_coeff"] = 0.01
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "study.json"
@@ -111,7 +175,7 @@ class TestMatchedTrsStudyManifest(unittest.TestCase):
 
     def test_manifest_coefficient_must_match_resolved_run_configuration(self) -> None:
         """Reject a mislabeled coefficient before generating authoritative outputs."""
-        run = study_analysis.load_study_manifest(MANIFESTS["x1"])["runs"][1]
+        run = study_analysis.load_study_manifest(self.manifests["x1"])["runs"][1]
         symmetry_cfg = {
             "use_data_augmentation": False,
             "use_mirror_loss": True,

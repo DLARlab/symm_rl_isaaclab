@@ -1,0 +1,22 @@
+{
+  "archive_sha256": "f39b00af613dcbdf9ca01461e84a9575d7a69d9aa4e846addb990c8e3f244165",
+  "cell_id": "gait_07_gallop__vx_pos_0p5__seed_0042",
+  "contact_threshold_mode": "body_weight",
+  "contact_threshold_off_n": 5.0,
+  "contact_threshold_on_n": 10.0,
+  "evaluation_seed": 42,
+  "gait_index": 7,
+  "ground_filter_paths": [
+    "/World/ground/terrain/mesh",
+    "/World/ground/terrain/mesh",
+    "/World/ground/terrain/mesh",
+    "/World/ground/terrain/mesh"
+  ],
+  "ground_filtered_samples": 750,
+  "method_version": "leg_usage_grid_full_v3",
+  "plan_sha256": "80067e75ca9dac1fca8f65bc9feb27fbb07625ede5bda0ec8e0799248741cae7",
+  "record_sha256": "09aa2f6034ae828889ca0bdea17e4aa038546581937583487f25e098d4031ffc",
+  "recorded_steps": 750,
+  "robot_mass_kg": 15.01900016865693,
+  "schema_version": 1
+}

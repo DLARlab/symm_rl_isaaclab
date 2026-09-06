@@ -135,15 +135,19 @@ def test_initial_registry_manifests_define_requested_cohorts_and_go2_split():
     assert len(go2["runs"]) == 8
     assert sum(run["classification"] == "eligible_main" for run in go2["runs"]) == 5
     assert sum(run["classification"] == "eligible_supplement" for run in go2["runs"]) == 3
-    tracked_go2 = [run for run in go2["runs"] if run["artifact_availability"] == "tracked"]
-    assert len(tracked_go2) == 4
-    assert all(run["path"].startswith("logs/rsl_rl/good_runs/unitree_go2_symm_flat/") for run in tracked_go2)
+    assert all(run["artifact_availability"] == "local_only" for run in go2["runs"])
+    historical_go2 = [run for run in go2["runs"] if "/legacy/" in run["path"]]
+    assert len(historical_go2) == 4
+    assert all(run["artifact_availability"] == "local_only" for run in historical_go2)
     assert go2["statistical_claim_status"] == "not_confirmatory_seed_42_only"
     assert [entry["classification"] for entry in module.classify_manifest(go2)] == [
         run["classification"] for run in go2["runs"]
     ]
 
-    assert len(manifests["x1_gait_v2_development_sweep"]["runs"]) == 3
+    x1 = manifests["x1_gait_v2_development_sweep"]
+    assert len(x1["runs"]) == 3
+    assert all(run["artifact_availability"] == "local_only" for run in x1["runs"])
+    assert all("/legacy/" in run["path"] for run in x1["runs"])
 
     for cohort_id in ("go2_v4_main_development", "x1_v4_main_development"):
         development = manifests[cohort_id]

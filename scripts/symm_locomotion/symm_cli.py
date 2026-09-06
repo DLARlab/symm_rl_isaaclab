@@ -23,7 +23,7 @@ CONDA_ENV = "symm_rl_isaaclab"
 DEFAULT_NUM_ENVS = 512
 DEFAULT_TRAINING_ITERATIONS = 20000
 DEFAULT_MIRROR_LOSS_COEFF = 0.1
-DEFAULT_TR_VALUE_COEFF = 0.05
+DEFAULT_TR_VALUE_COEFF = 0.0
 DEFAULT_TR_WARMUP_ITERATIONS = 500
 DEFAULT_TR_RAMPUP_ITERATIONS = 0
 DEFAULT_TR_RAMP_SHAPE = "linear"
@@ -447,6 +447,11 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
         dest="tr_value_coeff",
         type=float,
         default=DEFAULT_TR_VALUE_COEFF,
+        help=(
+            "Optional coefficient for the time-reversal critic-consistency ablation. Default: 0.0. "
+            "This is not the standard PPO value-loss coefficient. A positive value explicitly enables "
+            "the optional value-consistency hypothesis."
+        ),
     )
     parser.add_argument(
         "--tr-warmup-iterations",

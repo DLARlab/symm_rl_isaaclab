@@ -1,0 +1,345 @@
+{
+  "figures": [
+    {
+      "figure_id": "fig01",
+      "png": "fig01_training_efficiency.png",
+      "png_sha256": "5febd7121a4b1715fa0caff29422b9a0462faa6bd5ce17d597069720cbcb568b",
+      "source_tables": [
+        "training_efficiency.csv",
+        "learning_curve_points.csv"
+      ],
+      "stem": "fig01_training_efficiency",
+      "svg": "fig01_training_efficiency.svg",
+      "svg_sha256": "c184167b66f1186e4cf2626bd121c64328b1e0361b85f5447ae55da95040d6a1",
+      "title": "Training efficiency"
+    },
+    {
+      "figure_id": "fig02",
+      "png": "fig02_velocity_tracking_overall_direction.png",
+      "png_sha256": "e5c684d73590202d11a5e7161ffb65f46f5b403e5fb7a1233eb8bafad7bb23ae",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig02_velocity_tracking_overall_direction",
+      "svg": "fig02_velocity_tracking_overall_direction.svg",
+      "svg_sha256": "0f05f35f3fae8e67d4bf3c2931d340df8001b9a25193635fac5e5040ba80b7a2",
+      "title": "Velocity tracking: overall and by direction"
+    },
+    {
+      "figure_id": "fig03_01",
+      "png": "fig03_01_velocity_tracking_by_family_all.png",
+      "png_sha256": "24d6fc1474231aaccb8beaaae8b4c5fa46a852756ca96622ced3407b0456c4f4",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_01_velocity_tracking_by_family_all",
+      "svg": "fig03_01_velocity_tracking_by_family_all.svg",
+      "svg_sha256": "b594f86d92a5ba1dfb445513cba7f61fa845256aba749a7453dd8b9dc6e0ee03",
+      "title": "Velocity tracking by gait family: all velocities"
+    },
+    {
+      "figure_id": "fig03_02",
+      "png": "fig03_02_velocity_tracking_by_family_negative.png",
+      "png_sha256": "73cddb87dc4fc331bdfaec0b077f89b865d3bc4677bde2b59225e87b96a3c454",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_02_velocity_tracking_by_family_negative",
+      "svg": "fig03_02_velocity_tracking_by_family_negative.svg",
+      "svg_sha256": "105167685cb458514acb49b00fd4870523bd5af7f580e92a4892eca6e17f7d4f",
+      "title": "Velocity tracking by gait family: negative velocities"
+    },
+    {
+      "figure_id": "fig03_03",
+      "png": "fig03_03_velocity_tracking_by_family_positive.png",
+      "png_sha256": "3d6cca7366413ffc3e22f87d5e9998397da62a30adb159c96be6f786131ee034",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_03_velocity_tracking_by_family_positive",
+      "svg": "fig03_03_velocity_tracking_by_family_positive.svg",
+      "svg_sha256": "96c3ce29efce2b15c91ef66c95f55a706979048e49aa0f3a8f015fea4dfeda46",
+      "title": "Velocity tracking by gait family: positive velocities"
+    },
+    {
+      "figure_id": "fig03",
+      "png": "fig03_velocity_tracking_by_family_combined.png",
+      "png_sha256": "ca97215654d77c04b356e91b1a606e0a62aca88e2e306ac043cc63ace52e9368",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_velocity_tracking_by_family_combined",
+      "svg": "fig03_velocity_tracking_by_family_combined.svg",
+      "svg_sha256": "e11192dfd741ae2310739594f98e9e6d0d0c580a2b0e21246fb48085c842d558",
+      "title": "Velocity tracking by gait family: combined"
+    },
+    {
+      "figure_id": "fig04",
+      "png": "fig04_leg_usage_overall_direction.png",
+      "png_sha256": "e39a16f6bbcd8cd1f561d8860e333e8df90b05442ecb82972c6b6caec86197ca",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig04_leg_usage_overall_direction",
+      "svg": "fig04_leg_usage_overall_direction.svg",
+      "svg_sha256": "5fb54103ca523efbc5a81824a58082b83589eae9fcf315eecdd1070ae635bde3",
+      "title": "Leg usage: overall and by direction"
+    },
+    {
+      "figure_id": "fig05_01",
+      "png": "fig05_01_leg_usage_by_family_all.png",
+      "png_sha256": "26fc2b4b8bc0ede9a5f8108ee784ad5a9c9860878b3dd1a1b5b3da9cdecd6c4c",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_01_leg_usage_by_family_all",
+      "svg": "fig05_01_leg_usage_by_family_all.svg",
+      "svg_sha256": "dd4cfe8b1e0c371862ee2db8d98e64227409819e0110e281315f2bbfc3a15581",
+      "title": "Leg usage by gait family: all velocities"
+    },
+    {
+      "figure_id": "fig05_02",
+      "png": "fig05_02_leg_usage_by_family_negative.png",
+      "png_sha256": "4575ad9a4fa82387506e3f950957bed9b0425e416bd8f990c00bf795d3bcf7db",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_02_leg_usage_by_family_negative",
+      "svg": "fig05_02_leg_usage_by_family_negative.svg",
+      "svg_sha256": "841380d59c927087cc97476b523ccf0e5a300427b59428388c5a31755a8dbb72",
+      "title": "Leg usage by gait family: negative velocities"
+    },
+    {
+      "figure_id": "fig05_03",
+      "png": "fig05_03_leg_usage_by_family_positive.png",
+      "png_sha256": "edcbf78b7ee8c75a6bdfe85cf36c88b951678b43007a55d425bc28b1ffda5fa3",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_03_leg_usage_by_family_positive",
+      "svg": "fig05_03_leg_usage_by_family_positive.svg",
+      "svg_sha256": "98ccf2bd231d4254afb332c3a8861d2000f0b5dc23743739e3f260abc00dc0e6",
+      "title": "Leg usage by gait family: positive velocities"
+    },
+    {
+      "figure_id": "fig05",
+      "png": "fig05_leg_usage_by_family_combined.png",
+      "png_sha256": "a81c4c9a520dafd3e9f3a500c1f1a61ea3432bb58487f9c983d5fb225319bb1a",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_leg_usage_by_family_combined",
+      "svg": "fig05_leg_usage_by_family_combined.svg",
+      "svg_sha256": "96afdf1de3116f7e65bed54b14ed4068e898decf307ee7526632f37f140a4681",
+      "title": "Leg usage by gait family: combined"
+    },
+    {
+      "figure_id": "fig06",
+      "png": "fig06_gait_fidelity_overall_direction.png",
+      "png_sha256": "7268f4bde46aecfd416d407e68fc04628f8789115a47d9aa37ad13b64d5cb623",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig06_gait_fidelity_overall_direction",
+      "svg": "fig06_gait_fidelity_overall_direction.svg",
+      "svg_sha256": "85f7559efa7a7bd3a1507838ee7bb9f4236163d24712f03fd20ae2ea84e09755",
+      "title": "Gait fidelity: overall and by direction"
+    },
+    {
+      "figure_id": "fig07_01",
+      "png": "fig07_01_gait_fidelity_by_family_all.png",
+      "png_sha256": "3e02060756a7a47c510c9a0c27f7ed9208cdeb3430f08543715c2d687b643487",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_01_gait_fidelity_by_family_all",
+      "svg": "fig07_01_gait_fidelity_by_family_all.svg",
+      "svg_sha256": "1dd65c92a57bf0ec48d27889d94e986365411ebca0798696b3ed0888e6718ada",
+      "title": "Gait fidelity by family: all velocities"
+    },
+    {
+      "figure_id": "fig07_02",
+      "png": "fig07_02_gait_fidelity_by_family_negative.png",
+      "png_sha256": "1298c6a34427ce9c82f8835c11db5119a9a520d2886154a992594edeb740b878",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_02_gait_fidelity_by_family_negative",
+      "svg": "fig07_02_gait_fidelity_by_family_negative.svg",
+      "svg_sha256": "5a9ec670480713dec044ffe5ea2a6805818f99c642456f16f37bfdd05f87ba0a",
+      "title": "Gait fidelity by family: negative velocities"
+    },
+    {
+      "figure_id": "fig07_03",
+      "png": "fig07_03_gait_fidelity_by_family_positive.png",
+      "png_sha256": "fecc84f154a012f6967d7316689c27d302a5287b7f70cc3221c0471ada63c47e",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_03_gait_fidelity_by_family_positive",
+      "svg": "fig07_03_gait_fidelity_by_family_positive.svg",
+      "svg_sha256": "6abcfb6ef8f35d24d491be8c4f432b3449949fca3cdb2dbd90b1a6c482e8a053",
+      "title": "Gait fidelity by family: positive velocities"
+    },
+    {
+      "figure_id": "fig07",
+      "png": "fig07_gait_fidelity_by_family_combined.png",
+      "png_sha256": "26aebf3f9db85f715d2e818922c99651a74586f1233030f0c46ee576602e9ee7",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_gait_fidelity_by_family_combined",
+      "svg": "fig07_gait_fidelity_by_family_combined.svg",
+      "svg_sha256": "94258f0332f54835ece8498851e9c9b2551dbfd7686a9c77fbbeec5e00eab42a",
+      "title": "Gait fidelity by family: combined"
+    }
+  ],
+  "method_version": "gait_closure_comparison_v1",
+  "registry": {
+    "fig01": {
+      "kind": "figure",
+      "source_tables": [
+        "training_efficiency.csv",
+        "learning_curve_points.csv"
+      ],
+      "stem": "fig01_training_efficiency",
+      "title": "Training efficiency"
+    },
+    "fig02": {
+      "kind": "figure",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig02_velocity_tracking_overall_direction",
+      "title": "Velocity tracking: overall and by direction"
+    },
+    "fig03": {
+      "children": [
+        "fig03_01",
+        "fig03_02",
+        "fig03_03"
+      ],
+      "kind": "combined",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_velocity_tracking_by_family_combined",
+      "title": "Velocity tracking by gait family: combined"
+    },
+    "fig03_01": {
+      "kind": "figure",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_01_velocity_tracking_by_family_all",
+      "title": "Velocity tracking by gait family: all velocities"
+    },
+    "fig03_02": {
+      "kind": "figure",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_02_velocity_tracking_by_family_negative",
+      "title": "Velocity tracking by gait family: negative velocities"
+    },
+    "fig03_03": {
+      "kind": "figure",
+      "source_tables": [
+        "velocity_tracking_summary.csv"
+      ],
+      "stem": "fig03_03_velocity_tracking_by_family_positive",
+      "title": "Velocity tracking by gait family: positive velocities"
+    },
+    "fig04": {
+      "kind": "figure",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig04_leg_usage_overall_direction",
+      "title": "Leg usage: overall and by direction"
+    },
+    "fig05": {
+      "children": [
+        "fig05_01",
+        "fig05_02",
+        "fig05_03"
+      ],
+      "kind": "combined",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_leg_usage_by_family_combined",
+      "title": "Leg usage by gait family: combined"
+    },
+    "fig05_01": {
+      "kind": "figure",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_01_leg_usage_by_family_all",
+      "title": "Leg usage by gait family: all velocities"
+    },
+    "fig05_02": {
+      "kind": "figure",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_02_leg_usage_by_family_negative",
+      "title": "Leg usage by gait family: negative velocities"
+    },
+    "fig05_03": {
+      "kind": "figure",
+      "source_tables": [
+        "leg_usage_summary.csv"
+      ],
+      "stem": "fig05_03_leg_usage_by_family_positive",
+      "title": "Leg usage by gait family: positive velocities"
+    },
+    "fig06": {
+      "kind": "figure",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig06_gait_fidelity_overall_direction",
+      "title": "Gait fidelity: overall and by direction"
+    },
+    "fig07": {
+      "children": [
+        "fig07_01",
+        "fig07_02",
+        "fig07_03"
+      ],
+      "kind": "combined",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_gait_fidelity_by_family_combined",
+      "title": "Gait fidelity by family: combined"
+    },
+    "fig07_01": {
+      "kind": "figure",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_01_gait_fidelity_by_family_all",
+      "title": "Gait fidelity by family: all velocities"
+    },
+    "fig07_02": {
+      "kind": "figure",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_02_gait_fidelity_by_family_negative",
+      "title": "Gait fidelity by family: negative velocities"
+    },
+    "fig07_03": {
+      "kind": "figure",
+      "source_tables": [
+        "gait_fidelity_summary.csv"
+      ],
+      "stem": "fig07_03_gait_fidelity_by_family_positive",
+      "title": "Gait fidelity by family: positive velocities"
+    }
+  },
+  "schema_version": 1
+}

@@ -6,11 +6,11 @@
     "within_family": "equal mean across selected gait rows and velocities"
   },
   "analysis_provenance": {
-    "analyzer_sha256": "426e139510f69e205e2d5d2789cabe1098cd934e4b58d440e676cbb7b6fd206c",
-    "input_study_sha256": "33f6a45f6f359a9a79f942c40071799c72abbab7d2652d09a76259b824023e57",
+    "analyzer_sha256": "27262a94b37d30b7f65e15d8522374d2ef24e422ea051c305fea2dd18f98bbee",
+    "input_study_sha256": "e3312d4bd150fc1fc56041d63af84e0841713611e8f8bcd69c89cc3ddeceeaa4",
     "metrics_sha256": "deca1f51b63eceed0b6c536abf0dd12a51673a8fd157b05424c5b4f4e01a083b",
     "path": "metrics/analysis_provenance.json",
-    "record_sha256": "f0dbe200716aa905c49c1418ef6a5b3e85af10096742c1dd6b7bf56cc97e800f"
+    "record_sha256": "f8767d669000e4ab5b7bd2709740e68c1b9239a5317ec847ec1bfcf167df615d"
   },
   "coverage": {
     "complete": true,
@@ -375,6 +375,19 @@
       "tracking_qualified_observed_family_balanced_mean_total_per_s": 171.94746229456993,
       "valid_cells": 60
     }
+  },
+  "paired_tr_consistency": {
+    "analyzed_rows": 60,
+    "method_version": "paired_tr_consistency_phase_v1",
+    "outputs": {
+      "record": "metrics/paired_tr_consistency.json",
+      "rows": "metrics/paired_tr_consistency.csv",
+      "rows_sha256": "metrics/8441b68fa9b3f410be33d70a490b6b3e82ab228fd00914b6925a0ecab091ca99",
+      "summaries": "metrics/paired_tr_consistency_summary.csv",
+      "summaries_sha256": "metrics/1478f3352dcdddd002d165969b314ef836f07be938672404347573aa9d2745fa"
+    },
+    "record_sha256": "90ebf0fe1f5535605b2906551d3c5e3ffead9760ac5d6b2a456c906fb4b52d69",
+    "rows": 60
   },
   "protocol": "full",
   "schema_version": 1,

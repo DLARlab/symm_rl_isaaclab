@@ -26,5 +26,5 @@ class UnitreeGo2SymmFlatPPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
             experiment_name="unitree_go2_symm_flat",
             use_data_augmentation=False,
             data_augmentation_func=go2_symm_mdp.compute_time_reversal_states,
-            value_loss_coeff=0.05,
+            value_loss_coeff=0.0,
         )

@@ -96,7 +96,12 @@ def time_reversal_weighted_losses(
 
 
 class TimeReversalPPO(PPO):
-    """PPO with scheduled auxiliary time-reversal policy and value losses."""
+    """PPO with scheduled time-reversal policy consistency and an optional
+    time-reversal value-consistency ablation.
+
+    The value term is an optional time-reversal critic-consistency ablation;
+    the standard PPO critic and its return-regression loss are always retained.
+    """
 
     _MIN_ACTOR_STD = 1.0e-6
     _MAX_ACTOR_STD = 1.0
@@ -289,6 +294,9 @@ class TimeReversalPPO(PPO):
             augmentation_diagnostic_minibatch = augmentation_gradient_update and batch_index == 0
             need_policy_raw = compute_policy_raw or (diagnostic_minibatch and policy_schedule.enabled)
             need_value_raw = compute_value_raw or (diagnostic_minibatch and value_schedule.enabled)
+            value_gradients_required = effective_tr_value_coeff > 0.0 or (
+                diagnostic_minibatch and value_schedule.enabled
+            )
             if self.symmetry and (need_policy_raw or need_value_raw):
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
                 if legacy_data_augmentation_active:
@@ -371,11 +379,22 @@ class TimeReversalPPO(PPO):
                     else:
                         raise ValueError(f"Unsupported tr_policy_output_space: {output_space!r}.")
                 if need_value_raw:
-                    transformed_values = (
-                        values[original_batch_size:]
-                        if legacy_data_augmentation_active
-                        else self.critic(transformed_observations)
-                    )
+                    if value_gradients_required:
+                        transformed_values = (
+                            values[original_batch_size:]
+                            if legacy_data_augmentation_active
+                            else self.critic(transformed_observations)
+                        )
+                    else:
+                        # Diagnostic-only evaluation for the optional
+                        # time-reversal critic-consistency ablation must not
+                        # retain a graph or affect the standard PPO critic update.
+                        with torch.no_grad():
+                            transformed_values = (
+                                values[original_batch_size:].detach()
+                                if legacy_data_augmentation_active
+                                else self.critic(transformed_observations)
+                            )
                     tr_value_loss = self._masked_mse(
                         transformed_values,
                         values[:original_batch_size].detach(),
@@ -772,6 +791,18 @@ class TimeReversalPPO(PPO):
         for term in ("policy", "value", "augmentation"):
             schedule = resolve_time_reversal_schedule(self.symmetry, term)
             schedule.scale(0)
+            if (
+                term == "value"
+                and self.symmetry.get("use_tr_value_consistency") is True
+                and schedule.target_coeff == 0.0
+            ):
+                warnings.warn(
+                    "use_tr_value_consistency=True enables the optional time-reversal critic-consistency "
+                    "ablation, but its resolved coefficient is zero; it will make no contribution to the "
+                    "optimization loss.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         if augmentation_cfg.get("enabled", False):
             if augmentation_cfg.get("mode") != "dynamics_filtered_reverse_action_supervision":

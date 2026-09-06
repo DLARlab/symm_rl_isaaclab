@@ -1,0 +1,2109 @@
+{
+  "aggregation": {
+    "families": [
+      "trot",
+      "bound",
+      "half_bound",
+      "gallop"
+    ],
+    "outcome_filter": "none",
+    "overall": "equal arithmetic mean of the four gait-family means",
+    "scope_cells_per_run": {
+      "all": 60,
+      "negative": 30,
+      "positive": 30
+    },
+    "velocity_scopes": [
+      "all",
+      "negative",
+      "positive"
+    ],
+    "within_family": "arithmetic mean of every selected cell in the family"
+  },
+  "baseline_run_id": "run_00",
+  "display_name": "Unitree Go2",
+  "evaluation_protocol": {
+    "aggregation": {
+      "overall": "equal mean of trot, bound, half_bound, and gallop family means",
+      "primary_balance_metric": "mean absolute per-cell front/hind imbalance; signed values never cancel",
+      "tracking_qualified": "reported alongside all valid cells using the declared per-cell tracking threshold",
+      "within_family": "equal mean across selected gait rows and velocities"
+    },
+    "cells": [
+      {
+        "family": "trot",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "id": "gait_00_trot__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "relative_output_dir": "cells/gait_00_trot/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "trot",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "id": "gait_00_trot__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "relative_output_dir": "cells/gait_00_trot/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "trot",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "id": "gait_00_trot__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "relative_output_dir": "cells/gait_00_trot/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "trot",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "id": "gait_00_trot__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "relative_output_dir": "cells/gait_00_trot/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "trot",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "id": "gait_00_trot__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "relative_output_dir": "cells/gait_00_trot/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "trot",
+        "gait_index": 0,
+        "gait_name": "trot",
+        "id": "gait_00_trot__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "relative_output_dir": "cells/gait_00_trot/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "bound",
+        "gait_index": 1,
+        "gait_name": "bound",
+        "id": "gait_01_bound__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_01_bound/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "bound",
+        "gait_index": 1,
+        "gait_name": "bound",
+        "id": "gait_01_bound__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_01_bound/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "bound",
+        "gait_index": 1,
+        "gait_name": "bound",
+        "id": "gait_01_bound__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_01_bound/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "bound",
+        "gait_index": 1,
+        "gait_name": "bound",
+        "id": "gait_01_bound__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_01_bound/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "bound",
+        "gait_index": 1,
+        "gait_name": "bound",
+        "id": "gait_01_bound__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_01_bound/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "bound",
+        "gait_index": 1,
+        "gait_name": "bound",
+        "id": "gait_01_bound__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_01_bound/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 2,
+        "gait_name": "half_bound_front_a",
+        "id": "gait_02_half_bound__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_02_half_bound/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 2,
+        "gait_name": "half_bound_front_a",
+        "id": "gait_02_half_bound__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_02_half_bound/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 2,
+        "gait_name": "half_bound_front_a",
+        "id": "gait_02_half_bound__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_02_half_bound/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 2,
+        "gait_name": "half_bound_front_a",
+        "id": "gait_02_half_bound__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_02_half_bound/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 2,
+        "gait_name": "half_bound_front_a",
+        "id": "gait_02_half_bound__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_02_half_bound/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 2,
+        "gait_name": "half_bound_front_a",
+        "id": "gait_02_half_bound__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_02_half_bound/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 3,
+        "gait_name": "half_bound_front_b",
+        "id": "gait_03_half_bound__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_03_half_bound/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 3,
+        "gait_name": "half_bound_front_b",
+        "id": "gait_03_half_bound__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_03_half_bound/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 3,
+        "gait_name": "half_bound_front_b",
+        "id": "gait_03_half_bound__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_03_half_bound/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 3,
+        "gait_name": "half_bound_front_b",
+        "id": "gait_03_half_bound__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_03_half_bound/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 3,
+        "gait_name": "half_bound_front_b",
+        "id": "gait_03_half_bound__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_03_half_bound/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 3,
+        "gait_name": "half_bound_front_b",
+        "id": "gait_03_half_bound__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "relative_output_dir": "cells/gait_03_half_bound/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 4,
+        "gait_name": "half_bound_hind_a",
+        "id": "gait_04_half_bound__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_04_half_bound/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 4,
+        "gait_name": "half_bound_hind_a",
+        "id": "gait_04_half_bound__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_04_half_bound/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 4,
+        "gait_name": "half_bound_hind_a",
+        "id": "gait_04_half_bound__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_04_half_bound/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 4,
+        "gait_name": "half_bound_hind_a",
+        "id": "gait_04_half_bound__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_04_half_bound/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 4,
+        "gait_name": "half_bound_hind_a",
+        "id": "gait_04_half_bound__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_04_half_bound/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 4,
+        "gait_name": "half_bound_hind_a",
+        "id": "gait_04_half_bound__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_04_half_bound/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 5,
+        "gait_name": "half_bound_hind_b",
+        "id": "gait_05_half_bound__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_05_half_bound/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 5,
+        "gait_name": "half_bound_hind_b",
+        "id": "gait_05_half_bound__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_05_half_bound/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 5,
+        "gait_name": "half_bound_hind_b",
+        "id": "gait_05_half_bound__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_05_half_bound/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 5,
+        "gait_name": "half_bound_hind_b",
+        "id": "gait_05_half_bound__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_05_half_bound/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 5,
+        "gait_name": "half_bound_hind_b",
+        "id": "gait_05_half_bound__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_05_half_bound/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "half_bound",
+        "gait_index": 5,
+        "gait_name": "half_bound_hind_b",
+        "id": "gait_05_half_bound__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_05_half_bound/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 6,
+        "gait_name": "gallop_a",
+        "id": "gait_06_gallop__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_06_gallop/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 6,
+        "gait_name": "gallop_a",
+        "id": "gait_06_gallop__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_06_gallop/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 6,
+        "gait_name": "gallop_a",
+        "id": "gait_06_gallop__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_06_gallop/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 6,
+        "gait_name": "gallop_a",
+        "id": "gait_06_gallop__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_06_gallop/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 6,
+        "gait_name": "gallop_a",
+        "id": "gait_06_gallop__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_06_gallop/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 6,
+        "gait_name": "gallop_a",
+        "id": "gait_06_gallop__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_06_gallop/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 7,
+        "gait_name": "gallop_b",
+        "id": "gait_07_gallop__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_07_gallop/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 7,
+        "gait_name": "gallop_b",
+        "id": "gait_07_gallop__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_07_gallop/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 7,
+        "gait_name": "gallop_b",
+        "id": "gait_07_gallop__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_07_gallop/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 7,
+        "gait_name": "gallop_b",
+        "id": "gait_07_gallop__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_07_gallop/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 7,
+        "gait_name": "gallop_b",
+        "id": "gait_07_gallop__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_07_gallop/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 7,
+        "gait_name": "gallop_b",
+        "id": "gait_07_gallop__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "relative_output_dir": "cells/gait_07_gallop/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 8,
+        "gait_name": "gallop_c",
+        "id": "gait_08_gallop__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_08_gallop/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 8,
+        "gait_name": "gallop_c",
+        "id": "gait_08_gallop__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_08_gallop/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 8,
+        "gait_name": "gallop_c",
+        "id": "gait_08_gallop__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_08_gallop/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 8,
+        "gait_name": "gallop_c",
+        "id": "gait_08_gallop__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_08_gallop/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 8,
+        "gait_name": "gallop_c",
+        "id": "gait_08_gallop__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_08_gallop/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 8,
+        "gait_name": "gallop_c",
+        "id": "gait_08_gallop__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_08_gallop/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 9,
+        "gait_name": "gallop_d",
+        "id": "gait_09_gallop__vx_neg_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_09_gallop/vx_neg_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 9,
+        "gait_name": "gallop_d",
+        "id": "gait_09_gallop__vx_neg_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_09_gallop/vx_neg_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 9,
+        "gait_name": "gallop_d",
+        "id": "gait_09_gallop__vx_neg_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_09_gallop/vx_neg_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": -0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 9,
+        "gait_name": "gallop_d",
+        "id": "gait_09_gallop__vx_pos_0p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_09_gallop/vx_pos_0p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 0.5
+      },
+      {
+        "family": "gallop",
+        "gait_index": 9,
+        "gait_name": "gallop_d",
+        "id": "gait_09_gallop__vx_pos_1p0__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_09_gallop/vx_pos_1p0/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.0
+      },
+      {
+        "family": "gallop",
+        "gait_index": 9,
+        "gait_name": "gallop_d",
+        "id": "gait_09_gallop__vx_pos_1p5__seed_0042",
+        "measure_steps": 500,
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "relative_output_dir": "cells/gait_09_gallop/vx_pos_1p5/seed_0042",
+        "seed": 42,
+        "settle_steps": 250,
+        "step_dt": 0.02,
+        "total_steps": 750,
+        "velocity_mps": 1.5
+      }
+    ],
+    "contact_threshold_policy": {
+      "absolute_off_n": null,
+      "absolute_on_n": null,
+      "actual_threshold_archive_fields": [
+        "contact_threshold_on_n",
+        "contact_threshold_off_n"
+      ],
+      "actual_threshold_metrics_fields": [
+        "gait_contact_threshold_on_n",
+        "gait_contact_threshold_off_n"
+      ],
+      "actual_threshold_runtime_manifest": "<cell.relative_output_dir>/recording_manifest.json",
+      "mode": "body_weight",
+      "normalized_definition": "max(minimum_n, alpha * robot_mass_kg * 9.80665 / 4)"
+    },
+    "effort_limit_provenance": {
+      "definition": "configured articulation actuator effort_limit resolved in action joint order",
+      "fallback_allowed": false,
+      "sentinel_rejection_threshold_nm": 100000000.0,
+      "source": {
+        "files": {
+          "source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py": "ec12a3a094d9ecc018fbf13bb4d412ffb1288aa3a75b976f7661285f246a669b"
+        },
+        "missing_files": [],
+        "sha256": "3b98c0898b52601e7a22186d6d3648f2a83853b29b5dacf4f82b8f5fd84d71fc"
+      }
+    },
+    "episode_length_s": 15.040000000000001,
+    "evaluation_config": {
+      "contact": {
+        "alpha_off": 0.06,
+        "alpha_on": 0.12,
+        "ground_filtered_required": true,
+        "minimum_dwell_s": 0.02,
+        "minimum_off_n": 5.0,
+        "minimum_on_n": 10.0,
+        "mode": "body_weight",
+        "off_n": 10.0,
+        "on_n": 20.0
+      },
+      "gait": {
+        "boundary_exclusion_cycles": 0.02,
+        "classifier_max_error_cycles": 0.12,
+        "classifier_min_margin_cycles": 0.01,
+        "event_match_margin_cycles": 0.2,
+        "minimum_complete_cycles": 2,
+        "minimum_events_per_foot": 2,
+        "phase_sync_tolerance_cycles": 0.02,
+        "simultaneous_tolerance_cycles": 0.04
+      },
+      "load": {
+        "concentration_epsilon": 1e-12,
+        "impact_window_s": 0.05,
+        "joint_saturation_fraction": 0.95
+      },
+      "success": {
+        "maximum_vx_relative_rmse": 0.2,
+        "maximum_yaw_rmse_radps": 0.05,
+        "minimum_complete_cycles": 2,
+        "minimum_events_per_foot": 2,
+        "minimum_gait_agreement": 0.8,
+        "require_correct_family": true,
+        "require_no_termination": true,
+        "require_positive_progress": true
+      },
+      "tracking": {
+        "relative_error_epsilon_mps": 1e-06,
+        "rise_fraction": 0.9,
+        "settling_relative_band": 0.1,
+        "vx_relative_error_limit": 0.2,
+        "yaw_rmse_limit_radps": 0.05
+      }
+    },
+    "evaluation_seed": 42,
+    "gait_library_version": "time_reversal_closed_v2",
+    "gaits": [
+      {
+        "family": "trot",
+        "index": 0,
+        "name": "trot",
+        "phases": [
+          0.0,
+          0.5,
+          0.5,
+          0.0
+        ],
+        "time_reversal_partner": 0,
+        "training_weight": 4.0,
+        "weight": 4.0
+      },
+      {
+        "family": "bound",
+        "index": 1,
+        "name": "bound",
+        "phases": [
+          0.0,
+          0.0,
+          0.5,
+          0.5
+        ],
+        "time_reversal_partner": 1,
+        "training_weight": 4.0,
+        "weight": 4.0
+      },
+      {
+        "family": "half_bound",
+        "index": 2,
+        "name": "half_bound_front_a",
+        "phases": [
+          0.13,
+          -0.13,
+          0.5,
+          0.5
+        ],
+        "time_reversal_partner": 3,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "half_bound",
+        "index": 3,
+        "name": "half_bound_front_b",
+        "phases": [
+          -0.13,
+          0.13,
+          0.5,
+          0.5
+        ],
+        "time_reversal_partner": 2,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "half_bound",
+        "index": 4,
+        "name": "half_bound_hind_a",
+        "phases": [
+          0.0,
+          0.0,
+          0.63,
+          0.37
+        ],
+        "time_reversal_partner": 5,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "half_bound",
+        "index": 5,
+        "name": "half_bound_hind_b",
+        "phases": [
+          0.0,
+          0.0,
+          0.37,
+          0.63
+        ],
+        "time_reversal_partner": 4,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "gallop",
+        "index": 6,
+        "name": "gallop_a",
+        "phases": [
+          -0.13,
+          0.13,
+          0.63,
+          0.37
+        ],
+        "time_reversal_partner": 8,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "gallop",
+        "index": 7,
+        "name": "gallop_b",
+        "phases": [
+          0.13,
+          -0.13,
+          0.63,
+          0.37
+        ],
+        "time_reversal_partner": 9,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "gallop",
+        "index": 8,
+        "name": "gallop_c",
+        "phases": [
+          0.13,
+          -0.13,
+          0.37,
+          0.63
+        ],
+        "time_reversal_partner": 6,
+        "training_weight": 1.0,
+        "weight": 1.0
+      },
+      {
+        "family": "gallop",
+        "index": 9,
+        "name": "gallop_d",
+        "phases": [
+          -0.13,
+          0.13,
+          0.37,
+          0.63
+        ],
+        "time_reversal_partner": 7,
+        "training_weight": 1.0,
+        "weight": 1.0
+      }
+    ],
+    "measure_s": 10.0,
+    "measure_steps": 500,
+    "method_version": "leg_usage_grid_full_v3",
+    "nominal_profile": true,
+    "protocol": "full",
+    "render_cell_plots": false,
+    "robot": "go2",
+    "runtime_overrides": [],
+    "schema_version": 1,
+    "settle_s": 5.0,
+    "settle_steps": 250,
+    "source_provenance": {
+      "files": {
+        "scripts/reinforcement_learning/rsl_rl/play_rsl_rl.py": "c7eb8d44c29d69cd49fdf8736325a4b30907999b0b4d2a52cc72d9419ab09a19",
+        "scripts/reinforcement_learning/rsl_rl/symm_rollout_plotter.py": "0e8cf32345fab93111f95352b484a0b07bf81fde6bca30b17cbe8d387457ed24",
+        "scripts/symm_locomotion/_leg_usage_metrics.py": "deca1f51b63eceed0b6c536abf0dd12a51673a8fd157b05424c5b4f4e01a083b",
+        "scripts/symm_locomotion/evaluation.py": "27262a94b37d30b7f65e15d8522374d2ef24e422ea051c305fea2dd18f98bbee",
+        "scripts/symm_locomotion/symm_cli.py": "ebf7c3d49ff65873b5e1948410bf7d40d4f16ecdf56372b05a1136d0e8f24edd",
+        "source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py": "ec12a3a094d9ecc018fbf13bb4d412ffb1288aa3a75b976f7661285f246a669b",
+        "source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py": "948ed731303ed3192720b93f4779ef9b1c676b3b5ad1da43274fffb3b6c92755"
+      },
+      "git_branch": "jding/gait-closure-v4-archive",
+      "git_commit": "da361752654938efeea526098f30a008dd7320b5",
+      "missing_files": [],
+      "sha256": "0e1957eb3e5b8118b167ecb4c2926b01333ffead15cbdab2cb9232150c2d8b72"
+    },
+    "step_dt": 0.02,
+    "task": "Isaac-Velocity-Flat-Unitree-Go2-Symm-Play-v0",
+    "total_steps": 750,
+    "velocities_mps": [
+      -1.5,
+      -1.0,
+      -0.5,
+      0.5,
+      1.0,
+      1.5
+    ]
+  },
+  "evaluation_protocol_sha256": "67df09fa1a6a92f68c439aeaa67bf65beec30a75f8d16c75a589e3e6ff6d1385",
+  "evaluation_subdir": "evaluations/leg_usage_grid_full_v3",
+  "families": [
+    "trot",
+    "bound",
+    "half_bound",
+    "gallop"
+  ],
+  "method_version": "gait_closure_comparison_v1",
+  "reward_target": 35.0,
+  "robot": "go2",
+  "run_roots": [
+    "logs/rsl_rl/good_runs/unitree_go2_symm_flat"
+  ],
+  "runs": [
+    {
+      "abbreviation": "NoTRS",
+      "color": "#202124",
+      "folder": "2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "is_baseline": true,
+      "label": "NoTRS",
+      "mirror_coeff": 0.0,
+      "ramp_shape": "linear",
+      "rampup_iterations": 1000,
+      "run_id": "run_00",
+      "run_name": "2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata_source": "pre_first_rollout_initialization",
+      "treatment": {
+        "augmentation": {
+          "configuration": {
+            "action_abs_limit": 10.0,
+            "action_source": "analytic",
+            "dynamics_hidden_dims": [
+              256,
+              256
+            ],
+            "ema_decay": 0.995,
+            "filter_enabled": true,
+            "gradient_diagnostics_epsilon": 1e-12,
+            "gradient_diagnostics_interval": 100,
+            "inverse_hidden_dims": [
+              256,
+              256
+            ],
+            "learning_rate": 0.001,
+            "max_augmented_to_original_ratio": 0.25,
+            "maximum_contact_impulse": 20.0,
+            "maximum_validation_loss": 1.0,
+            "minimum_validation_samples": 128,
+            "mode": "dynamics_filtered_reverse_action_supervision",
+            "model_batch_size": 4096,
+            "model_updates_per_rollout": 1,
+            "phase_boundary_margin": 0.03,
+            "rng_seed": 0,
+            "threshold_multiplier": 2.0,
+            "use_confidence_weights": true,
+            "validation_fraction": 0.2,
+            "validation_quantile": 0.95
+          },
+          "enabled": false,
+          "mechanism": "dynamics_filtered_reverse_action_supervision",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 1000,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "policy": {
+          "configuration": {
+            "actor_mean_bound_mode": "per_joint_feasible",
+            "actor_mean_feasible_margin_fraction": 0.0,
+            "output_space": "normalized_requested_joint_target"
+          },
+          "enabled": false,
+          "mechanism": "normalized_requested_joint_target",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 1000,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "validity": {
+          "command_speed_bin_edges": [
+            0.5,
+            1.0,
+            1.5
+          ],
+          "min_abs_command_velocity": null,
+          "mode": "command",
+          "phase_boundary_margin": 0.03,
+          "projected_gravity_tolerance": 0.35,
+          "tracking_abs_tolerance": 0.25,
+          "tracking_rel_tolerance": 0.25
+        },
+        "validity_mode": "command",
+        "value": {
+          "configuration": {},
+          "enabled": false,
+          "mechanism": "value_consistency",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 1000,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        }
+      },
+      "trs_enabled": false,
+      "validity_mode": "command",
+      "value_coeff": 0.0,
+      "warmup_iterations": 500
+    },
+    {
+      "abbreviation": "Actor-m0.1",
+      "color": "#0072B2",
+      "folder": "2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "is_baseline": false,
+      "label": "Actor-m0.1",
+      "mirror_coeff": 0.1,
+      "ramp_shape": "linear",
+      "rampup_iterations": 0,
+      "run_id": "run_01",
+      "run_name": "2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata_source": "pre_first_rollout_initialization",
+      "treatment": {
+        "augmentation": {
+          "configuration": {
+            "action_abs_limit": 10.0,
+            "action_source": "analytic",
+            "dynamics_hidden_dims": [
+              256,
+              256
+            ],
+            "ema_decay": 0.995,
+            "filter_enabled": true,
+            "gradient_diagnostics_epsilon": 1e-12,
+            "gradient_diagnostics_interval": 100,
+            "inverse_hidden_dims": [
+              256,
+              256
+            ],
+            "learning_rate": 0.001,
+            "max_augmented_to_original_ratio": 0.25,
+            "maximum_contact_impulse": 20.0,
+            "maximum_validation_loss": 1.0,
+            "minimum_validation_samples": 128,
+            "mode": "dynamics_filtered_reverse_action_supervision",
+            "model_batch_size": 4096,
+            "model_updates_per_rollout": 1,
+            "phase_boundary_margin": 0.03,
+            "rng_seed": 0,
+            "threshold_multiplier": 2.0,
+            "use_confidence_weights": true,
+            "validation_fraction": 0.2,
+            "validation_quantile": 0.95
+          },
+          "enabled": false,
+          "mechanism": "dynamics_filtered_reverse_action_supervision",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "policy": {
+          "configuration": {
+            "actor_mean_bound_mode": "per_joint_feasible",
+            "actor_mean_feasible_margin_fraction": 0.0,
+            "output_space": "normalized_requested_joint_target"
+          },
+          "enabled": true,
+          "mechanism": "normalized_requested_joint_target",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.1
+        },
+        "validity": {
+          "command_speed_bin_edges": [
+            0.5,
+            1.0,
+            1.5
+          ],
+          "min_abs_command_velocity": null,
+          "mode": "command",
+          "phase_boundary_margin": 0.03,
+          "projected_gravity_tolerance": 0.35,
+          "tracking_abs_tolerance": 0.25,
+          "tracking_rel_tolerance": 0.25
+        },
+        "validity_mode": "command",
+        "value": {
+          "configuration": {},
+          "enabled": false,
+          "mechanism": "value_consistency",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        }
+      },
+      "trs_enabled": true,
+      "validity_mode": "command",
+      "value_coeff": 0.0,
+      "warmup_iterations": 500
+    },
+    {
+      "abbreviation": "Actor-m0.2",
+      "color": "#56B4E9",
+      "folder": "2026-09-03_12-49-47_m5_go2_actor_only_trs_m0p2_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "is_baseline": false,
+      "label": "Actor-m0.2",
+      "mirror_coeff": 0.2,
+      "ramp_shape": "linear",
+      "rampup_iterations": 0,
+      "run_id": "run_02",
+      "run_name": "2026-09-03_12-49-47_m5_go2_actor_only_trs_m0p2_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-09-03_12-49-47_m5_go2_actor_only_trs_m0p2_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata_source": "pre_first_rollout_initialization",
+      "treatment": {
+        "augmentation": {
+          "configuration": {
+            "action_abs_limit": 10.0,
+            "action_source": "analytic",
+            "dynamics_hidden_dims": [
+              256,
+              256
+            ],
+            "ema_decay": 0.995,
+            "filter_enabled": true,
+            "gradient_diagnostics_epsilon": 1e-12,
+            "gradient_diagnostics_interval": 100,
+            "inverse_hidden_dims": [
+              256,
+              256
+            ],
+            "learning_rate": 0.001,
+            "max_augmented_to_original_ratio": 0.25,
+            "maximum_contact_impulse": 20.0,
+            "maximum_validation_loss": 1.0,
+            "minimum_validation_samples": 128,
+            "mode": "dynamics_filtered_reverse_action_supervision",
+            "model_batch_size": 4096,
+            "model_updates_per_rollout": 1,
+            "phase_boundary_margin": 0.03,
+            "rng_seed": 0,
+            "threshold_multiplier": 2.0,
+            "use_confidence_weights": true,
+            "validation_fraction": 0.2,
+            "validation_quantile": 0.95
+          },
+          "enabled": false,
+          "mechanism": "dynamics_filtered_reverse_action_supervision",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "policy": {
+          "configuration": {
+            "actor_mean_bound_mode": "per_joint_feasible",
+            "actor_mean_feasible_margin_fraction": 0.0,
+            "output_space": "normalized_requested_joint_target"
+          },
+          "enabled": true,
+          "mechanism": "normalized_requested_joint_target",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.2
+        },
+        "validity": {
+          "command_speed_bin_edges": [
+            0.5,
+            1.0,
+            1.5
+          ],
+          "min_abs_command_velocity": null,
+          "mode": "command",
+          "phase_boundary_margin": 0.03,
+          "projected_gravity_tolerance": 0.35,
+          "tracking_abs_tolerance": 0.25,
+          "tracking_rel_tolerance": 0.25
+        },
+        "validity_mode": "command",
+        "value": {
+          "configuration": {},
+          "enabled": false,
+          "mechanism": "value_consistency",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        }
+      },
+      "trs_enabled": true,
+      "validity_mode": "command",
+      "value_coeff": 0.0,
+      "warmup_iterations": 500
+    },
+    {
+      "abbreviation": "Actor-m0.3",
+      "color": "#D97706",
+      "folder": "2026-09-04_00-27-07_m5_go2_actor_only_trs_m0p3_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "is_baseline": false,
+      "label": "Actor-m0.3",
+      "mirror_coeff": 0.3,
+      "ramp_shape": "linear",
+      "rampup_iterations": 0,
+      "run_id": "run_03",
+      "run_name": "2026-09-04_00-27-07_m5_go2_actor_only_trs_m0p3_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-09-04_00-27-07_m5_go2_actor_only_trs_m0p3_v0_w500_r0_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata_source": "pre_first_rollout_initialization",
+      "treatment": {
+        "augmentation": {
+          "configuration": {
+            "action_abs_limit": 10.0,
+            "action_source": "analytic",
+            "dynamics_hidden_dims": [
+              256,
+              256
+            ],
+            "ema_decay": 0.995,
+            "filter_enabled": true,
+            "gradient_diagnostics_epsilon": 1e-12,
+            "gradient_diagnostics_interval": 100,
+            "inverse_hidden_dims": [
+              256,
+              256
+            ],
+            "learning_rate": 0.001,
+            "max_augmented_to_original_ratio": 0.25,
+            "maximum_contact_impulse": 20.0,
+            "maximum_validation_loss": 1.0,
+            "minimum_validation_samples": 128,
+            "mode": "dynamics_filtered_reverse_action_supervision",
+            "model_batch_size": 4096,
+            "model_updates_per_rollout": 1,
+            "phase_boundary_margin": 0.03,
+            "rng_seed": 0,
+            "threshold_multiplier": 2.0,
+            "use_confidence_weights": true,
+            "validation_fraction": 0.2,
+            "validation_quantile": 0.95
+          },
+          "enabled": false,
+          "mechanism": "dynamics_filtered_reverse_action_supervision",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "policy": {
+          "configuration": {
+            "actor_mean_bound_mode": "per_joint_feasible",
+            "actor_mean_feasible_margin_fraction": 0.0,
+            "output_space": "normalized_requested_joint_target"
+          },
+          "enabled": true,
+          "mechanism": "normalized_requested_joint_target",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.3
+        },
+        "validity": {
+          "command_speed_bin_edges": [
+            0.5,
+            1.0,
+            1.5
+          ],
+          "min_abs_command_velocity": null,
+          "mode": "command",
+          "phase_boundary_margin": 0.03,
+          "projected_gravity_tolerance": 0.35,
+          "tracking_abs_tolerance": 0.25,
+          "tracking_rel_tolerance": 0.25
+        },
+        "validity_mode": "command",
+        "value": {
+          "configuration": {},
+          "enabled": false,
+          "mechanism": "value_consistency",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 0,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        }
+      },
+      "trs_enabled": true,
+      "validity_mode": "command",
+      "value_coeff": 0.0,
+      "warmup_iterations": 500
+    },
+    {
+      "abbreviation": "Actor-m0.1-r500",
+      "color": "#00875A",
+      "folder": "2026-09-04_23-04-00_m5_go2_actor_only_trs_m0p1_v0_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "is_baseline": false,
+      "label": "Actor-m0.1-r500",
+      "mirror_coeff": 0.1,
+      "ramp_shape": "linear",
+      "rampup_iterations": 500,
+      "run_id": "run_04",
+      "run_name": "2026-09-04_23-04-00_m5_go2_actor_only_trs_m0p1_v0_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-09-04_23-04-00_m5_go2_actor_only_trs_m0p1_v0_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata_source": "pre_first_rollout_initialization",
+      "treatment": {
+        "augmentation": {
+          "configuration": {
+            "action_abs_limit": 10.0,
+            "action_source": "analytic",
+            "dynamics_hidden_dims": [
+              256,
+              256
+            ],
+            "ema_decay": 0.995,
+            "filter_enabled": true,
+            "gradient_diagnostics_epsilon": 1e-12,
+            "gradient_diagnostics_interval": 100,
+            "inverse_hidden_dims": [
+              256,
+              256
+            ],
+            "learning_rate": 0.001,
+            "max_augmented_to_original_ratio": 0.25,
+            "maximum_contact_impulse": 20.0,
+            "maximum_validation_loss": 1.0,
+            "minimum_validation_samples": 128,
+            "mode": "dynamics_filtered_reverse_action_supervision",
+            "model_batch_size": 4096,
+            "model_updates_per_rollout": 1,
+            "phase_boundary_margin": 0.03,
+            "rng_seed": 0,
+            "threshold_multiplier": 2.0,
+            "use_confidence_weights": true,
+            "validation_fraction": 0.2,
+            "validation_quantile": 0.95
+          },
+          "enabled": false,
+          "mechanism": "dynamics_filtered_reverse_action_supervision",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 500,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "policy": {
+          "configuration": {
+            "actor_mean_bound_mode": "per_joint_feasible",
+            "actor_mean_feasible_margin_fraction": 0.0,
+            "output_space": "normalized_requested_joint_target"
+          },
+          "enabled": true,
+          "mechanism": "normalized_requested_joint_target",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 500,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.1
+        },
+        "validity": {
+          "command_speed_bin_edges": [
+            0.5,
+            1.0,
+            1.5
+          ],
+          "min_abs_command_velocity": null,
+          "mode": "command",
+          "phase_boundary_margin": 0.03,
+          "projected_gravity_tolerance": 0.35,
+          "tracking_abs_tolerance": 0.25,
+          "tracking_rel_tolerance": 0.25
+        },
+        "validity_mode": "command",
+        "value": {
+          "configuration": {},
+          "enabled": false,
+          "mechanism": "value_consistency",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 500,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        }
+      },
+      "trs_enabled": true,
+      "validity_mode": "command",
+      "value_coeff": 0.0,
+      "warmup_iterations": 500
+    },
+    {
+      "abbreviation": "Actor-m0.2-r500",
+      "color": "#CC79A7",
+      "folder": "2026-09-04_23-04-13_m5_go2_actor_only_trs_m0p2_v0_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "is_baseline": false,
+      "label": "Actor-m0.2-r500",
+      "mirror_coeff": 0.2,
+      "ramp_shape": "linear",
+      "rampup_iterations": 500,
+      "run_id": "run_05",
+      "run_name": "2026-09-04_23-04-13_m5_go2_actor_only_trs_m0p2_v0_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "run_path": "logs/rsl_rl/good_runs/unitree_go2_symm_flat/2026-09-04_23-04-13_m5_go2_actor_only_trs_m0p2_v0_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43",
+      "training_metadata_source": "pre_first_rollout_initialization",
+      "treatment": {
+        "augmentation": {
+          "configuration": {
+            "action_abs_limit": 10.0,
+            "action_source": "analytic",
+            "dynamics_hidden_dims": [
+              256,
+              256
+            ],
+            "ema_decay": 0.995,
+            "filter_enabled": true,
+            "gradient_diagnostics_epsilon": 1e-12,
+            "gradient_diagnostics_interval": 100,
+            "inverse_hidden_dims": [
+              256,
+              256
+            ],
+            "learning_rate": 0.001,
+            "max_augmented_to_original_ratio": 0.25,
+            "maximum_contact_impulse": 20.0,
+            "maximum_validation_loss": 1.0,
+            "minimum_validation_samples": 128,
+            "mode": "dynamics_filtered_reverse_action_supervision",
+            "model_batch_size": 4096,
+            "model_updates_per_rollout": 1,
+            "phase_boundary_margin": 0.03,
+            "rng_seed": 0,
+            "threshold_multiplier": 2.0,
+            "use_confidence_weights": true,
+            "validation_fraction": 0.2,
+            "validation_quantile": 0.95
+          },
+          "enabled": false,
+          "mechanism": "dynamics_filtered_reverse_action_supervision",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 500,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        },
+        "policy": {
+          "configuration": {
+            "actor_mean_bound_mode": "per_joint_feasible",
+            "actor_mean_feasible_margin_fraction": 0.0,
+            "output_space": "normalized_requested_joint_target"
+          },
+          "enabled": true,
+          "mechanism": "normalized_requested_joint_target",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 500,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.2
+        },
+        "validity": {
+          "command_speed_bin_edges": [
+            0.5,
+            1.0,
+            1.5
+          ],
+          "min_abs_command_velocity": null,
+          "mode": "command",
+          "phase_boundary_margin": 0.03,
+          "projected_gravity_tolerance": 0.35,
+          "tracking_abs_tolerance": 0.25,
+          "tracking_rel_tolerance": 0.25
+        },
+        "validity_mode": "command",
+        "value": {
+          "configuration": {},
+          "enabled": false,
+          "mechanism": "value_consistency",
+          "schedule": {
+            "decay_iterations": 0,
+            "final_scale": 1.0,
+            "hold_iterations": 0,
+            "ramp_shape": "linear",
+            "rampup_iterations": 500,
+            "warmup_iterations": 500
+          },
+          "target_coeff": 0.0
+        }
+      },
+      "trs_enabled": true,
+      "validity_mode": "command",
+      "value_coeff": 0.0,
+      "warmup_iterations": 500
+    }
+  ],
+  "schema_version": 1,
+  "training": {
+    "max_iterations": 20000,
+    "num_envs": 512,
+    "num_steps_per_env": 24,
+    "sample_stride_iterations": 20,
+    "seed": 43,
+    "smoothing_window_iterations": 200,
+    "threshold_reward": 35.0
+  }
+}

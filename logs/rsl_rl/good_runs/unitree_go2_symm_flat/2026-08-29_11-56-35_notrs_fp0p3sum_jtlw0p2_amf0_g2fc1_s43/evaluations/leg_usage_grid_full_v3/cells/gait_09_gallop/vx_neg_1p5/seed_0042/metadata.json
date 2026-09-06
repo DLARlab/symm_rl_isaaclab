@@ -1,0 +1,42 @@
+{
+  "cell_id": "gait_09_gallop__vx_neg_1p5__seed_0042",
+  "cell_index": 54,
+  "checkpoint": {
+    "iteration": 19999,
+    "path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\\model_19999.pt",
+    "sha256": "eb1070b5f85b03a1233fa0308b04650cc3ac1dc39548b903dc6201cda54ed2b8"
+  },
+  "configured_gait_index": 9,
+  "ended_at": "2026-09-04T14:09:10.477948+00:00",
+  "evaluation_seed": 42,
+  "expected_steps": 750,
+  "gait_family": "gallop",
+  "gait_index": 9,
+  "gait_name": "gallop_d",
+  "gait_phases": [
+    -0.13,
+    0.13,
+    0.37,
+    0.63
+  ],
+  "gait_weight": 1.0,
+  "measure_s": 10.0,
+  "measure_steps": 500,
+  "measurement_start_step": 250,
+  "measurement_stop_step": 750,
+  "nominal_profile": true,
+  "outcome": "completed",
+  "plan_path": "D:\\symm_rl_isaaclab\\logs\\rsl_rl\\unitree_go2_symm_flat\\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\\evaluations\\leg_usage_grid_full_v3\\study.json",
+  "plan_sha256": "76237ffafcfcf2ddb344eb32834690057f1f0785cd01489332dd23891ff74943",
+  "protocol_version": "leg_usage_grid_full_v3",
+  "recorded_steps": 750,
+  "schema_version": 1,
+  "settle_s": 5.0,
+  "settle_steps": 250,
+  "started_at": "2026-09-04T14:08:42.395035+00:00",
+  "step_dt": 0.02,
+  "termination_terms": [],
+  "termination_time_s": null,
+  "velocity_mps": -1.5,
+  "wall_duration_s": 28.082634799997322
+}

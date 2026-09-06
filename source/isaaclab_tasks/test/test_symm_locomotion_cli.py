@@ -257,6 +257,8 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
 
     assert args.num_envs == 512
     assert args.iterations == 20000
+    assert args.mirror_loss_coeff == pytest.approx(0.1)
+    assert args.tr_value_coeff == 0.0
     assert args.tr_rampup_iterations == 0
     assert args.tr_ramp_shape == "linear"
     assert command[command.index("--num_envs") + 1] == "512"
@@ -264,9 +266,36 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
     assert args.tr_min_abs_cmd_vel == 0.0
     assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
     assert "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false" in command
+    assert "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.1" in command
+    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0" in command
     assert "agent.algorithm.symmetry_cfg.rampup_iterations=0" in command
     assert "agent.algorithm.symmetry_cfg.ramp_shape=linear" in command
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+
+
+@pytest.mark.parametrize("robot", ["go2", "x1"])
+def test_train_explicit_positive_tr_value_coefficient_is_forwarded(robot):
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", robot, "--tr-value-coef", "0.05", "--no-conda-run"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert args.tr_value_coeff == pytest.approx(0.05)
+    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.05" in command
+
+
+def test_train_tr_value_help_distinguishes_optional_ablation_from_ppo_critic():
+    symm_cli = _load_symm_cli()
+    parser = symm_cli.build_parser()
+    subcommands = next(action for action in parser._actions if action.dest == "command")
+    train_parser = subcommands.choices["train"]
+    help_text = next(action.help for action in train_parser._actions if action.dest == "tr_value_coeff")
+
+    assert "Optional coefficient for the time-reversal critic-consistency ablation" in help_text
+    assert "Default: 0.0" in help_text
+    assert "not the standard PPO value-loss coefficient" in help_text
+    assert "positive value explicitly enables" in help_text
 
 
 def test_ramped_train_run_name_records_complete_schedule():

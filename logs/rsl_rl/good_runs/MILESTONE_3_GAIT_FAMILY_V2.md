@@ -149,38 +149,21 @@ making a method-level claim.
 
 ## Archived evidence
 
-- [X1 report](dobot_x1_symm_flat/legacy/gait_family_v2_analysis/REPORT.md)
-- [Go2 report](unitree_go2_symm_flat/legacy/gait_family_v2_analysis/REPORT.md)
 - [X1 curated-run index](dobot_x1_symm_flat/README.md)
 - [Go2 curated-run index](unitree_go2_symm_flat/README.md)
 
-Every retained run includes its TensorBoard event, resolved parameters,
-training-time Git provenance, terminal checkpoint, exports, playback artifacts,
-and raw fixed-grid evaluation data. The analysis folders contain frozen study
-manifests, reproducible scripts, CSV/JSON summaries, and SVG/PNG figures.
-
-The per-run TensorBoard event is the authoritative training log. The resolved
-environment and agent snapshots, training-source provenance, deployment
-exports, and raw evaluation cells retain the inputs needed to audit the report.
+The tables in this file are the canonical published summaries of the historical
+Go2 and X1 Gait Family V2 studies. Their raw reports, training runs, and
+reproduction folders were retired from the published `good_runs` tree in
+Milestone 5 and remain only in the historical revision described below.
 
 ## Reproduction
 
-From the repository root, regenerate the archived comparison products with:
-
-```powershell
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\legacy\gait_family_v2_analysis\reproduce.py
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\legacy\gait_family_v2_analysis\reproduce.py
-```
-
-The Go2 folder vendors the pinned historical V1 analysis engine and its two
-helper modules so the original four-run report remains self-contained. The X1
-folder regenerates the later full-V3 re-evaluation from the nested curated
-runs. Its three `model_0.pt` files are intentionally omitted by the
-terminal-checkpoint-only publication policy. Each run instead carries a
-`provenance/legacy_initialization.json` record containing the SHA-256 observed
-before archival. The comparison engine accepts that record only after the run
-registry and resolved configuration match, labels the source as
-checksum-only, and does not claim that the omitted bytes were reverified.
+The retired report and reproduction assets can be recovered from the repository
+history at the Milestone 4 base commit recorded in
+[Milestone 5](MILESTONE_5_ACTOR_TRS_V5.md). They are deliberately absent from
+the Actor TRS V5 branch, so the old in-tree reproduction commands no longer
+apply to a clean checkout.
 
 The archived studies and their fixed-grid inputs remain historical evidence;
 the current parameter screen continues in

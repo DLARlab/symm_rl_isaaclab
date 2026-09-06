@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+from rsl_rl.models import MLPModel
 from tensordict import TensorDict
+
+from isaaclab.utils.io import load_yaml
 
 from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.agents.rsl_rl_ppo_cfg import (
     DobotX1SymmFlatPPORunnerCfg,
@@ -244,6 +248,9 @@ def test_default_agent_legacy_projection_hash_is_unchanged(config_type, expected
     symmetry = resolved["algorithm"]["symmetry_cfg"]
     for field in (*_PUBLICATION_SYMMETRY_FIELDS, *_SATURATION_SYMMETRY_FIELDS):
         symmetry.pop(field)
+    # Normalize the one deliberately changed field so the frozen projection
+    # continues to guard every other historical runner default.
+    symmetry["value_loss_coeff"] = 0.05
     assert sha256_value(resolved) == expected_sha256
 
 
@@ -347,6 +354,165 @@ def test_canonical_policy_and_value_switches_are_independent(policy_enabled, val
     _, policy_coefficient, value_coefficient = algorithm._effective_time_reversal_coefficients()
 
     assert (policy_coefficient, value_coefficient) == expected
+
+
+@pytest.mark.parametrize(
+    "runner_cfg_type",
+    [UnitreeGo2SymmFlatPPORunnerCfg, DobotX1SymmFlatPPORunnerCfg],
+    ids=("go2", "x1"),
+)
+def test_robot_defaults_resolve_actor_only_trs_schedule(runner_cfg_type):
+    runner_cfg = runner_cfg_type()
+    symmetry = runner_cfg.algorithm.symmetry_cfg.to_dict()
+    policy_schedule = resolve_time_reversal_schedule(symmetry, "policy")
+    value_schedule = resolve_time_reversal_schedule(symmetry, "value")
+
+    assert symmetry["mirror_loss_coeff"] == pytest.approx(0.1)
+    assert symmetry["value_loss_coeff"] == 0.0
+    assert policy_schedule.enabled is True
+    assert policy_schedule.coefficient(499) == 0.0
+    assert policy_schedule.coefficient(500) == pytest.approx(0.1)
+    assert value_schedule.enabled is False
+    assert all(value_schedule.coefficient(iteration) == 0.0 for iteration in (0, 499, 500, 20_000))
+    assert symmetry["tr_augmentation"]["enabled"] is False
+
+
+@pytest.mark.parametrize(
+    ("canonical_flag", "coefficient", "expected_enabled"),
+    [
+        (None, 0.0, False),
+        (None, 0.05, True),
+        (False, 0.05, False),
+        (True, 0.0, True),
+        (True, 0.05, True),
+    ],
+)
+def test_value_consistency_enablement_preserves_legacy_inference(canonical_flag, coefficient, expected_enabled):
+    symmetry = TimeReversalSymmetryCfg(
+        use_data_augmentation=False,
+        use_mirror_loss=True,
+        data_augmentation_func=lambda **_kwargs: (None, None),
+        use_time_reversal_regularization=True,
+        mirror_loss_coeff=0.1,
+        value_loss_coeff=coefficient,
+        use_tr_value_consistency=canonical_flag,
+        warmup_iterations=0,
+        rampup_iterations=0,
+    ).to_dict()
+
+    schedule = resolve_time_reversal_schedule(symmetry, "value")
+
+    assert schedule.enabled is expected_enabled
+    assert schedule.target_coeff == pytest.approx(coefficient)
+    expected_coefficient = coefficient if expected_enabled else 0.0
+    assert schedule.coefficient(0) == pytest.approx(expected_coefficient)
+
+
+def test_explicitly_enabled_zero_value_ablation_warns_clearly():
+    algorithm = TimeReversalPPO.__new__(TimeReversalPPO)
+    algorithm.symmetry = UnitreeGo2SymmFlatPPORunnerCfg().algorithm.symmetry_cfg.to_dict()
+    algorithm.symmetry["use_tr_value_consistency"] = True
+
+    with pytest.warns(UserWarning, match="critic-consistency ablation.*coefficient is zero"):
+        algorithm._validate_time_reversal_configuration()
+
+
+@pytest.mark.parametrize(
+    ("runner_cfg_type", "relative_agent_path"),
+    [
+        (
+            UnitreeGo2SymmFlatPPORunnerCfg,
+            "logs/rsl_rl/good_runs/unitree_go2_symm_flat/"
+            "2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_"
+            "fp0p3sum_jtlw0p2_amf0_g2fc1_s43/params/agent.yaml",
+        ),
+        (
+            DobotX1SymmFlatPPORunnerCfg,
+            "logs/rsl_rl/good_runs/dobot_x1_symm_flat/"
+            "2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/params/agent.yaml",
+        ),
+    ],
+    ids=("go2", "x1"),
+)
+def test_actor_only_v5_agent_yaml_remains_loadable(runner_cfg_type, relative_agent_path):
+    agent_path = Path(__file__).resolve().parents[3] / relative_agent_path
+    archived_bytes = agent_path.read_bytes()
+
+    archived = load_yaml(str(agent_path))
+    runner_cfg = runner_cfg_type()
+    runner_cfg.from_dict(archived)
+
+    symmetry = runner_cfg.algorithm.symmetry_cfg
+    policy_schedule = resolve_time_reversal_schedule(symmetry.to_dict(), "policy")
+    value_schedule = resolve_time_reversal_schedule(symmetry.to_dict(), "value")
+    assert symmetry.value_loss_coeff == pytest.approx(0.0)
+    assert symmetry.use_tr_policy_consistency is True
+    assert symmetry.use_tr_value_consistency is False
+    assert policy_schedule.enabled is True
+    assert policy_schedule.coefficient(500) == pytest.approx(0.1)
+    assert value_schedule.enabled is False
+    assert value_schedule.coefficient(500) == pytest.approx(0.0)
+    assert symmetry.tr_augmentation.enabled is False
+    assert agent_path.read_bytes() == archived_bytes
+
+
+@pytest.mark.parametrize(
+    ("runner_cfg_type", "relative_checkpoint_path"),
+    [
+        (
+            UnitreeGo2SymmFlatPPORunnerCfg,
+            "logs/rsl_rl/good_runs/unitree_go2_symm_flat/"
+            "2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_"
+            "fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
+        ),
+        (
+            DobotX1SymmFlatPPORunnerCfg,
+            "logs/rsl_rl/good_runs/dobot_x1_symm_flat/"
+            "2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/model_19999.pt",
+        ),
+    ],
+    ids=("go2", "x1"),
+)
+def test_actor_only_v5_checkpoint_remains_loadable(runner_cfg_type, relative_checkpoint_path):
+    checkpoint_path = Path(__file__).resolve().parents[3] / relative_checkpoint_path
+    archived_bytes = checkpoint_path.read_bytes()
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    runner_cfg = runner_cfg_type()
+    observations = TensorDict({"policy": torch.zeros(1, 72)}, batch_size=[1])
+    actor = MLPModel(
+        observations,
+        runner_cfg.obs_groups,
+        "actor",
+        12,
+        hidden_dims=runner_cfg.actor.hidden_dims,
+        activation=runner_cfg.actor.activation,
+        obs_normalization=runner_cfg.actor.obs_normalization,
+        distribution_cfg=runner_cfg.actor.distribution_cfg.to_dict(),
+    )
+    critic = MLPModel(
+        observations,
+        runner_cfg.obs_groups,
+        "critic",
+        1,
+        hidden_dims=runner_cfg.critic.hidden_dims,
+        activation=runner_cfg.critic.activation,
+        obs_normalization=runner_cfg.critic.obs_normalization,
+    )
+    actor.load_state_dict(checkpoint["actor_state_dict"])
+    critic.load_state_dict(checkpoint["critic_state_dict"])
+    optimizer = torch.optim.Adam((*actor.parameters(), *critic.parameters()))
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    assert checkpoint["iter"] == 19999
+    assert torch.all(torch.isfinite(actor(observations)))
+    assert torch.all(torch.isfinite(critic(observations)))
+    assert len(optimizer.state) == len(checkpoint["optimizer_state_dict"]["state"])
+    assert checkpoint["time_reversal_state"]["policy_schedule"]["enabled"] is True
+    assert checkpoint["time_reversal_state"]["policy_schedule"]["target_coeff"] == pytest.approx(0.1)
+    assert checkpoint["time_reversal_state"]["value_schedule"]["enabled"] is False
+    assert checkpoint["time_reversal_state"]["value_schedule"]["target_coeff"] == pytest.approx(0.0)
+    assert checkpoint_path.read_bytes() == archived_bytes
 
 
 def test_shared_agent_config_emits_project_local_symmetry_schema():

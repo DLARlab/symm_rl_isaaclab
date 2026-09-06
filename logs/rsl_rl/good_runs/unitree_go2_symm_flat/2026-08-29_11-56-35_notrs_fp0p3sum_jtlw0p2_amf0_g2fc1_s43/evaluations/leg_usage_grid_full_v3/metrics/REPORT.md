@@ -2,13 +2,13 @@
 
 - Robot: `go2`
 - Protocol: `full` (`leg_usage_grid_full_v3`)
-- Checkpoint: `D:\symm_rl_isaaclab\logs\rsl_rl\unitree_go2_symm_flat\2026-08-29_11-56-35_d5_go2_recover_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt` (SHA-256 `eb1070b5f85b03a1233fa0308b04650cc3ac1dc39548b903dc6201cda54ed2b8`)
+- Checkpoint: `D:\symm_rl_isaaclab\logs\rsl_rl\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt` (SHA-256 `eb1070b5f85b03a1233fa0308b04650cc3ac1dc39548b903dc6201cda54ed2b8`)
 - Grid: 60 planned protocol cells (10 available gait rows, 6 available velocities)
 - Window: 5 s settling, then 10 s measurement
 - Coverage: 60/60 valid cells (100.0%)
 - Domain coverage: velocity 60/60, heading 60/60, gait 60/60, raw load 60/60, GRF load 60/60, normalized load 60/60
 - Tracking quality: 14/60 velocity-domain cells pass both `planar RMSE <= 0.05 + 0.25 * abs(vx)` [m/s] and `yaw RMSE <= 0.05` [rad/s]
-- Analysis provenance: `analysis_provenance.json` (record `de52b6fdb53f4c77b64eff8ca2f90e209d137b71a3dfb51ec621db4b35c0ae99`)
+- Analysis provenance: `analysis_provenance.json` (record `a860ac0d6ec5f7ae02b3dd5bd402e93b13fd36aad336c862921252ae30789555`)
 
 Primary balance is the mean of per-cell absolute front/hind imbalance. Signed imbalance is retained in `cell_metrics.csv` and `family_metrics.csv`, but opposite signs never cancel in the primary score. The overall score gives each of trot, bound, half-bound, and gallop equal weight.
 
