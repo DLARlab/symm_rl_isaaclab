@@ -9,7 +9,7 @@ SPDX-License-Identifier: BSD-3-Clause
 
 **Date:** 2026-09-06
 
-**Branch:** `jding/proprio-history-trs-v5`
+**Branch:** `64d_history_trs_v1`
 
 **Archive contract:** `good_runs_64d`
 

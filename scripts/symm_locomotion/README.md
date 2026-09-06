@@ -1013,7 +1013,7 @@ estimate fatigue life or failure probability.
 ```powershell
 .\scripts\symm_locomotion\evaluation.ps1 `
   --robot go2 --run 2026-08-21_example --model 19999 `
-  --expected_branch jding/proprio-history-trs-v5
+  --expected_branch 64d_history_trs_v1
 ```
 
 Use the exact light and full commands below for a resolved checkpoint:
@@ -1021,11 +1021,11 @@ Use the exact light and full commands below for a resolved checkpoint:
 ```powershell
 .\scripts\symm_locomotion\evaluation.ps1 `
   --robot go2 --checkpoint C:\path\to\model_19999.pt --protocol light `
-  --expected_branch jding/proprio-history-trs-v5
+  --expected_branch 64d_history_trs_v1
 
 .\scripts\symm_locomotion\evaluation.ps1 `
   --robot go2 --checkpoint C:\path\to\model_19999.pt --protocol full `
-  --expected_branch jding/proprio-history-trs-v5
+  --expected_branch 64d_history_trs_v1
 ```
 
 The utility resolves `--run`, `--model`, and `--checkpoint latest` in the same

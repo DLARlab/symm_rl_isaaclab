@@ -40,7 +40,7 @@ is zero. Policy, value, and augmentation schedules are independent.
 {
   "schema_version": 1,
   "study_name": "day1-go2-policy-value",
-  "expected_branch": "jding/proprio-history-trs-v5",
+  "expected_branch": "64d_history_trs_v1",
   "treatment_variables": [
     "tr_policy.enabled",
     "tr_value.enabled"

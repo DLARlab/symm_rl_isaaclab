@@ -9,7 +9,7 @@ SPDX-License-Identifier: BSD-3-Clause
 
 This directory is the publication archive for runs produced by the default
 proprioceptive-history policy contract on the
-`jding/proprio-history-trs-v5` branch. The archive name records the
+`64d_history_trs_v1` branch. The archive name records the
 instantaneous observation-frame width: one policy frame has 64 values. The
 default native history contains 30 frames, so its flattened MLP input still has
 `30 * 64 = 1920` values.
