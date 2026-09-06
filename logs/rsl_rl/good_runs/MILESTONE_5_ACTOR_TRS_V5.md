@@ -2,7 +2,7 @@
 
 - Evidence collected: 2026-09-02 through 2026-09-05
 - Documented: 2026-09-05
-- Publication branch: `jding/actor_trs_v5`
+- Publication branch: `jding/72d_actor_trs_v5`
 - Milestone-4 base: `da361752654938efeea526098f30a008dd7320b5`
 - Baseline: [Milestone 4: gait-closure parameter V4](MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md), documented
   2026-09-01
@@ -805,7 +805,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name go2_ppo_notrs_m0_v0_seed42 `
   --no-conda-run `
   --no-trs `
@@ -827,7 +827,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name go2_actor_only_trs_m0p1_v0_seed42 `
   --no-conda-run `
   agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true `
@@ -848,7 +848,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name go2_critic_only_trs_m0_v0p05_seed42 `
   --no-conda-run `
   agent.algorithm.symmetry_cfg.use_tr_policy_consistency=false `
@@ -869,7 +869,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name go2_actor_value_trs_m0p1_v0p05_seed42 `
   --no-conda-run `
   agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true `
@@ -890,7 +890,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name x1_ppo_notrs_m0_v0_seed42 `
   --no-conda-run `
   --no-trs `
@@ -912,7 +912,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name x1_actor_only_trs_m0p1_v0_seed42 `
   --no-conda-run `
   agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true `
@@ -933,7 +933,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name x1_critic_only_trs_m0_v0p05_seed42 `
   --no-conda-run `
   agent.algorithm.symmetry_cfg.use_tr_policy_consistency=false `
@@ -954,7 +954,7 @@ that schedule is inactive.
   --tr-warmup-iterations 500 `
   --tr-rampup-iterations 1000 `
   --tr-ramp-shape half_cosine `
-  --expected-branch jding/actor_trs_v5 `
+  --expected-branch jding/72d_actor_trs_v5 `
   --run-name x1_actor_value_trs_m0p1_v0p05_seed42 `
   --no-conda-run `
   agent.algorithm.symmetry_cfg.use_tr_policy_consistency=true `
