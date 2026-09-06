@@ -1,0 +1,12 @@
+# Publish every curated run directory and every non-checkpoint artifact.
+# The repository-level .gitignore explicitly exposes this 64D archive.
+!**/
+!**
+
+# Never publish interpreter or test caches copied with an analysis folder.
+**/__pycache__/
+**/*.py[cod]
+
+# Keep iteration checkpoints local by default. Add one exact negated path for
+# the numerically latest checkpoint whenever a completed run is curated.
+**/model_*.pt

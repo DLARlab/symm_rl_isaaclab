@@ -130,6 +130,94 @@ def _one(rows: Sequence[Mapping[str, Any]], **selectors: Any) -> Mapping[str, An
     return selected[0]
 
 
+def _complete_overall_metrics(expected_cells: int) -> dict[str, Any]:
+    """Build complete analyzer coverage for progress-validation tests."""
+    coverage_fields = (
+        "expected_cells",
+        "valid_cells",
+        "velocity_valid_cells",
+        "heading_valid_cells",
+        "gait_valid_cells",
+        "raw_load_valid_cells",
+        "grf_load_valid_cells",
+        "normalized_load_valid_cells",
+    )
+    return {
+        "coverage": {"complete": True, **{field: expected_cells for field in coverage_fields}},
+        "metrics": {
+            str(metadata["source_metric"]): {"complete": True, "valid_cells": expected_cells}
+            for metadata in comparison.LEG_METRICS.values()
+        },
+    }
+
+
+@pytest.mark.parametrize("skipped_cells", [0, 59])
+def test_evaluation_completeness_accepts_metric_complete_termination_and_resume(skipped_cells: int):
+    progress = {
+        "status": "complete",
+        "total_cells": 60,
+        "completed_cells": 60,
+        "successful_cells": 59,
+        "terminated_cells": 1,
+        "skipped_cells": skipped_cells,
+    }
+
+    comparison._validate_evaluation_completeness(progress, _complete_overall_metrics(60), 60, "History-m0.1")
+
+
+def test_evaluation_completeness_rejects_inconsistent_outcome_accounting():
+    progress = {
+        "status": "complete",
+        "total_cells": 60,
+        "completed_cells": 60,
+        "successful_cells": 58,
+        "terminated_cells": 1,
+        "skipped_cells": 0,
+    }
+
+    with pytest.raises(ValueError, match=r"successful_cells \+ terminated_cells"):
+        comparison._validate_evaluation_completeness(progress, _complete_overall_metrics(60), 60, "History-m0.1")
+
+
+def test_metric_complete_cell_outcome_accepts_termination_but_rejects_disagreement():
+    assert comparison._validated_cell_outcome_status({"status": "valid", "terminated": "False"}, "run/cell") == "valid"
+    assert (
+        comparison._validated_cell_outcome_status({"status": "terminated", "terminated": "True"}, "run/cell")
+        == "terminated"
+    )
+
+    with pytest.raises(ValueError, match="no metric-complete outcome"):
+        comparison._validated_cell_outcome_status({"status": "failed", "terminated": "False"}, "run/cell")
+    with pytest.raises(ValueError, match="outcome fields disagree"):
+        comparison._validated_cell_outcome_status({"status": "terminated", "terminated": "False"}, "run/cell")
+
+
+def test_evaluation_outcome_warning_names_retained_terminated_cell():
+    warnings = comparison._evaluation_outcome_warnings(
+        [
+            {
+                "run": {"abbreviation": "History-m0.1"},
+                "cells": [
+                    {"cell_id": "completed", "status": "valid"},
+                    {"cell_id": "gait_08_gallop__vx_neg_0p5__seed_0042", "status": "terminated"},
+                ],
+            }
+        ]
+    )
+
+    assert len(warnings) == 1
+    assert "History-m0.1" in warnings[0]
+    assert "gait_08_gallop__vx_neg_0p5__seed_0042" in warnings[0]
+    assert "outcome-free aggregation" in warnings[0]
+
+
+def test_default_run_roots_use_the_64d_history_archive(tmp_path: Path):
+    assert comparison.default_run_roots(tmp_path) == (
+        tmp_path / "logs/rsl_rl/unitree_go2_symm_flat",
+        tmp_path / "logs/rsl_rl/good_runs_64d/unitree_go2_symm_flat",
+    )
+
+
 def test_parse_run_spec_is_explicit_and_preserves_user_text():
     assert comparison.parse_run_spec("NoTRS=2026-08-29_run") == ("NoTRS", "2026-08-29_run")
     assert comparison.parse_run_spec("A=folder=with=equals") == ("A", "folder=with=equals")

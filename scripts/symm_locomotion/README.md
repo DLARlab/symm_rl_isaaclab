@@ -778,9 +778,10 @@ The main leg-usage arrays in `sim_data.npz` are:
   records the boundaries applied during smoothing.
 
 Relative `--run` values are resolved under the selected robot's routine log
-directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
-`logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
-`--checkpoint`.
+directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated history
+checkpoints under `logs/rsl_rl/good_runs_64d/`, pass the checkpoint path
+directly with `--checkpoint`. Historical 72D checkpoints remain under
+`logs/rsl_rl/good_runs/` and work the same way when passed explicitly.
 
 ## Policy evaluation
 
@@ -1161,10 +1162,9 @@ the legends. Run arguments retain their command-line order, except that the
 explicit `--baseline` is placed first in comparison tables and figures. The
 baseline is always black.
 
-The following command reproduces the five-run Go2 comparison. The resolver
-checks the normal experiment root first and then the curated `good_runs` root,
-so the command remains valid if a retained run is later moved into the curated
-archive.
+The following command reproduces the historical five-run Go2 comparison. It
+passes the 72D archive explicitly because this branch's default resolver checks
+the normal experiment root first and then the 64D-frame history archive.
 
 ```powershell
 .\isaaclab.bat -p .\scripts\symm_locomotion\comparison.py `
@@ -1203,10 +1203,12 @@ compatibility launchers complete their deprecation cycle.
 
 The example's treatment order deliberately preserves the v2 semantic colors:
 Low-r0 is blue, Low-r500 is light blue, High-r0 is orange, and High-r500 is
-green. `--run_root` is repeatable. When it is omitted, the two roots shown
-above are the defaults. Identical archived copies resolve to the first root;
-copies that differ in any comparison-consumed evaluation, checkpoint,
-training-metadata, or TensorBoard input are rejected as ambiguous.
+green. `--run_root` is repeatable. When it is omitted, the defaults are
+`logs/rsl_rl/unitree_go2_symm_flat/` followed by
+`logs/rsl_rl/good_runs_64d/unitree_go2_symm_flat/`. Identical archived
+copies resolve to the first root; copies that differ in any
+comparison-consumed evaluation, checkpoint, training-metadata, or TensorBoard
+input are rejected as ambiguous.
 Duplicate abbreviations, duplicate resolved paths, a missing baseline, and
 incompatible evaluation protocols are also errors. The v2 palette provides
 unique colors for up to eight runs, including the black baseline; larger
