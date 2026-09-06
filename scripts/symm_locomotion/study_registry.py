@@ -29,6 +29,8 @@ CLASSIFICATIONS = frozenset(
 )
 DESIGN_ROLES = frozenset({"main", "supplement", "historical_diagnostic"})
 ARTIFACT_AVAILABILITY = frozenset({"tracked", "local_only"})
+PRIMARY_TRACKED_ARCHIVE_DIRNAME = "good_runs_64d"
+TRACKED_ARCHIVE_DIRNAMES = (PRIMARY_TRACKED_ARCHIVE_DIRNAME, "good_runs")
 _HASH_PATTERN = re.compile(r"^[0-9a-f]+$")
 _MISSING = object()
 _PERFORMANCE_FACT_ROOTS = frozenset(
@@ -291,8 +293,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> list[str]:
             path_parts = Path(path).parts
             if Path(path).is_absolute() or ".." in path_parts:
                 errors.append(f"run {run_id}: path must be a repository-relative path without '..'")
-            elif availability == "tracked" and tuple(path_parts[:3]) != ("logs", "rsl_rl", "good_runs"):
-                errors.append(f"run {run_id}: tracked artifacts must live below logs/rsl_rl/good_runs")
+            elif availability == "tracked" and not (
+                tuple(path_parts[:2]) == ("logs", "rsl_rl")
+                and len(path_parts) >= 3
+                and path_parts[2] in TRACKED_ARCHIVE_DIRNAMES
+            ):
+                errors.append(
+                    f"run {run_id}: tracked artifacts must live below logs/rsl_rl/"
+                    f"{PRIMARY_TRACKED_ARCHIVE_DIRNAME} or a retained legacy archive"
+                )
         run_facts = run.get("facts", {})
         if not isinstance(run_facts, Mapping):
             errors.append(f"run {run_id}: facts must be a mapping")
@@ -317,7 +326,7 @@ def verify_manifest_artifacts(
     """Verify referenced folders and immutable artifact hashes without changing them."""
     errors: list[str] = []
     root = repo_root.resolve()
-    tracked_root = (root / "logs" / "rsl_rl" / "good_runs").resolve()
+    tracked_roots = tuple((root / "logs" / "rsl_rl" / dirname).resolve() for dirname in TRACKED_ARCHIVE_DIRNAMES)
     for run in manifest.get("runs", []):
         run_id = str(run.get("run_id"))
         run_path = Path(str(run.get("path", "")))
@@ -328,10 +337,9 @@ def verify_manifest_artifacts(
             errors.append(f"run {run_id}: referenced run folder escapes the repository: {run_path}")
             continue
         if run.get("artifact_availability", "tracked") == "tracked":
-            try:
-                run_path.relative_to(tracked_root)
-            except ValueError:
-                errors.append(f"run {run_id}: tracked run folder escapes {tracked_root}")
+            if not any(run_path.is_relative_to(tracked_root) for tracked_root in tracked_roots):
+                allowed = ", ".join(str(path) for path in tracked_roots)
+                errors.append(f"run {run_id}: tracked run folder escapes the allowed archive roots: {allowed}")
                 continue
         if not run_path.is_dir():
             if run.get("artifact_availability", "tracked") == "local_only":

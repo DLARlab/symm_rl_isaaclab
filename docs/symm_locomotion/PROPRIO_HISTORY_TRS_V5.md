@@ -279,7 +279,7 @@ migrate its inputs.
 Example Windows launches:
 
 ```powershell
-.\scripts\symm_locomotion\train.ps1 --robot go2 --history --history-length 30 --tr-consistency-mode transition_aligned_sequence --tr-policy-coef 0.1 --tr-value-coef 0.05
+.\scripts\symm_locomotion\train.ps1 --robot go2 --history --history-length 30 --tr-consistency-mode transition_aligned_sequence --tr-policy-coef 0.1 --tr-value-coef 0.0
 .\scripts\symm_locomotion\train.ps1 --robot x1 --history --tr-consistency-mode framewise_feature_approx
 .\scripts\symm_locomotion\train.ps1 --robot x1 --no-history --no-trs
 .\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint latest --history --history-length 30
@@ -293,8 +293,8 @@ or simulator physics. Motor damping, friction, inelastic impacts, actuation
 lag, controller saturation, observation delay, contact discontinuities,
 external pushes, and termination break physical reversibility. Validity gates
 and detached confidence weights reduce obvious violations but do not prove
-that a candidate is dynamically realizable. The value residual remains a
-task-conditioned inductive bias.
+that a candidate is dynamically realizable. When explicitly enabled, the
+value residual remains a task-conditioned inductive bias.
 
 Ordinary checkpoints do not snapshot the complete simulator physics state, so
 a resumed rollout is not claimed to be a bitwise continuation of contact

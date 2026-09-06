@@ -81,6 +81,7 @@ modules directly or extend historical study reproducers for new experiments.
 |---|---|---|
 | General launchers | `train.*`, `play.*`, `record.*`, `evaluation.*`, `comparison.*`, `tensorboard.*`, `ablation.*`, `symm_locomotion.{sh,ps1}`, `symm_cli.py` | Supported interfaces for routine training, playback, recording, evaluation, comparison, TensorBoard, and ablation workflows. Prefer the platform wrapper or the matching Python entry point. |
 | General study utilities | `launch_study.py`, `scheduler.*` | Supported advanced tools for manifest-defined studies and delayed sequential shell jobs. |
+| Offline numerical diagnostics | `analyze_tr_value_consistency.{py,ps1}` | Compares forward- and backward-oriented discounted returns only from explicitly complete, per-step reward cycles. |
 | Internal implementation | `_run.{sh,ps1}`, `_tensorboard_scalars.py`, `_leg_usage_metrics.py`, `training_provenance.py`, `study_registry.py`, `_mp4_to_gif.py` | Required implementation and validation modules. They are not additional launcher families; keep them beside the public entry points. |
 | Archival study reproduction | `analyze_matched_trs_study.py`, `analyze_trs_grid.py`, `plot_good_runs_tensorboard.py`, `plot_trs_tensorboard.py`, `update_gait_family_v3_analysis.py`, `paired_tr_consistency.py` | Retained so existing studies remain reproducible. Use `comparison.*` and `evaluation.*` for new work. |
 | Compatibility modules | `leg_usage_metrics.py`, `mp4_to_gif.py` | Stable historical import and script paths; current launchers use their underscored implementation modules. |
@@ -198,6 +199,10 @@ New launcher options use the hyphenated spellings shown above. Their
 snake_case forms remain accepted as compatibility aliases.
 
 Training and ablation runs default to 20,000 iterations across 512 environments.
+Routine training defaults to policy mirror consistency `0.1` and auxiliary
+critic consistency `0.0`. Pass a positive `--tr-value-coef` only for an
+explicit critic-consistency ablation; this option does not control standard
+PPO value regression.
 
 `--tr-warmup-iterations` sets the fully unregularized updates before TRS starts.
 `--tr-rampup-iterations 0` preserves the hard switch; positive values ramp both

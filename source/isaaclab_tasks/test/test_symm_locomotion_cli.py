@@ -258,6 +258,8 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
 
     assert args.num_envs == 512
     assert args.iterations == 20000
+    assert args.mirror_loss_coeff == pytest.approx(0.1)
+    assert args.tr_value_coeff == 0.0
     assert args.tr_rampup_iterations == 0
     assert args.tr_ramp_shape == "linear"
     assert command[command.index("--num_envs") + 1] == "512"
@@ -265,6 +267,8 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
     assert args.tr_min_abs_cmd_vel == 0.0
     assert "agent.algorithm.symmetry_cfg.use_data_augmentation=False" in command
     assert "agent.algorithm.symmetry_cfg.tr_augmentation.enabled=false" in command
+    assert "agent.algorithm.symmetry_cfg.mirror_loss_coeff=0.1" in command
+    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.0" in command
     assert "agent.algorithm.symmetry_cfg.rampup_iterations=0" in command
     assert "agent.algorithm.symmetry_cfg.ramp_shape=linear" in command
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
@@ -273,6 +277,31 @@ def test_train_defaults_apply_shared_scale_and_trs_settings():
     assert "agent.algorithm.symmetry_cfg.history_enabled=true" in command
     assert "agent.algorithm.symmetry_cfg.history_length=30" in command
     assert "agent.algorithm.symmetry_cfg.tr_consistency_mode='transition_aligned_sequence'" in command
+
+
+@pytest.mark.parametrize("robot", ["go2", "x1"])
+def test_train_explicit_positive_tr_value_coefficient_is_forwarded(robot):
+    symm_cli = _load_symm_cli()
+    args = symm_cli.build_parser().parse_args(["train", "--robot", robot, "--tr-value-coef", "0.05"])
+    args.robot_spec = symm_cli.get_robot(args.robot)
+
+    command = symm_cli.train_lab_args(args, [])
+
+    assert args.tr_value_coeff == pytest.approx(0.05)
+    assert "agent.algorithm.symmetry_cfg.value_loss_coeff=0.05" in command
+
+
+def test_train_tr_value_help_distinguishes_optional_ablation_from_ppo_critic():
+    symm_cli = _load_symm_cli()
+    parser = symm_cli.build_parser()
+    subcommands = next(action for action in parser._actions if action.dest == "command")
+    train_parser = subcommands.choices["train"]
+    help_text = next(action.help for action in train_parser._actions if action.dest == "tr_value_coeff")
+
+    assert "Optional coefficient for the time-reversal critic-consistency ablation" in help_text
+    assert "Default: 0.0" in help_text
+    assert "not the standard PPO value-loss coefficient" in help_text
+    assert "positive value explicitly enables" in help_text
 
 
 @pytest.mark.parametrize("command", ["train", "play", "record", "evaluation", "ablation"])
@@ -320,7 +349,7 @@ def test_history_aliases_disable_history_and_force_zero(no_history_option, lengt
     assert "env.observations.policy.history_length=0" in command
     assert "agent.algorithm.symmetry_cfg.history_enabled=false" in command
     assert "agent.algorithm.symmetry_cfg.history_length=0" in command
-    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p1_v0p05_h0_cur0_seeddefault"
+    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p1_v0_h0_cur0_seeddefault"
 
 
 @pytest.mark.parametrize("history_length", [0, -1])
@@ -400,7 +429,7 @@ def test_train_direct_context_records_policy_contract_metadata():
         "mirror_loss_coeff": 0.1,
         "trajectory_augmentation_enabled": False,
         "use_data_augmentation": False,
-        "value_loss_coeff": 0.05,
+        "value_loss_coeff": 0.0,
     }
 
 
@@ -454,7 +483,7 @@ def test_command_curriculum_flags_build_validated_overrides_and_run_name():
     assert "env.commands.base_velocity.curriculum_maximum_weight=8.0" in command
     assert "env.commands.base_velocity.curriculum_locked_cell_weight=0.0" in command
     assert "env.commands.base_velocity.curriculum_seed=123" in command
-    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p1_v0p05_h30_cur1_seed42"
+    assert command[command.index("--run_name") + 1] == "go2_trseq_m0p1_v0_h30_cur1_seed42"
 
 
 def test_disabled_command_curriculum_override_is_quoted_for_hydra():

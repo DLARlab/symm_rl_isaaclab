@@ -24,3 +24,8 @@ Changed
   ``tr_consistency_mode="framewise_feature_approx"`` to reproduce the former
   feature-level ablation; legacy checkpoints require explicit transfer or the
   matching approximate mode rather than silently resuming under the new map.
+* Changed symmetric Go2 and Dobot X1 PPO defaults to use time-reversal policy
+  consistency without auxiliary critic consistency. Set
+  ``symmetry_cfg.value_loss_coeff`` to a positive value to restore the optional
+  time-reversal critic-consistency ablation; standard PPO value regression is
+  unchanged.

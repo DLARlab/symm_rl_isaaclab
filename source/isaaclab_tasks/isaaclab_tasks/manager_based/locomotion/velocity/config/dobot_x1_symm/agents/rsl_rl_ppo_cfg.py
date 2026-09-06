@@ -26,5 +26,5 @@ class DobotX1SymmFlatPPORunnerCfg(UnitreeGo2FlatPPORunnerCfg):
             experiment_name="dobot_x1_symm_flat",
             use_data_augmentation=False,
             data_augmentation_func=dobot_mdp.compute_time_reversal_states,
-            value_loss_coeff=0.05,
+            value_loss_coeff=0.0,
         )

@@ -46,8 +46,14 @@ The complete algorithm and observation contract are documented in
 Training, playback, recording, full-V3 evaluation, comparison, TensorBoard,
 ablation, and scheduling use the same shared launcher families as the 72D
 Actor TRS V5 branch. History-specific CLI options and provenance fields are
-additions to that common surface. Actor-only publication plotters and offline
-diagnostics are not treated as general launcher parity requirements.
+additions to that common surface. The branch also carries the same strict
+complete-cycle future-versus-past return diagnostic; actor-only publication
+plot inventories remain tied to their own archived run cohort.
+
+The shared training defaults match Actor TRS V5: policy mirror consistency is
+enabled at `0.1`, auxiliary critic consistency defaults to `0.0`, and standard
+PPO value regression remains enabled. A positive `--tr-value-coef` is an
+explicit critic-consistency ablation.
 
 On this branch, new comparisons search these Go2 roots by default, in order:
 
@@ -56,6 +62,20 @@ On this branch, new comparisons search these Go2 roots by default, in order:
 
 Historical 72D reproduction commands must pass
 `logs/rsl_rl/good_runs/unitree_go2_symm_flat` explicitly.
+
+## 72D parity audit
+
+The Go2 and Dobot X1 robot models, actuator settings, ordered joints, contact
+sensors, flat-scene physics, gait command ranges, action geometry, domain
+randomization magnitudes, termination limits, and robot-specific reward
+arguments match the 72D Actor TRS V5 branch.
+
+The remaining environment differences are required by this branch's declared
+experiment: the 64D observation/history contract, causal disturbance-boundary
+tracking, and a straight-line reward that excludes absolute world lateral
+position and heading recovery (`pose_weight=0.0`). The 72D branch retains those
+world-pose recovery terms (`pose_weight=0.30`). These differences must not be
+silently overwritten when synchronizing reusable utilities.
 
 ## Evidence status
 

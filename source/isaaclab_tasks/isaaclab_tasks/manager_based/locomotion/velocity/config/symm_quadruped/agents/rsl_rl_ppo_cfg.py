@@ -23,7 +23,7 @@ def configure_symm_quadruped_ppo(
     experiment_name: str,
     data_augmentation_func: Callable,
     use_data_augmentation: bool,
-    value_loss_coeff: float,
+    value_loss_coeff: float = 0.0,
     mirror_loss_coeff: float = 0.1,
     min_abs_command_velocity: float = 0.0,
     warmup_iterations: int = 500,
@@ -46,7 +46,10 @@ def configure_symm_quadruped_ppo(
         data_augmentation_func: Time-reversal data augmentation function.
         use_data_augmentation: Whether to duplicate mini-batch samples with time-reversed states. This legacy
             compatibility path is deprecated; prefer the filtered ``tr_augmentation`` configuration.
-        value_loss_coeff: Weight for the value-function TRS consistency loss.
+        value_loss_coeff: An optional time-reversal value-consistency ablation coefficient. It is zero by default
+            because temporal reversal does not generally imply invariance of a forward-looking discounted state
+            value. This controls the optional time-reversal critic-consistency ablation, not standard PPO value
+            regression.
         mirror_loss_coeff: Weight for the policy mirror loss.
         min_abs_command_velocity: Minimum forward command velocity [m/s] for TRS losses.
         warmup_iterations: Number of fully unregularized PPO updates before applying TRS losses.

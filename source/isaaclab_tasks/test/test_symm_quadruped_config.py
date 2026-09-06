@@ -97,13 +97,13 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
         experiment_name="test",
         data_augmentation_func=lambda **_: None,
         use_data_augmentation=False,
-        value_loss_coeff=0.0,
     )
 
     assert cfg.max_iterations == 20000
     assert cfg.clip_actions is None
     assert cfg.actor.distribution_cfg.init_std == 0.5
     assert cfg.algorithm.entropy_coef == 0.005
+    assert cfg.algorithm.symmetry_cfg.value_loss_coeff == 0.0
     assert cfg.algorithm.symmetry_cfg.command_observation_index == 3
     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
 
@@ -233,9 +233,11 @@ def test_robot_ppo_time_reversal_configuration_is_stable(runner_cfg_type):
     assert symmetry_cfg.use_time_reversal_regularization
     assert symmetry_cfg.use_mirror_loss
     assert symmetry_cfg.mirror_loss_coeff == 0.1
-    assert symmetry_cfg.value_loss_coeff == 0.05
+    assert symmetry_cfg.value_loss_coeff == 0.0
     assert symmetry_cfg.min_abs_command_velocity == 0.0
     assert symmetry_cfg.warmup_iterations == 500
+    assert runner_cfg.algorithm.value_loss_coef == 1.0
+    assert runner_cfg.algorithm.use_clipped_value_loss is True
 
 
 def test_running_reward_is_clipped_before_terminal_penalty_is_added():

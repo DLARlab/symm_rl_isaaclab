@@ -198,7 +198,7 @@ def test_protocol_fact_hashes_must_match_registered_artifacts():
     facts["checkpoint_status"]["final_iteration"] = 19999
     run = {
         "run_id": "bound-run",
-        "path": "logs/rsl_rl/good_runs/robot/run",
+        "path": "logs/rsl_rl/good_runs_64d/robot/run",
         "artifact_availability": "tracked",
         "design_role": "main",
         "classification": "eligible_main",
@@ -222,6 +222,35 @@ def test_protocol_fact_hashes_must_match_registered_artifacts():
     run["artifacts"]["params/env.yaml"] = "f" * 64
 
     assert any("params/env.yaml" in error for error in module.validate_manifest(manifest))
+
+
+def test_registry_accepts_new_64d_and_retained_legacy_archive_roots():
+    module = _load_module()
+    run = {
+        "run_id": "bound-run",
+        "path": "logs/rsl_rl/good_runs_64d/robot/run",
+        "artifact_availability": "tracked",
+        "design_role": "main",
+        "classification": "eligible_main",
+        "facts": {**_facts(), "checkpoint_status": {**_facts()["checkpoint_status"], "final_iteration": 1}},
+        "artifacts": {
+            "git/symm_rl_isaaclab.diff": "b" * 64,
+            "params/agent.yaml": "c" * 64,
+            "params/env.yaml": "d" * 64,
+            "model_1.pt": "e" * 64,
+        },
+    }
+    manifest = {
+        "schema_version": 1,
+        "cohort_id": "archive-roots",
+        "selection_basis": "protocol_facts_only",
+        "protocol": _protocol(),
+        "runs": [run],
+    }
+
+    assert module.validate_manifest(manifest) == []
+    run["path"] = "logs/rsl_rl/good_runs/robot/run"
+    assert module.validate_manifest(manifest) == []
 
 
 def test_missing_local_only_artifacts_are_reported_as_skipped(tmp_path):
@@ -253,7 +282,7 @@ def test_tracked_run_path_cannot_traverse_outside_good_runs(tmp_path):
         "runs": [
             {
                 "run_id": "escape",
-                "path": "logs/rsl_rl/good_runs/../../../outside",
+                "path": "logs/rsl_rl/good_runs_64d/../../../outside",
                 "artifact_availability": "tracked",
                 "design_role": "main",
                 "classification": "eligible_main",
