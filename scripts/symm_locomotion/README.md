@@ -785,8 +785,9 @@ The main leg-usage arrays in `sim_data.npz` are:
 Relative `--run` values are resolved under the selected robot's routine log
 directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated history
 checkpoints under `logs/rsl_rl/good_runs_64d/`, pass the checkpoint path
-directly with `--checkpoint`. Historical 72D checkpoints remain under
-`logs/rsl_rl/good_runs/` and work the same way when passed explicitly.
+directly with `--checkpoint`. Historical 72D checkpoints remain on branch
+`jding/72d_actor_trs_v5` under `logs/rsl_rl/good_runs_72d/` and work the same
+way when passed explicitly from that worktree.
 
 ## Policy evaluation
 
@@ -1180,7 +1181,7 @@ the normal experiment root first and then the 64D-frame history archive.
   --run "High-r500=2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
   --baseline NoTRS `
   --run_root .\logs\rsl_rl\unitree_go2_symm_flat `
-  --run_root .\logs\rsl_rl\good_runs\unitree_go2_symm_flat `
+  --run_root .\logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat `
   --output_dir .\logs\analysis\rsl_rl\unitree_go2_symm_flat\2026-09-01_09-33-57_gait_closure_parameter_v4_analysis
 ```
 

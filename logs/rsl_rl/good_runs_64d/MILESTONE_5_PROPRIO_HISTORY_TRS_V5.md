@@ -60,8 +60,9 @@ On this branch, new comparisons search these Go2 roots by default, in order:
 1. `logs/rsl_rl/unitree_go2_symm_flat`
 2. `logs/rsl_rl/good_runs_64d/unitree_go2_symm_flat`
 
-Historical 72D reproduction commands must pass
-`logs/rsl_rl/good_runs/unitree_go2_symm_flat` explicitly.
+Historical 72D reproduction commands must run from a
+`jding/72d_actor_trs_v5` worktree and pass
+`logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat` explicitly.
 
 ## 72D parity audit
 

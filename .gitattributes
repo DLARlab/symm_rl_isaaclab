@@ -16,8 +16,10 @@
 *.hdf5 filter=lfs diff=lfs merge=lfs -text
 
 logs/rsl_rl/**/events.out.tfevents* filter=lfs diff=lfs merge=lfs -text
-logs/rsl_rl/good_runs/**/*.npz filter=lfs diff=lfs merge=lfs -text
-logs/rsl_rl/good_runs/**/*.png filter=lfs diff=lfs merge=lfs -text
+logs/rsl_rl/good_runs_64d/**/*.npz filter=lfs diff=lfs merge=lfs -text
+logs/rsl_rl/good_runs_64d/**/*.png filter=lfs diff=lfs merge=lfs -text
+logs/rsl_rl/good_runs_72d/**/*.npz filter=lfs diff=lfs merge=lfs -text
+logs/rsl_rl/good_runs_72d/**/*.png filter=lfs diff=lfs merge=lfs -text
 
 source/isaaclab_tasks/test/golden_images/**/*.png filter=lfs diff=lfs merge=lfs -text
 

@@ -135,9 +135,9 @@ def test_initial_registry_manifests_define_requested_cohorts_and_go2_split():
     assert len(go2["runs"]) == 8
     assert sum(run["classification"] == "eligible_main" for run in go2["runs"]) == 5
     assert sum(run["classification"] == "eligible_supplement" for run in go2["runs"]) == 3
-    tracked_go2 = [run for run in go2["runs"] if run["artifact_availability"] == "tracked"]
-    assert len(tracked_go2) == 4
-    assert all(run["path"].startswith("logs/rsl_rl/good_runs/unitree_go2_symm_flat/") for run in tracked_go2)
+    archived_go2 = [run for run in go2["runs"] if run["path"].startswith("logs/rsl_rl/good_runs_72d/")]
+    assert len(archived_go2) == 4
+    assert all(run["artifact_availability"] == "local_only" for run in archived_go2)
     assert go2["statistical_claim_status"] == "not_confirmatory_seed_42_only"
     assert [entry["classification"] for entry in module.classify_manifest(go2)] == [
         run["classification"] for run in go2["runs"]
@@ -164,7 +164,7 @@ def test_initial_registry_manifests_define_requested_cohorts_and_go2_split():
         assert module.validate_manifest(manifest) == []
         for run in manifest["runs"]:
             if run["artifact_availability"] == "tracked":
-                assert run["path"].startswith("logs/rsl_rl/good_runs/")
+                assert run["path"].startswith("logs/rsl_rl/good_runs_64d/")
 
 
 def test_malformed_facts_report_validation_errors_instead_of_crashing():
@@ -177,7 +177,7 @@ def test_malformed_facts_report_validation_errors_instead_of_crashing():
         "runs": [
             {
                 "run_id": "bad-facts",
-                "path": "logs/rsl_rl/good_runs/robot/run",
+                "path": "logs/rsl_rl/good_runs_64d/robot/run",
                 "artifact_availability": "tracked",
                 "design_role": "main",
                 "classification": "ineligible_protocol",
@@ -224,7 +224,7 @@ def test_protocol_fact_hashes_must_match_registered_artifacts():
     assert any("params/env.yaml" in error for error in module.validate_manifest(manifest))
 
 
-def test_registry_accepts_new_64d_and_retained_legacy_archive_roots():
+def test_registry_accepts_only_the_64d_tracked_archive_root():
     module = _load_module()
     run = {
         "run_id": "bound-run",
@@ -250,7 +250,7 @@ def test_registry_accepts_new_64d_and_retained_legacy_archive_roots():
 
     assert module.validate_manifest(manifest) == []
     run["path"] = "logs/rsl_rl/good_runs/robot/run"
-    assert module.validate_manifest(manifest) == []
+    assert any("logs/rsl_rl/good_runs_64d" in error for error in module.validate_manifest(manifest))
 
 
 def test_missing_local_only_artifacts_are_reported_as_skipped(tmp_path):
@@ -272,7 +272,7 @@ def test_missing_local_only_artifacts_are_reported_as_skipped(tmp_path):
     assert "local-only artifact folder is unavailable" in skipped[0]
 
 
-def test_tracked_run_path_cannot_traverse_outside_good_runs(tmp_path):
+def test_tracked_run_path_cannot_traverse_outside_good_runs_64d(tmp_path):
     module = _load_module()
     manifest = {
         "schema_version": 1,

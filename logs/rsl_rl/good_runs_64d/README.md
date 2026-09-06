@@ -14,11 +14,13 @@ instantaneous observation-frame width: one policy frame has 64 values. The
 default native history contains 30 frames, so its flattened MLP input still has
 `30 * 64 = 1920` values.
 
-Do not place historical 72D policies in this archive. The older 72D milestones
-and checkpoints remain in the sibling [`good_runs`](../good_runs/README.md)
-archive. A curated `--no-history` ablation may live here because it uses the
-same 64D frame contract, but its 64D effective input must remain clearly
-separated from the default 1920D history cohort.
+Do not place historical 72D policies in this archive. Their milestones and
+checkpoints remain on branch `jding/72d_actor_trs_v5` under
+`logs/rsl_rl/good_runs_72d/`. That directory may be visible here as an ignored
+local working copy, but it is not part of this branch's commits. A curated
+`--no-history` ablation may live here because it uses the same 64D frame
+contract, but its 64D effective input must remain clearly separated from the
+default 1920D history cohort.
 
 ## Milestone timeline
 
@@ -80,5 +82,5 @@ For each retained training run:
 
 The default comparison root intentionally excludes the historical 72D archive,
 preventing incompatible policies from being selected by name. A historical
-reproduction can still pass its old `good_runs` path explicitly with
-`--run_root`.
+reproduction should run from a `jding/72d_actor_trs_v5` worktree and pass its
+`good_runs_72d` path explicitly with `--run_root`.

@@ -383,12 +383,13 @@ launcher intentionally rejects their 72D actors.
 ```
 
 `--run` is resolved under the selected robot's routine experiment directory,
-for example `logs/rsl_rl/unitree_go2_symm_flat/`. To play a curated
-`good_runs` checkpoint, pass the checkpoint path directly:
+for example `logs/rsl_rl/unitree_go2_symm_flat/`. To play one of these
+historical checkpoints, use a worktree on `jding/72d_actor_trs_v5` and pass
+its `good_runs_72d` checkpoint path directly:
 
 ```powershell
-.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
-.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs\dobot_x1_symm_flat\2026-08-25_06-08-02_notrs_x1def_s42\model_19999.pt
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
+.\scripts\symm_locomotion\play.ps1 --robot x1 --checkpoint logs\rsl_rl\good_runs_72d\dobot_x1_symm_flat\2026-08-25_06-08-02_notrs_x1def_s42\model_19999.pt
 ```
 
 Record videos:
@@ -446,23 +447,17 @@ logs/rsl_rl/unitree_go2_symm_flat/
 logs/rsl_rl/dobot_x1_symm_flat/
 ```
 
-Selected backed-up runs are copied under `logs/rsl_rl/good_runs/`. See the
-[curated-run index](logs/rsl_rl/good_runs/README.md) and the four chronological
-milestones:
+Selected 64D runs are copied under `logs/rsl_rl/good_runs_64d/`. See the
+[curated-run index](logs/rsl_rl/good_runs_64d/README.md) and
+[Proprioceptive History TRS V5 milestone](logs/rsl_rl/good_runs_64d/MILESTONE_5_PROPRIO_HISTORY_TRS_V5.md).
 
-1. [60D to 72D](logs/rsl_rl/good_runs/MILESTONE_1_60D_TO_72D.md)
-2. [Phase Mapping V2 and the leg-permutation fix](logs/rsl_rl/good_runs/MILESTONE_2_PHASE_MAPPING_V2_AND_LEG_PERMUTATION_FIX.md)
-3. [Gait-family V2](logs/rsl_rl/good_runs/MILESTONE_3_GAIT_FAMILY_V2.md)
-4. [Gait-closure parameter V4](logs/rsl_rl/good_runs/MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md)
-
-Milestone 4 records the archived V4 five-policy cohort for each robot. The Go2
-screen recovers the Milestone 3 reward deficit for selected TRS settings while
-retaining useful leg-usage tradeoffs. Results remain single-seed,
-configuration-specific checkpoint comparisons rather than method-level causal
-claims.
+The historical 72D archive, including its five milestone documents, is
+committed only on branch `jding/72d_actor_trs_v5` under
+`logs/rsl_rl/good_runs_72d/`. It may remain beside `good_runs_64d` as an
+ignored local working copy, but it is deliberately excluded from 64D commits.
 
 Leave routine training outputs in the robot-specific experiment directories
-unless a run is intentionally curated and copied into `good_runs`.
+unless a run is intentionally curated and copied into `good_runs_64d`.
 
 Compare recent runs:
 
@@ -585,7 +580,7 @@ Full pre-commit before committing or pushing:
 
 - Keep the old IsaacGym project separate from this Isaac Lab migration.
 - Keep routine logs ignored; add only curated runs under
-  `logs/rsl_rl/good_runs/` intentionally.
+  `logs/rsl_rl/good_runs_64d/` intentionally on this branch.
 - Do not edit generated changelog outputs directly. Add changelog fragments
   under `source/<package>/changelog.d/` when needed.
 

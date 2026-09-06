@@ -55,15 +55,46 @@ class TestCuratedTensorBoardPlotter(unittest.TestCase):
             self.assertEqual(plotter._parse_yaml_scalar(path, "schedule"), "adaptive")
 
     def test_discovery_is_limited_to_six_matched_runs_per_robot(self) -> None:
-        """Find only the twelve traces in the matched retained inventory."""
-        runs = plotter.discover_curated_runs()
-        self.assertEqual(len(runs), 12)
-        for robot in plotter.ROBOT_RUN_DIRS:
-            self.assertEqual(sum(run.robot == robot for run in runs), 6)
-        for run in runs:
-            self.assertTrue(run.event_path.is_relative_to(plotter.GOOD_RUNS_ROOT))
-            self.assertTrue(run.agent_path.is_relative_to(plotter.GOOD_RUNS_ROOT))
-            self.assertEqual(run.seed, 42)
+        """Find only the twelve traces in a matched retained inventory."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            archive_root = Path(temporary_directory) / "good_runs_72d"
+            run_dirs = plotter._robot_run_dirs(archive_root)
+            for run_name in sorted(plotter.PHASE_V2_RUN_NAMES | plotter.GAIT_V2_RUN_NAMES):
+                robot = "go2" if "_go2_" in run_name else "x1"
+                generation = plotter._generation(run_name)
+                run_root = run_dirs[robot][0 if generation == "phase-v2" else 1]
+                run_path = run_root / run_name
+                params_path = run_path / "params"
+                params_path.mkdir(parents=True)
+                (run_path / "events.out.tfevents.synthetic").touch()
+                if "no_trs" in run_name:
+                    use_mirror_loss, mirror_coeff, value_coeff = False, 0.0, 0.0
+                elif "m0p1" in run_name:
+                    use_mirror_loss, mirror_coeff, value_coeff = True, 0.1, 0.05
+                else:
+                    use_mirror_loss, mirror_coeff, value_coeff = True, 0.2, 0.1
+                (params_path / "agent.yaml").write_text(
+                    "seed: 42\n"
+                    "max_iterations: 20000\n"
+                    "learning_rate: 0.001\n"
+                    "schedule: adaptive\n"
+                    f"use_mirror_loss: {str(use_mirror_loss).lower()}\n"
+                    f"mirror_loss_coeff: {mirror_coeff}\n"
+                    f"value_loss_coeff: {value_coeff}\n"
+                    "warmup_iterations: 500\n"
+                    "min_abs_command_velocity: 0.0\n",
+                    encoding="utf-8",
+                )
+
+            runs = plotter.discover_curated_runs(archive_root)
+
+            self.assertEqual(len(runs), 12)
+            for robot in run_dirs:
+                self.assertEqual(sum(run.robot == robot for run in runs), 6)
+            for run in runs:
+                self.assertTrue(run.event_path.is_relative_to(archive_root))
+                self.assertTrue(run.agent_path.is_relative_to(archive_root))
+                self.assertEqual(run.seed, 42)
 
 
 if __name__ == "__main__":

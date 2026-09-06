@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Plot reward curves for TensorBoard runs archived under ``good_runs``."""
+"""Plot reward curves for historical 72D runs archived under ``good_runs_72d``."""
 
 from __future__ import annotations
 
@@ -33,21 +33,28 @@ from plot_trs_tensorboard import (
     _svg_tag,
 )
 
-GOOD_RUNS_ROOT = LOG_ROOT / "good_runs"
+GOOD_RUNS_ROOT = LOG_ROOT / "good_runs_72d"
 OUTPUT_ROOT = GOOD_RUNS_ROOT / "curated_tensorboard"
 REWARD_TAG = "Train/mean_reward"
 SMOOTHING_WINDOW = 200
 PLOT_STRIDE = 10
-ROBOT_RUN_DIRS = {
-    "go2": (
-        GOOD_RUNS_ROOT / "unitree_go2_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward",
-        GOOD_RUNS_ROOT / "unitree_go2_symm_flat/legacy/gait_family_v2_analysis",
-    ),
-    "x1": (
-        GOOD_RUNS_ROOT / "dobot_x1_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward",
-        GOOD_RUNS_ROOT / "dobot_x1_symm_flat/legacy/gait_family_v2_analysis",
-    ),
-}
+
+
+def _robot_run_dirs(good_runs_root: Path) -> dict[str, tuple[Path, Path]]:
+    """Return historical run roots below a selected 72D archive."""
+    return {
+        "go2": (
+            good_runs_root / "unitree_go2_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward",
+            good_runs_root / "unitree_go2_symm_flat/legacy/gait_family_v2_analysis",
+        ),
+        "x1": (
+            good_runs_root / "dobot_x1_symm_flat/legacy/phase_mapping_v2_legacy_permutation_reward",
+            good_runs_root / "dobot_x1_symm_flat/legacy/gait_family_v2_analysis",
+        ),
+    }
+
+
+ROBOT_RUN_DIRS = _robot_run_dirs(GOOD_RUNS_ROOT)
 ROBOT_TITLES = {
     "go2": "Unitree Go2",
     "x1": "Dobot X1",
@@ -79,7 +86,7 @@ ET.register_namespace("", SVG_NAMESPACE)
 
 @dataclass(frozen=True)
 class CuratedRun:
-    """One TensorBoard run archived under ``good_runs``."""
+    """One TensorBoard run archived under ``good_runs_72d``."""
 
     robot: str
     generation: str
@@ -163,10 +170,11 @@ def _generation(run_name: str) -> str:
     )
 
 
-def discover_curated_runs() -> list[CuratedRun]:
+def discover_curated_runs(good_runs_root: Path | None = None) -> list[CuratedRun]:
     """Discover the matched phase-v2/gait-v2 comparison inventory."""
+    run_dirs = ROBOT_RUN_DIRS if good_runs_root is None else _robot_run_dirs(good_runs_root)
     runs = []
-    for robot, run_roots in ROBOT_RUN_DIRS.items():
+    for robot, run_roots in run_dirs.items():
         for run_root in run_roots:
             for run_path in sorted(path for path in run_root.iterdir() if path.is_dir()):
                 if run_path.name not in PHASE_V2_RUN_NAMES | GAIT_V2_RUN_NAMES:
@@ -197,7 +205,7 @@ def discover_curated_runs() -> list[CuratedRun]:
                         min_abs_command_velocity=float(_parse_yaml_scalar(agent_path, "min_abs_command_velocity")),
                     )
                 )
-    for robot in ROBOT_RUN_DIRS:
+    for robot in run_dirs:
         robot_runs = [run for run in runs if run.robot == robot]
         if len(robot_runs) != 6:
             raise ValueError(f"Expected six curated TensorBoard runs for {robot}, found {len(robot_runs)}.")
@@ -314,7 +322,7 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
     title.text = f"{ROBOT_TITLES[robot]} curated TensorBoard reward by training iteration"
     description = ET.SubElement(root, _svg_tag("desc"), {"id": "plot-description"})
     description.text = (
-        "Six mean-reward curves from runs physically archived under good_runs. "
+        "Six mean-reward curves from runs physically archived under good_runs_72d. "
         "Dashed lines are the phase-v2 cohort and solid lines are the gait-v2 cohort."
     )
     ET.SubElement(
@@ -348,7 +356,7 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
         root,
         canvas_width / 2.0,
         72.0,
-        (f"{REWARD_TAG}, {SMOOTHING_WINDOW}-iteration trailing mean · source: logs/rsl_rl/good_runs only"),
+        (f"{REWARD_TAG}, {SMOOTHING_WINDOW}-iteration trailing mean · source: logs/rsl_rl/good_runs_72d only"),
         size=13,
         anchor="middle",
         fill="#5F6368",
