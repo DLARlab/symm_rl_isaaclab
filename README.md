@@ -449,7 +449,7 @@ logs/rsl_rl/dobot_x1_symm_flat/
 
 Selected 64D runs are copied under `logs/rsl_rl/good_runs_64d/`. See the
 [curated-run index](logs/rsl_rl/good_runs_64d/README.md) and
-[Proprioceptive History TRS V5 milestone](logs/rsl_rl/good_runs_64d/MILESTONE_5_PROPRIO_HISTORY_TRS_V5.md).
+[Proprioceptive History TRS V1 milestone](logs/rsl_rl/good_runs_64d/MILESTONE_1_PROPRIO_HISTORY_TRS_V1.md).
 
 The historical 72D archive, including its five milestone documents, is
 committed only on branch `jding/72d_actor_trs_v5` under

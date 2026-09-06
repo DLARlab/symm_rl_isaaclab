@@ -5,7 +5,7 @@ All rights reserved.
 SPDX-License-Identifier: BSD-3-Clause
 -->
 
-# Milestone 5: Proprioceptive History TRS V5
+# Milestone 1: Proprioceptive History TRS V1
 
 **Date:** 2026-09-06
 
@@ -16,8 +16,9 @@ SPDX-License-Identifier: BSD-3-Clause
 ## Scope
 
 This milestone records the implementation and evidence-storage boundary for
-the history-aware V5 experiment. It does not yet designate a good run or make
-an empirical performance claim.
+the first history-aware TRS experiment. It is Milestone 1 and History TRS V1
+because the earlier Actor TRS milestones belong to the separate 72D archive.
+It does not yet designate a good run or make an empirical performance claim.
 
 The policy uses the immutable `hardware_proprio_history_64d_v1` frame contract.
 Each frame contains 64 proprioceptive, command, gait, and two-action-history
@@ -38,8 +39,8 @@ and has no privileged velocity or recurrent state.
 - Kept the existing shared `scripts/symm_locomotion/` launcher surface for both
   robots and separated this branch's curated evidence into `good_runs_64d`.
 
-The complete algorithm and observation contract are documented in
-[`docs/symm_locomotion/PROPRIO_HISTORY_TRS_V5.md`](../../../docs/symm_locomotion/PROPRIO_HISTORY_TRS_V5.md).
+The complete algorithm and observation contract are documented in the
+[branch design note](../../../docs/symm_locomotion/PROPRIO_HISTORY_TRS_V5.md).
 
 ## Utility contract
 
@@ -63,6 +64,80 @@ On this branch, new comparisons search these Go2 roots by default, in order:
 Historical 72D reproduction commands must run from a
 `jding/72d_actor_trs_v5` worktree and pass
 `logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat` explicitly.
+
+## 64D no-TRS baseline commands
+
+These commands port the compatible settings from the retained 72D no-TRS
+baselines while keeping this branch's 64D frame, native 30-frame history, and
+disabled command curriculum. They retain each robot's original seed, reward
+geometry, actor-bound mode, and inactive TR schedule for direct provenance
+comparison. Settings specific to a 72D observation transform are not copied.
+Under `--no-trs`, policy consistency, critic consistency, and transformed-data
+augmentation are all disabled; the ordinary PPO value loss remains active.
+
+### Unitree Go2
+
+```powershell
+.\scripts\symm_locomotion\train.ps1 `
+  --robot go2 `
+  --num-envs 512 `
+  --iterations 20000 `
+  --run-name m1_go2_64d_history_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43 `
+  --seed 43 `
+  --history `
+  --history-length 30 `
+  --no-trs `
+  --tr-policy-coef 0.0 `
+  --tr-value-coef 0.0 `
+  --tr-warmup-iterations 500 `
+  --tr-rampup-iterations 1000 `
+  --tr-ramp-shape linear `
+  --tr-min-abs-cmd-vel 0.0 `
+  --foot-phase-weight 0.3 `
+  --foot-phase-reduction sum `
+  --joint-target-limit-mode requested_overflow `
+  --joint-target-limit-weight 0.2 `
+  --actor-mean-bound-mode per_joint_feasible `
+  --tr-policy-output-space normalized_requested_joint_target `
+  --gait-sampling-profile trclosed_v2_equal_family `
+  --gait-curriculum-iterations 0 `
+  --no-command-curriculum `
+  --expected-branch 64d_history_trs_v1 `
+  --no-conda-run `
+  -- `
+  agent.algorithm.symmetry_cfg.actor_mean_feasible_margin_fraction=0.0
+```
+
+### Dobot X1
+
+```powershell
+.\scripts\symm_locomotion\train.ps1 `
+  --robot x1 `
+  --num-envs 512 `
+  --iterations 20000 `
+  --run-name m1_x1_64d_history_notrs_x1def_s42 `
+  --seed 42 `
+  --history `
+  --history-length 30 `
+  --no-trs `
+  --tr-policy-coef 0.0 `
+  --tr-value-coef 0.0 `
+  --tr-warmup-iterations 0 `
+  --tr-rampup-iterations 0 `
+  --tr-ramp-shape linear `
+  --tr-min-abs-cmd-vel 0.0 `
+  --foot-phase-weight 0.3 `
+  --foot-phase-reduction sum `
+  --joint-target-limit-mode legacy_clamped `
+  --joint-target-limit-weight 0.05 `
+  --actor-mean-bound-mode legacy_global `
+  --tr-policy-output-space raw_action_mean `
+  --gait-sampling-profile trclosed_v2_equal_family `
+  --gait-curriculum-iterations 0 `
+  --no-command-curriculum `
+  --expected-branch 64d_history_trs_v1 `
+  --no-conda-run
+```
 
 ## 72D parity audit
 

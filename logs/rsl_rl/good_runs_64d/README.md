@@ -26,7 +26,7 @@ default 1920D history cohort.
 
 | Milestone | Date | Principal change |
 | --- | --- | --- |
-| [5: Proprioceptive History TRS V5](MILESTONE_5_PROPRIO_HISTORY_TRS_V5.md) | 2026-09-06 | Introduced the 64D hardware-oriented frame, 30-frame causal history, and transition-aligned reverse-sequence objective. |
+| [1: Proprioceptive History TRS V1](MILESTONE_1_PROPRIO_HISTORY_TRS_V1.md) | 2026-09-06 | Introduced the first 64D history-TRS implementation with a hardware-oriented frame, 30-frame causal history, and transition-aligned reverse-sequence objective. |
 
 This milestone currently documents the implementation and archive contract.
 It does not claim a successful training result. Add evidence-backed result
@@ -36,7 +36,7 @@ statements only after the corresponding run artifacts have been curated here.
 
 ```text
 good_runs_64d/
-  MILESTONE_5_PROPRIO_HISTORY_TRS_V5.md
+  MILESTONE_1_PROPRIO_HISTORY_TRS_V1.md
   dobot_x1_symm_flat/
     README.md
     <curated training directories>
