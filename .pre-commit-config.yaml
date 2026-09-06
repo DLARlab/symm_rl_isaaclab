@@ -5,7 +5,7 @@
 
 exclude: |
   (?x)^(
-    logs/rsl_rl/good_runs/|
+    logs/rsl_rl/good_runs_72d/|
     source/isaaclab_assets/isaaclab_assets/robots/go2_symm/(dae|urdf)/|
     source/isaaclab_assets/isaaclab_assets/robots/dobot_quad_v2/
   )

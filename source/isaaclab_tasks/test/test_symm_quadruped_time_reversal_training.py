@@ -422,13 +422,13 @@ def test_explicitly_enabled_zero_value_ablation_warns_clearly():
     [
         (
             UnitreeGo2SymmFlatPPORunnerCfg,
-            "logs/rsl_rl/good_runs/unitree_go2_symm_flat/"
+            "logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat/"
             "2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_"
             "fp0p3sum_jtlw0p2_amf0_g2fc1_s43/params/agent.yaml",
         ),
         (
             DobotX1SymmFlatPPORunnerCfg,
-            "logs/rsl_rl/good_runs/dobot_x1_symm_flat/"
+            "logs/rsl_rl/good_runs_72d/dobot_x1_symm_flat/"
             "2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/params/agent.yaml",
         ),
     ],
@@ -461,13 +461,13 @@ def test_actor_only_v5_agent_yaml_remains_loadable(runner_cfg_type, relative_age
     [
         (
             UnitreeGo2SymmFlatPPORunnerCfg,
-            "logs/rsl_rl/good_runs/unitree_go2_symm_flat/"
+            "logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat/"
             "2026-09-03_00-14-58_m5_go2_actor_only_trs_m0p1_v0_w500_r0_"
             "fp0p3sum_jtlw0p2_amf0_g2fc1_s43/model_19999.pt",
         ),
         (
             DobotX1SymmFlatPPORunnerCfg,
-            "logs/rsl_rl/good_runs/dobot_x1_symm_flat/"
+            "logs/rsl_rl/good_runs_72d/dobot_x1_symm_flat/"
             "2026-09-03_00-15-11_m5_x1_actor_only_trs_m0p1_v0_w500_r0_x1def_s42/model_19999.pt",
         ),
     ],

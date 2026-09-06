@@ -168,15 +168,15 @@ The publication reports, resolved manifests, source hashes, tables, and figure h
 From the repository root, regenerate every comparison table and figure with the archived manifest:
 
 ```bash
-./isaaclab.sh -p logs/rsl_rl/good_runs/dobot_x1_symm_flat/gait_closure_parameter_v4_analysis/reproduce.py
-./isaaclab.sh -p logs/rsl_rl/good_runs/unitree_go2_symm_flat/gait_closure_parameter_v4_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/dobot_x1_symm_flat/gait_closure_parameter_v4_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat/gait_closure_parameter_v4_analysis/reproduce.py
 ```
 
 On Windows PowerShell, use the equivalent wrapper:
 
 ```powershell
-.\isaaclab.bat -p logs\rsl_rl\good_runs\dobot_x1_symm_flat\gait_closure_parameter_v4_analysis\reproduce.py
-.\isaaclab.bat -p logs\rsl_rl\good_runs\unitree_go2_symm_flat\gait_closure_parameter_v4_analysis\reproduce.py
+.\isaaclab.bat -p logs\rsl_rl\good_runs_72d\dobot_x1_symm_flat\gait_closure_parameter_v4_analysis\reproduce.py
+.\isaaclab.bat -p logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat\gait_closure_parameter_v4_analysis\reproduce.py
 ```
 
 Each retained training directory supplies its TensorBoard event file, `provenance/initialization.json`, resolved

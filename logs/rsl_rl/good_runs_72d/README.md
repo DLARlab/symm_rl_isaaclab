@@ -23,7 +23,7 @@ supports the result, and which limitations prevent a broader claim.
 ## Current archive layout
 
 ```text
-good_runs/
+good_runs_72d/
   MILESTONE_1_*.md ... MILESTONE_5_*.md
   dobot_x1_symm_flat/
     README.md
@@ -81,15 +81,15 @@ committed Actor TRS V5 tables and figures through the Isaac Lab Python wrapper.
 Windows PowerShell:
 
 ```powershell
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\actor_trs_v5_analysis\reproduce.py
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\actor_trs_v5_analysis\reproduce.py
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs_72d\dobot_x1_symm_flat\actor_trs_v5_analysis\reproduce.py
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat\actor_trs_v5_analysis\reproduce.py
 ```
 
 Linux:
 
 ```bash
-./isaaclab.sh -p logs/rsl_rl/good_runs/dobot_x1_symm_flat/actor_trs_v5_analysis/reproduce.py
-./isaaclab.sh -p logs/rsl_rl/good_runs/unitree_go2_symm_flat/actor_trs_v5_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/dobot_x1_symm_flat/actor_trs_v5_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat/actor_trs_v5_analysis/reproduce.py
 ```
 
 The comparison validates archived run identities, terminal checkpoints,
@@ -99,7 +99,7 @@ writing outputs.
 To play an archived policy, pass its checkpoint path directly, for example:
 
 ```powershell
-.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
+.\scripts\symm_locomotion\play.ps1 --robot go2 --checkpoint .\logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat\2026-08-29_11-56-35_notrs_fp0p3sum_jtlw0p2_amf0_g2fc1_s43\model_19999.pt
 ```
 
 ## Checkpoint publication policy

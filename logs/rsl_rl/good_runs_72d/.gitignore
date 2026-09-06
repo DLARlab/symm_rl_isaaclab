@@ -1,5 +1,5 @@
 # Publish every curated run directory and every non-checkpoint artifact.
-# The repository-level .gitignore explicitly exposes this good_runs tree.
+# The repository-level .gitignore explicitly exposes this good_runs_72d tree.
 !**/
 !**
 

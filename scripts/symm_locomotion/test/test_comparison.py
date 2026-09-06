@@ -899,6 +899,17 @@ def test_load_manifest_round_trips_configuration(tmp_path: Path):
     assert loaded["sample_stride_iterations"] == 17
 
 
+def test_legacy_good_runs_manifest_root_follows_archive_rename(tmp_path: Path):
+    legacy = tmp_path / "logs" / "rsl_rl" / "good_runs" / "robot"
+    renamed = tmp_path / "logs" / "rsl_rl" / "good_runs_72d" / "robot"
+    renamed.mkdir(parents=True)
+
+    assert comparison._resolve_configured_run_root("logs/rsl_rl/good_runs/robot", tmp_path) == renamed.resolve()
+
+    legacy.mkdir(parents=True)
+    assert comparison._resolve_configured_run_root("logs/rsl_rl/good_runs/robot", tmp_path) == legacy.resolve()
+
+
 def test_manifest_reproduction_binds_its_saved_protocol_and_treatments():
     protocol = {
         "robot": "go2",

@@ -62,8 +62,8 @@ _build
 !logs/
 !logs/rsl_rl/
 logs/rsl_rl/*
-!logs/rsl_rl/good_runs/
-!logs/rsl_rl/good_runs/**
+!logs/rsl_rl/good_runs_72d/
+!logs/rsl_rl/good_runs_72d/**
 
 # Pre-Trained Checkpoints
 /.pretrained_checkpoints/

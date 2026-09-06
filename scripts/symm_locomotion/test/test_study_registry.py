@@ -168,7 +168,7 @@ def test_initial_registry_manifests_define_requested_cohorts_and_go2_split():
         assert module.validate_manifest(manifest) == []
         for run in manifest["runs"]:
             if run["artifact_availability"] == "tracked":
-                assert run["path"].startswith("logs/rsl_rl/good_runs/")
+                assert run["path"].startswith("logs/rsl_rl/good_runs_72d/")
 
 
 def test_malformed_facts_report_validation_errors_instead_of_crashing():
@@ -181,7 +181,7 @@ def test_malformed_facts_report_validation_errors_instead_of_crashing():
         "runs": [
             {
                 "run_id": "bad-facts",
-                "path": "logs/rsl_rl/good_runs/robot/run",
+                "path": "logs/rsl_rl/good_runs_72d/robot/run",
                 "artifact_availability": "tracked",
                 "design_role": "main",
                 "classification": "ineligible_protocol",
@@ -202,7 +202,7 @@ def test_protocol_fact_hashes_must_match_registered_artifacts():
     facts["checkpoint_status"]["final_iteration"] = 19999
     run = {
         "run_id": "bound-run",
-        "path": "logs/rsl_rl/good_runs/robot/run",
+        "path": "logs/rsl_rl/good_runs_72d/robot/run",
         "artifact_availability": "tracked",
         "design_role": "main",
         "classification": "eligible_main",
@@ -257,7 +257,7 @@ def test_tracked_run_path_cannot_traverse_outside_good_runs(tmp_path):
         "runs": [
             {
                 "run_id": "escape",
-                "path": "logs/rsl_rl/good_runs/../../../outside",
+                "path": "logs/rsl_rl/good_runs_72d/../../../outside",
                 "artifact_availability": "tracked",
                 "design_role": "main",
                 "classification": "eligible_main",

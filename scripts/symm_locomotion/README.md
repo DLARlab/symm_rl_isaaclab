@@ -82,7 +82,7 @@ modules directly or extend historical study reproducers for new experiments.
 | General launchers | `train.*`, `play.*`, `record.*`, `evaluation.*`, `comparison.*`, `tensorboard.*`, `ablation.*`, `symm_locomotion.{sh,ps1}`, `symm_cli.py` | Supported interfaces for routine training, playback, recording, evaluation, comparison, TensorBoard, and ablation workflows. Prefer the platform wrapper or the matching Python entry point. |
 | General study utilities | `launch_study.py`, `scheduler.*` | Supported advanced tools for manifest-defined studies and delayed sequential shell jobs. |
 | Internal implementation | `_run.{sh,ps1}`, `_tensorboard_scalars.py`, `_leg_usage_metrics.py`, `training_provenance.py`, `study_registry.py`, `_mp4_to_gif.py` | Required implementation and validation modules. They are not additional launcher families; keep them beside the public entry points. |
-| Curated study plotting | `plot_good_runs_tensorboard.py` | Rebuilds the Actor TRS V5 reward plots from the ten runs published directly under the two `good_runs` robot roots. |
+| Curated study plotting | `plot_good_runs_tensorboard.py` | Rebuilds the Actor TRS V5 reward plots from the ten runs published directly under the two `good_runs_72d` robot roots. |
 | Archival study reproduction | `analyze_matched_trs_study.py`, `analyze_trs_grid.py`, `plot_trs_tensorboard.py`, `update_gait_family_v3_analysis.py`, `paired_tr_consistency.py` | Retained so existing studies remain reproducible. Use `comparison.*` and `evaluation.*` for new work. |
 | Compatibility modules | `leg_usage_metrics.py`, `mp4_to_gif.py` | Stable historical import and script paths; current launchers use their underscored implementation modules. |
 | Deprecated compatibility | `compare.*`, `analyze_leg_usage.*` | Temporary forwarding interfaces. Migrate to `symm_locomotion.* compare` and `evaluation.*`; these files remain for the required deprecation window. |
@@ -724,7 +724,7 @@ The main leg-usage arrays in `sim_data.npz` are:
 
 Relative `--run` values are resolved under the selected robot's routine log
 directory, such as `logs/rsl_rl/unitree_go2_symm_flat/`. For curated
-`logs/rsl_rl/good_runs/` checkpoints, pass the checkpoint path directly with
+`logs/rsl_rl/good_runs_72d/` checkpoints, pass the checkpoint path directly with
 `--checkpoint`.
 
 ## Policy evaluation
@@ -1107,8 +1107,8 @@ explicit `--baseline` is placed first in comparison tables and figures. The
 baseline is always black.
 
 The following command reproduces the five-run Go2 comparison. The resolver
-checks the normal experiment root first and then the curated `good_runs` root;
-this matters because the final run currently lives only in `good_runs`.
+checks the normal experiment root first and then the curated `good_runs_72d` root;
+this matters because the final run currently lives only in `good_runs_72d`.
 
 ```powershell
 .\isaaclab.bat -p .\scripts\symm_locomotion\comparison.py `
@@ -1119,7 +1119,7 @@ this matters because the final run currently lives only in `good_runs`.
   --run "High-r500=2026-08-31_00-14-42_trs_m0p2_v0p1_w500_r500_vmcmd_fp0p3sum_jtlw0p2_amf0_g2fc1_s43" `
   --baseline NoTRS `
   --run_root .\logs\rsl_rl\unitree_go2_symm_flat `
-  --run_root .\logs\rsl_rl\good_runs\unitree_go2_symm_flat `
+  --run_root .\logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat `
   --output_dir .\logs\rsl_rl\unitree_go2_symm_flat\gait_closure_v4_analysis
 ```
 

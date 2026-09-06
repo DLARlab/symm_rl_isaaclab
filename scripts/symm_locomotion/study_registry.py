@@ -291,8 +291,8 @@ def validate_manifest(manifest: Mapping[str, Any]) -> list[str]:
             path_parts = Path(path).parts
             if Path(path).is_absolute() or ".." in path_parts:
                 errors.append(f"run {run_id}: path must be a repository-relative path without '..'")
-            elif availability == "tracked" and tuple(path_parts[:3]) != ("logs", "rsl_rl", "good_runs"):
-                errors.append(f"run {run_id}: tracked artifacts must live below logs/rsl_rl/good_runs")
+            elif availability == "tracked" and tuple(path_parts[:3]) != ("logs", "rsl_rl", "good_runs_72d"):
+                errors.append(f"run {run_id}: tracked artifacts must live below logs/rsl_rl/good_runs_72d")
         run_facts = run.get("facts", {})
         if not isinstance(run_facts, Mapping):
             errors.append(f"run {run_id}: facts must be a mapping")
@@ -317,7 +317,7 @@ def verify_manifest_artifacts(
     """Verify referenced folders and immutable artifact hashes without changing them."""
     errors: list[str] = []
     root = repo_root.resolve()
-    tracked_root = (root / "logs" / "rsl_rl" / "good_runs").resolve()
+    tracked_root = (root / "logs" / "rsl_rl" / "good_runs_72d").resolve()
     for run in manifest.get("runs", []):
         run_id = str(run.get("run_id"))
         run_path = Path(str(run.get("path", "")))

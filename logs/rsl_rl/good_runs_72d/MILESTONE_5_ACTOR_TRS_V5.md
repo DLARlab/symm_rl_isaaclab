@@ -725,13 +725,13 @@ The resolved manifests, provenance, tables, reports, and 16 figures per robot ar
 Regenerate the committed outputs from the curated run roots:
 
 ```powershell
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\actor_trs_v5_analysis\reproduce.py
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\unitree_go2_symm_flat\actor_trs_v5_analysis\reproduce.py
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs_72d\dobot_x1_symm_flat\actor_trs_v5_analysis\reproduce.py
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs_72d\unitree_go2_symm_flat\actor_trs_v5_analysis\reproduce.py
 ```
 
 ```bash
-./isaaclab.sh -p logs/rsl_rl/good_runs/dobot_x1_symm_flat/actor_trs_v5_analysis/reproduce.py
-./isaaclab.sh -p logs/rsl_rl/good_runs/unitree_go2_symm_flat/actor_trs_v5_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/dobot_x1_symm_flat/actor_trs_v5_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/unitree_go2_symm_flat/actor_trs_v5_analysis/reproduce.py
 ```
 
 Each of the ten current training directories publishes every non-checkpoint artifact, including TensorBoard events,

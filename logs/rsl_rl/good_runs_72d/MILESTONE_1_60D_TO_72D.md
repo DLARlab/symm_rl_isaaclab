@@ -8,7 +8,7 @@ Timeline: **Milestone 1** ·
 [Milestone 4](MILESTONE_4_GAIT_CLOSURE_PARAMETER_V4.md)
 
 Archive status: the ten policies documented here are retained as a historical
-record but are no longer part of the active `good_runs` branch tree. Their last
+record but are no longer part of the active `good_runs_72d` branch tree. Their last
 complete branch snapshot is commit `eb523deb0da5793209352cc88a3b51058c4af99f`.
 
 This document records the transition from the first two curated 60D policies
@@ -309,7 +309,7 @@ Each run's `git/symm_rl_isaaclab.diff` contains metadata followed by a
 before applying it:
 
 ```powershell
-$archive = 'logs\rsl_rl\good_runs\<robot>\<run>\git\symm_rl_isaaclab.diff'
+$archive = 'logs\rsl_rl\good_runs_72d\<robot>\<run>\git\symm_rl_isaaclab.diff'
 $lines = Get-Content -LiteralPath $archive
 $marker = [Array]::IndexOf($lines, '--- git diff ---')
 $lines[($marker + 1)..($lines.Length - 1)] | Set-Content -LiteralPath '.\historical-run.patch'

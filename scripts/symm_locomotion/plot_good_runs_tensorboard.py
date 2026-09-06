@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Plot reward curves for the Actor TRS V5 runs archived under ``good_runs``."""
+"""Plot reward curves for the Actor TRS V5 runs archived under ``good_runs_72d``."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ from plot_trs_tensorboard import (
     _svg_tag,
 )
 
-GOOD_RUNS_ROOT = LOG_ROOT / "good_runs"
+GOOD_RUNS_ROOT = LOG_ROOT / "good_runs_72d"
 OUTPUT_ROOT = GOOD_RUNS_ROOT / "curated_tensorboard"
 REWARD_TAG = "Train/mean_reward"
 SMOOTHING_WINDOW = 200
@@ -75,7 +75,7 @@ ET.register_namespace("", SVG_NAMESPACE)
 
 @dataclass(frozen=True)
 class CuratedRun:
-    """One TensorBoard run archived under ``good_runs``."""
+    """One TensorBoard run archived under ``good_runs_72d``."""
 
     robot: str
     generation: str
@@ -320,7 +320,7 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
     title.text = f"{ROBOT_TITLES[robot]} curated TensorBoard reward by training iteration"
     description = ET.SubElement(root, _svg_tag("desc"), {"id": "plot-description"})
     description.text = (
-        f"{expected_curve_count} mean-reward curves from the Actor TRS V5 runs archived under good_runs. "
+        f"{expected_curve_count} mean-reward curves from the Actor TRS V5 runs archived under good_runs_72d. "
         "Solid Actor TRS lines use immediate activation after warmup (r0); dashed lines use a nonzero ramp-up."
     )
     ET.SubElement(
@@ -354,7 +354,7 @@ def plot_robot_curves(robot: str, curves: Sequence[CuratedCurve], output_path: P
         root,
         canvas_width / 2.0,
         72.0,
-        (f"{REWARD_TAG}, {SMOOTHING_WINDOW}-iteration trailing mean · source: logs/rsl_rl/good_runs only"),
+        (f"{REWARD_TAG}, {SMOOTHING_WINDOW}-iteration trailing mean · source: logs/rsl_rl/good_runs_72d only"),
         size=13,
         anchor="middle",
         fill="#5F6368",

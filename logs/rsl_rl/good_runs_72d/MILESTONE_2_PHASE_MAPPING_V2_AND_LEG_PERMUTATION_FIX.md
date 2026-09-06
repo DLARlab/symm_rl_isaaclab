@@ -271,7 +271,7 @@ optimizer settings.
 
 The tables below are the canonical published summaries of the historical Go2
 and X1 four-run studies. Their raw report and reproduction folders were retired
-from the published `good_runs` tree in Milestone 5; they remain available only
+from the published `good_runs_72d` tree in Milestone 5; they remain available only
 in the original detached revision named in the reproduction note below.
 
 Each comparison uses four seed-42 runs, 20,000 PPO iterations, 512 environments,
@@ -353,14 +353,14 @@ latest-only archive, and rejects a partially present set.
 
 The manifest-driven analyzer used for the two Phase Mapping V2 studies and its
 raw reports, figures, manifests, and machine-readable summaries were retired
-from the published `good_runs` tree in Milestone 5. This milestone's tables and
+from the published `good_runs_72d` tree in Milestone 5. This milestone's tables and
 validation record remain the canonical summary; the unpublished local legacy
 folders are not required by the current Actor TRS V5 archive.
 
 For exact historical reproduction, use detached commit
-`5546e5ca3fa4c9268ed3e2c0c78a2a73b6b0056e`. In that checkout, run the
-original Go2 or X1 wrapper under
-`logs/rsl_rl/good_runs/<robot>/phase_mapping_v2_*_trs_run_analysis/`; each
+`5546e5ca3fa4c9268ed3e2c0c78a2a73b6b0056e`. That revision predates the
+`good_runs_72d` rename, so in that checkout run the original Go2 or X1 wrapper
+under `logs/rsl_rl/good_runs/<robot>/phase_mapping_v2_*_trs_run_analysis/`; each
 wrapper invokes `scripts/symm_locomotion/analyze_matched_trs_study.py`. The
 archived `summary.json` files record the original analysis-method and manifest
 hashes for auditability.

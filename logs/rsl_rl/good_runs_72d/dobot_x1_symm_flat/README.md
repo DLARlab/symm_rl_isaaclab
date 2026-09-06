@@ -52,13 +52,13 @@ descriptive rather than a strict causal coefficient ablation.
 Windows PowerShell:
 
 ```powershell
-.\isaaclab.bat -p .\logs\rsl_rl\good_runs\dobot_x1_symm_flat\actor_trs_v5_analysis\reproduce.py
+.\isaaclab.bat -p .\logs\rsl_rl\good_runs_72d\dobot_x1_symm_flat\actor_trs_v5_analysis\reproduce.py
 ```
 
 Linux:
 
 ```bash
-./isaaclab.sh -p logs/rsl_rl/good_runs/dobot_x1_symm_flat/actor_trs_v5_analysis/reproduce.py
+./isaaclab.sh -p logs/rsl_rl/good_runs_72d/dobot_x1_symm_flat/actor_trs_v5_analysis/reproduce.py
 ```
 
 Generated reports and provenance files may retain absolute paths and the

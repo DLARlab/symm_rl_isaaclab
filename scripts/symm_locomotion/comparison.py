@@ -1540,8 +1540,25 @@ def default_run_roots(repo_root: Path) -> tuple[Path, Path]:
     """Return the primary and archived Go2 run roots in search order."""
     return (
         repo_root / "logs" / "rsl_rl" / "unitree_go2_symm_flat",
-        repo_root / "logs" / "rsl_rl" / "good_runs" / "unitree_go2_symm_flat",
+        repo_root / "logs" / "rsl_rl" / "good_runs_72d" / "unitree_go2_symm_flat",
     )
+
+
+def _resolve_configured_run_root(value: str, repo_root: Path) -> Path:
+    """Resolve a manifest root, honoring the curated archive's one-time rename."""
+    configured = Path(value)
+    resolved = (configured if configured.is_absolute() else repo_root / configured).resolve()
+    if resolved.exists():
+        return resolved
+
+    legacy_archive = (repo_root / "logs" / "rsl_rl" / "good_runs").resolve()
+    try:
+        relative = resolved.relative_to(legacy_archive)
+    except ValueError:
+        return resolved
+
+    renamed = (repo_root / "logs" / "rsl_rl" / "good_runs_72d" / relative).resolve()
+    return renamed if renamed.exists() else resolved
 
 
 def _run_identity(path: Path, evaluation_subdir: str) -> dict[str, str]:
@@ -2712,10 +2729,7 @@ def load_manifest(
     roots = tuple(run_roots or ())
     if not roots:
         configured_roots = manifest.get("run_roots", [])
-        roots = tuple(
-            (Path(value) if Path(value).is_absolute() else repo_root / Path(value)).resolve()
-            for value in configured_roots
-        )
+        roots = tuple(_resolve_configured_run_root(str(value), repo_root) for value in configured_roots)
     if not roots:
         roots = default_run_roots(repo_root)
     specifications = []
@@ -3677,7 +3691,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=[],
         help=(
             "Run-directory search root; repeat to set search order. Defaults to the primary Go2 root followed by "
-            "the good_runs archive."
+            "the good_runs_72d archive."
         ),
     )
     parser.add_argument(

@@ -154,7 +154,7 @@ making a method-level claim.
 
 The tables in this file are the canonical published summaries of the historical
 Go2 and X1 Gait Family V2 studies. Their raw reports, training runs, and
-reproduction folders were retired from the published `good_runs` tree in
+reproduction folders were retired from the published `good_runs_72d` tree in
 Milestone 5 and remain only in the historical revision described below.
 
 ## Reproduction
