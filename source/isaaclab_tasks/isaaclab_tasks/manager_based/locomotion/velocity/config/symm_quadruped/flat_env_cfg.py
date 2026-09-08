@@ -61,7 +61,7 @@ class SymmQuadrupedRewardsCfg(RewardsCfg):
     """Independent body-frame y-velocity command tracking reward."""
 
     base_roll_exp: RewTerm | None = None
-    """Independent base-roll stability reward."""
+    """Independent base-roll stability term."""
 
     leg_permutation_symmetry: RewTerm | None = None
     """Phase-weighted joint symmetry under configured leg permutations."""
@@ -186,7 +186,7 @@ def make_gait_velocity_command(
                 ang_vel_z=(-0.5, 0.5),
                 heading=(0.0, 0.0),
             ),
-            num_bins=(16, 1, 16),
+            num_bins=(21, 1, 21),
             weight_update=0.2,
             max_weight=1.0,
             neighbor_distance=1,
@@ -268,8 +268,8 @@ def configure_rewards(
 
     feet_cfg = SceneEntityCfg("robot", body_names=list(foot_body_names), preserve_order=True)
     joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
-    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=1.0)
-    env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=-200.0)
+    env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=0.0)
+    env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=0.0)
     env_cfg.rewards.cmd = None
     env_cfg.rewards.track_lin_vel_x_exp = None
     env_cfg.rewards.track_lin_vel_y_exp = None
@@ -279,7 +279,7 @@ def configure_rewards(
         params={"command_name": "base_velocity", "error_scale": yaw_tracking_error_scale},
     )
     env_cfg.rewards.base_roll_exp = RewTerm(
-        func=mdp_module.base_roll_exp,
+        func=mdp_module.base_roll_exp_penalty,
         weight=0.30,
         params={"error_scale": 0.25},
     )

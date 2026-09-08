@@ -16,6 +16,11 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped.obse
     FrameMajorObservationHistoryWrapper,
 )
 
+JI22_REWARD_SIGMA = 0.02
+"""Negative-reward scale used by the Ji22 reward composition."""
+
+_JI22_TERMINATION_REWARD_TERM = "termination_penalty"
+
 
 def _clip_reward_before_termination(
     total_reward: torch.Tensor,
@@ -32,6 +37,18 @@ def _combine_running_and_termination_reward(
 ) -> torch.Tensor:
     """Combine rewards using the stable nonnegative-running-reward rule."""
     return _clip_reward_before_termination(running_reward + termination_reward, termination_reward)
+
+
+def _combine_ji22_reward(
+    positive_reward: torch.Tensor,
+    negative_reward: torch.Tensor,
+    termination_reward: torch.Tensor,
+    sigma: float = JI22_REWARD_SIGMA,
+) -> torch.Tensor:
+    """Compose signed running rewards using Ji22 shaping, then add termination reward."""
+    if sigma <= 0.0:
+        raise ValueError(f"Ji22 reward sigma must be positive, received {sigma}.")
+    return positive_reward * torch.exp(negative_reward / sigma) + termination_reward
 
 
 def _clamp_joint_position_targets(
@@ -77,6 +94,17 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
     def load_managers(self) -> None:
         """Load managers and add frame-major policy history when more than one frame is requested."""
         super().load_managers()
+        try:
+            termination_reward_index = self.reward_manager.active_terms.index(_JI22_TERMINATION_REWARD_TERM)
+        except ValueError as exc:
+            raise ValueError(
+                f"Ji22 reward composition requires the {_JI22_TERMINATION_REWARD_TERM!r} reward term."
+            ) from exc
+        self._ji22_nontermination_reward_indices = torch.tensor(
+            [index for index in range(len(self.reward_manager.active_terms)) if index != termination_reward_index],
+            dtype=torch.long,
+            device=self.device,
+        )
         history_cfg = self.cfg.policy_observation_history
         if history_cfg.history_length == 1:
             return
@@ -134,8 +162,19 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         termination_cfg = self.reward_manager.get_term_cfg("termination_penalty")
         termination_reward = self.reset_terminated.to(total_reward.dtype) * termination_cfg.weight * self.step_dt
         running_reward = total_reward - termination_reward
-        self.reward_buf = _clip_reward_before_termination(total_reward, termination_reward)
+        # Reuse RewardManager's weighted pre-dt values so stateful reward terms are not evaluated twice.
+        running_reward_terms = (
+            self.reward_manager._step_reward.index_select(1, self._ji22_nontermination_reward_indices) * self.step_dt
+        )
+        positive_reward = torch.clamp_min(running_reward_terms, 0.0).sum(dim=-1)
+        negative_reward = torch.clamp_max(running_reward_terms, 0.0).sum(dim=-1)
+        # Previous positive-clipping behavior, retained for easy experiment comparison:
+        # self.reward_buf = _clip_reward_before_termination(total_reward, termination_reward)
+        self.reward_buf = _combine_ji22_reward(positive_reward, negative_reward, termination_reward)
         step_diagnostics = self._compute_step_diagnostics(action, running_reward)
+        step_diagnostics["Diagnostics/ji22_positive_reward_mean"] = positive_reward.mean()
+        step_diagnostics["Diagnostics/ji22_negative_reward_mean"] = negative_reward.mean()
+        step_diagnostics["Diagnostics/ji22_multiplier_mean"] = torch.exp(negative_reward / JI22_REWARD_SIGMA).mean()
 
         if len(self.recorder_manager.active_terms) > 0:
             self.obs_buf = self.observation_manager.compute()

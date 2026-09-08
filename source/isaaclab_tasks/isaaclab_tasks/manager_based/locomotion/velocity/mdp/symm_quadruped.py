@@ -132,7 +132,10 @@ class GaitVelocityCommandCfg(CommandTermCfg):
         """Bin-weight curriculum for velocity command sampling."""
 
         enabled: bool = False
-        """Whether to sample commands from curriculum bins instead of a uniform range."""
+        """Whether successful command bins progressively unlock neighboring bins.
+
+        When disabled, every command bin remains active with equal sampling weight.
+        """
 
         initial_ranges: GaitVelocityCommandCfg.Ranges = MISSING
         """Initially active command ranges."""
@@ -224,7 +227,7 @@ class GaitVelocityCommandCfg(CommandTermCfg):
 
 
 class _VelocityCommandBinCurriculum:
-    """Weighted bin sampler for planar base velocity commands."""
+    """Weighted bin sampler with optional curriculum updates for planar velocity commands."""
 
     def __init__(self, cfg: GaitVelocityCommandCfg, device: str):
         if cfg.curriculum is None:
@@ -282,7 +285,7 @@ class _VelocityCommandBinCurriculum:
 
     def update(self, bin_ids: torch.Tensor, success: torch.Tensor) -> None:
         """Increase weights for successful bins and their neighboring bins."""
-        if len(bin_ids) == 0 or not bool(torch.any(success)):
+        if not self._cfg.enabled or len(bin_ids) == 0 or not bool(torch.any(success)):
             return
 
         successful_bin_ids = torch.unique(bin_ids[success], dim=0)
@@ -299,7 +302,11 @@ class _VelocityCommandBinCurriculum:
             )
 
     def _initialize_weights(self) -> None:
-        """Activate bins whose centers are inside the configured initial command range."""
+        """Activate all bins uniformly or initialize the enabled curriculum range."""
+        if not self._cfg.enabled:
+            self._weights.fill_(float(self._cfg.max_weight))
+            return
+
         centers = tuple(0.5 * (edges[:-1] + edges[1:]) for edges in self._edges)
         active_masks = []
         for dim, center in enumerate(centers):
@@ -358,7 +365,7 @@ class GaitVelocityCommand(CommandTerm):
         self._completed_command_window_count = torch.zeros(self.num_envs, device=self.device)
         self._sampled_command_bins = torch.zeros(self.num_envs, 3, dtype=torch.long, device=self.device)
         self._command_curriculum = None
-        if cfg.curriculum is not None and cfg.curriculum.enabled:
+        if cfg.curriculum is not None:
             self._command_curriculum = _VelocityCommandBinCurriculum(cfg, self.device)
         if cfg.curriculum_tracking_lin_vel_sigma <= 0.0 or cfg.curriculum_tracking_ang_vel_sigma <= 0.0:
             raise ValueError("Curriculum tracking reward sigmas must be positive.")
@@ -706,7 +713,8 @@ class GaitVelocityCommand(CommandTerm):
         )
 
         if self._command_curriculum is not None:
-            self._command_curriculum.update(self._sampled_command_bins[valid_env_ids], success)
+            if self.cfg.curriculum is not None and self.cfg.curriculum.enabled:
+                self._command_curriculum.update(self._sampled_command_bins[valid_env_ids], success)
             self._update_curriculum_metrics(valid_env_ids)
 
         self._command_tracking_lin_vel_reward_sum[valid_env_ids] = 0.0
@@ -957,6 +965,26 @@ def base_roll_exp(
     asset: Articulation = env.scene[asset_cfg.name]
     roll, _, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
     return _tracking_exp(roll, error_scale)
+
+
+def base_roll_exp_penalty(
+    env: ManagerBasedRLEnv,
+    error_scale: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize base roll with a bounded exponential kernel.
+
+    Args:
+        env: The environment instance.
+        error_scale: Roll-error scale [rad].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Per-environment roll penalty in ``[-1, 0]``.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    roll, _, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+    return _tracking_exp(roll, error_scale) - 1.0
 
 
 def command_tracking_penalty(

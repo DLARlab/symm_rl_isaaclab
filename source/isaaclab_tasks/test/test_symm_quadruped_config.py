@@ -110,6 +110,22 @@ def test_running_reward_is_clipped_before_terminal_penalty_is_added():
     assert torch.equal(reward, torch.tensor([0.5, 0.0, -4.0]))
 
 
+def test_ji22_reward_exponentially_scales_positive_reward_before_termination():
+    positive_reward = torch.tensor([0.02, 0.01, 0.02])
+    negative_reward = torch.tensor([0.0, -0.02, -0.055])
+    termination_reward = torch.tensor([0.0, 0.0, -4.0])
+
+    reward = symm_quadruped_env._combine_ji22_reward(
+        positive_reward,
+        negative_reward,
+        termination_reward,
+        sigma=0.02,
+    )
+
+    expected_reward = positive_reward * torch.exp(negative_reward / 0.02) + termination_reward
+    assert torch.allclose(reward, expected_reward)
+
+
 def test_symmetric_environment_applies_pending_commands_after_reward():
     calls = []
     command_term = SimpleNamespace(command=torch.tensor([[1.0]]))
@@ -128,7 +144,7 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
     def compute_reward(**_):
         calls.append("reward")
         assert torch.equal(command_term.command, torch.tensor([[1.0]]))
-        return torch.ones(1)
+        return torch.tensor([-0.01])
 
     def compute_observation(**_):
         calls.append("observation")
@@ -164,8 +180,10 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
         reward_manager=SimpleNamespace(
             compute=compute_reward,
             get_term_cfg=lambda _: SimpleNamespace(weight=-1.0),
+            _step_reward=torch.tensor([[0.5, -1.0]]),
         ),
         step_dt=0.02,
+        _ji22_nontermination_reward_indices=torch.tensor([0, 1]),
         _compute_step_diagnostics=lambda *_: {},
         observation_manager=SimpleNamespace(compute=compute_observation),
         extras={},
@@ -174,9 +192,10 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
         symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv._apply_pending_command_resampling(env)
     )
 
-    symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv.step(env, torch.zeros(1, 1))
+    _, reward, _, _, _ = symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv.step(env, torch.zeros(1, 1))
 
     assert calls == ["prepare_command", "reward", "apply_pending", "observation"]
+    assert torch.allclose(reward, torch.tensor([0.01 * math.exp(-1.0)]))
 
 
 @pytest.mark.parametrize("env_cfg_cls", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
@@ -530,7 +549,7 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
     assert env._last_ground_reaction_force_includes_friction
 
 
-def test_gait_command_uses_planar_velocity_curriculum():
+def test_gait_command_uses_21_by_1_by_21_bins_with_curriculum_enabled():
     command_cfg = make_gait_velocity_command(symm_quadruped)
 
     assert not command_cfg.heading_command
@@ -542,7 +561,7 @@ def test_gait_command_uses_planar_velocity_curriculum():
     assert command_cfg.curriculum.initial_ranges.lin_vel_x == (-0.5, 0.5)
     assert command_cfg.curriculum.initial_ranges.lin_vel_y == (-0.6, 0.6)
     assert command_cfg.curriculum.initial_ranges.ang_vel_z == (-0.5, 0.5)
-    assert command_cfg.curriculum.num_bins == (16, 1, 16)
+    assert command_cfg.curriculum.num_bins == (21, 1, 21)
     assert command_cfg.resampling_time_range == (10.0, 10.0)
     assert command_cfg.resampling_time_gait == 10.0
     assert command_cfg.resampling_transition_probabilities == pytest.approx((1.0 / 3.0,) * 3)
@@ -556,6 +575,7 @@ def test_gait_command_uses_planar_velocity_curriculum():
 
 def test_gait_command_curriculum_expands_successful_bins():
     command_cfg = make_gait_velocity_command(symm_quadruped)
+    command_cfg.curriculum.enabled = True
     curriculum = symm_quadruped._VelocityCommandBinCurriculum(command_cfg, "cpu")
     initial_active_bins = curriculum.active_bin_count
     initial_max_command = curriculum.max_active_abs_command
@@ -565,24 +585,51 @@ def test_gait_command_curriculum_expands_successful_bins():
     curriculum.update(boundary_bin_id.unsqueeze(0), torch.tensor([True]))
 
     assert curriculum.active_bin_count > initial_active_bins
-    assert initial_max_command.tolist() == pytest.approx([0.5, 0.6, 0.5])
-    assert curriculum.max_active_abs_command[0].item() == pytest.approx(initial_max_command[0].item() + 0.5)
+    bin_width = 8.0 / 21.0
+    assert initial_max_command.tolist() == pytest.approx([4.0 / 7.0, 0.6, 4.0 / 7.0])
+    assert curriculum.max_active_abs_command[0].item() == pytest.approx(initial_max_command[0].item() + bin_width)
     assert curriculum.max_active_abs_command[1].item() == pytest.approx(initial_max_command[1].item())
-    assert curriculum.max_active_abs_command[2].item() == pytest.approx(initial_max_command[2].item() + 0.5)
+    assert curriculum.max_active_abs_command[2].item() == pytest.approx(initial_max_command[2].item() + bin_width)
 
 
 def test_gait_command_curriculum_samples_only_active_bins():
     command_cfg = make_gait_velocity_command(symm_quadruped)
+    command_cfg.curriculum.enabled = True
     curriculum = symm_quadruped._VelocityCommandBinCurriculum(command_cfg, "cpu")
 
     commands, _ = curriculum.sample(256)
 
-    assert torch.all(commands[:, 0] >= -0.5)
-    assert torch.all(commands[:, 0] <= 0.5)
+    assert torch.all(commands[:, 0] >= -(4.0 / 7.0))
+    assert torch.all(commands[:, 0] <= 4.0 / 7.0)
     assert torch.all(commands[:, 1] >= -0.6)
     assert torch.all(commands[:, 1] <= 0.6)
-    assert torch.all(commands[:, 2] >= -0.5)
-    assert torch.all(commands[:, 2] <= 0.5)
+    assert torch.all(commands[:, 2] >= -(4.0 / 7.0))
+    assert torch.all(commands[:, 2] <= 4.0 / 7.0)
+
+
+def test_gait_command_disabled_curriculum_samples_all_bins_without_updating_weights():
+    command_cfg = make_gait_velocity_command(symm_quadruped)
+    command_cfg.curriculum.enabled = False
+    curriculum = symm_quadruped._VelocityCommandBinCurriculum(command_cfg, "cpu")
+
+    initial_weights = curriculum._weights.clone()
+    commands, bin_ids = curriculum.sample(512)
+    curriculum.update(bin_ids, torch.ones(len(bin_ids), dtype=torch.bool))
+
+    assert curriculum.active_bin_count == 21 * 1 * 21
+    assert curriculum.max_active_abs_command.tolist() == pytest.approx([4.0, 0.6, 4.0])
+    assert torch.equal(curriculum._weights, initial_weights)
+    assert torch.all(bin_ids[:, 0] >= 0)
+    assert torch.all(bin_ids[:, 0] < 21)
+    assert torch.all(bin_ids[:, 1] == 0)
+    assert torch.all(bin_ids[:, 2] >= 0)
+    assert torch.all(bin_ids[:, 2] < 21)
+    assert torch.all(commands[:, 0] >= -4.0)
+    assert torch.all(commands[:, 0] <= 4.0)
+    assert torch.all(commands[:, 1] >= -0.6)
+    assert torch.all(commands[:, 1] <= 0.6)
+    assert torch.all(commands[:, 2] >= -4.0)
+    assert torch.all(commands[:, 2] <= 4.0)
 
 
 def test_gait_command_zeroes_forward_commands_at_threshold():
@@ -684,6 +731,7 @@ def test_gait_command_curriculum_uses_configured_reward_thresholds():
         curriculum_tracking_lin_vel_threshold=0.85,
         curriculum_tracking_ang_vel_threshold=0.85,
     )
+    command_cfg.curriculum.enabled = True
     curriculum_update = {}
     command = SimpleNamespace(
         cfg=command_cfg,
@@ -790,18 +838,21 @@ def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
         base_height_range=(0.35, 0.45),
     )
 
+    assert env_cfg.rewards.foot_periodicity.weight == 0.30
+    assert env_cfg.rewards.base_height.weight == 0.30
     assert env_cfg.rewards.hip_action_penalty.weight == 0.15
-    assert env_cfg.rewards.alive_bonus.weight == 1.0
+    assert env_cfg.rewards.alive_bonus.weight == 0.0
     assert env_cfg.rewards.cmd is None
     assert env_cfg.rewards.sagittal_plane is None
     assert env_cfg.rewards.straight_line_motion is None
     assert env_cfg.rewards.termination_penalty.func is base_mdp.is_terminated
-    assert env_cfg.rewards.termination_penalty.weight == -200.0
+    assert env_cfg.rewards.termination_penalty.weight == 0.0
     assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_target_limit_penalty
     assert env_cfg.rewards.joint_target_limits.weight == 0.05
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
     assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.20
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
+    assert env_cfg.rewards.smoothness.weight == 0.10
     assert env_cfg.rewards.foot_clearance.weight == 0.10
     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
@@ -829,7 +880,7 @@ def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
     assert env_cfg.rewards.track_ang_vel_z_exp.func is symm_quadruped.track_ang_vel_z_exp
     assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.5
     assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
-    assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp
+    assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp_penalty
     assert env_cfg.rewards.base_roll_exp.weight == 0.30
     assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
     assert env_cfg.rewards.straight_line_motion is None
@@ -935,10 +986,14 @@ def test_x1_config_sets_branch_preserving_calf_limits_at_startup():
         assert term.params["distribution"] == "uniform"
 
 
-def test_x1_config_uses_reduced_command_curriculum_range_and_thresholds():
+def test_robot_configs_use_uniform_21_by_1_by_21_command_bins():
     x1_command_cfg = DobotX1SymmFlatEnvCfg().commands.base_velocity
     go2_command_cfg = UnitreeGo2SymmFlatEnvCfg().commands.base_velocity
 
+    assert x1_command_cfg.curriculum.enabled
+    assert go2_command_cfg.curriculum.enabled
+    assert x1_command_cfg.curriculum.num_bins == (21, 1, 21)
+    assert go2_command_cfg.curriculum.num_bins == (21, 1, 21)
     assert x1_command_cfg.ranges.lin_vel_x == (-3.0, 3.0)
     assert x1_command_cfg.ranges.ang_vel_z == (-2.0, 2.0)
     assert x1_command_cfg.curriculum_tracking_lin_vel_threshold == 0.85
@@ -1280,11 +1335,13 @@ def test_independent_velocity_tracking_and_roll_rewards_only_measure_their_compo
     y_reward = symm_quadruped.track_lin_vel_y_exp(env, command_name="base_velocity", error_scale=0.20)
     yaw_reward = symm_quadruped.track_ang_vel_z_exp(env, command_name="base_velocity", error_scale=0.20)
     roll_reward = symm_quadruped.base_roll_exp(env, error_scale=0.25)
+    roll_penalty = symm_quadruped.base_roll_exp_penalty(env, error_scale=0.25)
 
     assert x_reward.tolist() == pytest.approx([1.0, expected, 1.0, 1.0, 1.0])
     assert y_reward.tolist() == pytest.approx([1.0, 1.0, expected, 1.0, 1.0])
     assert yaw_reward.tolist() == pytest.approx([1.0, 1.0, 1.0, expected, 1.0])
     assert roll_reward.tolist() == pytest.approx([1.0, 1.0, 1.0, 1.0, expected])
+    assert roll_penalty.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0, expected - 1.0])
 
 
 def test_straight_line_motion_reward_penalizes_world_lateral_position_and_heading():

@@ -5,10 +5,10 @@ set -euo pipefail
 export LD_LIBRARY_PATH="/home/dlar58/anaconda3/envs/symm_rl_isaaclab/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 export OMNI_KIT_ACCEPT_EULA=YES
 
-checkpoint="logs/rsl_rl/dobot_x1_symm_flat/2026-09-03_17-31-53_x1_no_trs/model_4999.pt"
-x_command="2"
+checkpoint="logs/rsl_rl/dobot_x1_symm_flat/2026-09-07_03-47-11_x1_with_trs_mirror0p1/model_9999.pt"
+x_command="1"
 y_command="0.5"
-yaw_command="1"
+yaw_command="0.6"
 
 gait_names=(
   "trot"
