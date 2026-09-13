@@ -14,6 +14,7 @@ import pytest
 import torch
 
 from isaaclab.envs import mdp as base_mdp
+from isaaclab.utils.math import quat_from_euler_xyz
 
 from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.flat_env_cfg import (
     DobotX1SymmFlatEnvCfg,
@@ -857,6 +858,7 @@ def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
     assert env_cfg.rewards.foot_clearance.params["min_command_speed"] == 0.20
+    assert env_cfg.rewards.foot_clearance.params["min_command_yaw_rate"] == 0.20
 
 
 def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
@@ -918,7 +920,7 @@ def test_robot_configs_use_robot_specific_foot_clearance_shaping():
     assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
     assert go2_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
-    assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.04
+    assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.10
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
     assert go2_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_tracking_reward
     assert go2_cfg.rewards.foot_clearance.weight == 0.15
@@ -1018,6 +1020,22 @@ def test_x1_config_terminates_low_or_face_down_front_body_postures():
     assert x1_cfg.terminations.front_body_height.func is symm_quadruped.body_local_point_height_below
     assert x1_cfg.terminations.front_body_height.params["point_b"] == (0.35, 0.0, 0.0)
     assert x1_cfg.terminations.front_body_height.params["min_height"] == 0.08
+
+
+def test_base_height_penalty_targets_035_m_instead_of_accepting_a_range():
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(
+            root_pos_w=_tensor_data(
+                torch.tensor([[0.0, 0.0, 0.35], [0.0, 0.0, 0.30], [0.0, 0.0, 0.40], [0.0, 0.0, 0.50]])
+            ),
+        )
+    )
+    env = SimpleNamespace(scene=scene)
+
+    penalty = symm_quadruped.base_height_range_penalty(env, height_range=(0.45, 0.60))
+
+    assert penalty.tolist() == pytest.approx([0.0, math.exp(-1.0) - 1.0, math.exp(-1.0) - 1.0, math.exp(-3.0) - 1.0])
 
 
 def test_body_local_point_height_detects_virtual_front_body_ground_contact():
@@ -1182,6 +1200,93 @@ def test_foot_clearance_uses_ground_relative_swing_target_without_current_speed_
     assert env._foot_clearance_diagnostics["shortfall"][0].tolist() == pytest.approx([0.06, 0.03, 0.0, 0.0])
 
 
+@pytest.mark.parametrize("command_speed, expected_gate", [(0.1, 0.5), (0.2, 1.0), (0.4, 1.0)])
+def test_foot_clearance_gate_uses_planar_speed_in_every_direction(command_speed, expected_gate):
+    directions = torch.tensor(
+        [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0], [0.6, 0.8], [-0.6, 0.8], [0.6, -0.8], [-0.6, -0.8]]
+    )
+    num_envs = len(directions) + 2
+    command = torch.zeros(num_envs, 3)
+    command[0, 0] = 0.2  # Fully active forward reference.
+    command[1:-1, :2] = command_speed * directions
+    scene = _Scene()
+    scene.env_origins = torch.zeros(num_envs, 3)
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(torch.zeros(num_envs, 4, 3))))
+    gait_command = SimpleNamespace(
+        duty_factors=torch.full((num_envs,), 0.5),
+        kappa=torch.full((num_envs,), 16.0),
+        foot_phases=lambda: torch.full((num_envs, 4), 0.25),
+    )
+    env = SimpleNamespace(
+        scene=scene,
+        command_manager=SimpleNamespace(
+            get_term=lambda _: gait_command,
+            get_command=lambda _: command,
+        ),
+    )
+
+    penalty = symm_quadruped.foot_clearance_penalty(
+        env,
+        command_name="base_velocity",
+        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
+        min_height=0.04,
+        height_scale=0.025,
+        min_command_speed=0.2,
+    )
+
+    assert penalty[0] < 0.0
+    torch.testing.assert_close(penalty[1:-1], (expected_gate * penalty[0]).expand(len(directions)))
+    assert penalty[-1].item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("yaw_scale", [0.2, 0.4])
+def test_foot_clearance_gate_includes_yaw_with_an_independent_scale(yaw_scale):
+    command = torch.tensor(
+        [
+            [0.2, 0.0, 0.0],  # Fully active planar reference.
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.5 * yaw_scale],
+            [0.0, 0.0, -0.5 * yaw_scale],
+            [0.0, 0.0, yaw_scale],
+            [0.0, 0.0, -yaw_scale],
+            [0.0, 0.0, 2.0 * yaw_scale],
+            [0.0, 0.0, -2.0 * yaw_scale],
+            [0.06, 0.08, 0.25 * yaw_scale],  # Planar speed dominates.
+            [0.03, 0.04, -0.75 * yaw_scale],  # Yaw rate dominates.
+            [0.06, 0.08, 0.5 * yaw_scale],  # Equally active gates must not add.
+        ]
+    )
+    num_envs = len(command)
+    scene = _Scene()
+    scene.env_origins = torch.zeros(num_envs, 3)
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(torch.zeros(num_envs, 4, 3))))
+    gait_command = SimpleNamespace(
+        duty_factors=torch.full((num_envs,), 0.5),
+        kappa=torch.full((num_envs,), 16.0),
+        foot_phases=lambda: torch.full((num_envs, 4), 0.25),
+    )
+    env = SimpleNamespace(
+        scene=scene,
+        command_manager=SimpleNamespace(
+            get_term=lambda _: gait_command,
+            get_command=lambda _: command,
+        ),
+    )
+    penalty = symm_quadruped.foot_clearance_penalty(
+        env,
+        command_name="base_velocity",
+        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
+        min_height=0.04,
+        height_scale=0.025,
+        min_command_speed=0.2,
+        min_command_yaw_rate=yaw_scale,
+    )
+
+    assert penalty[0] < 0.0
+    expected_gates = torch.tensor([1.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 0.5, 0.75, 0.5])
+    torch.testing.assert_close(penalty, expected_gates * penalty[0])
+
+
 def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost_support():
     pitch = 0.8
     scene = _Scene()
@@ -1342,6 +1447,24 @@ def test_independent_velocity_tracking_and_roll_rewards_only_measure_their_compo
     assert yaw_reward.tolist() == pytest.approx([1.0, 1.0, 1.0, expected, 1.0])
     assert roll_reward.tolist() == pytest.approx([1.0, 1.0, 1.0, 1.0, expected])
     assert roll_penalty.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0, expected - 1.0])
+
+
+@pytest.mark.parametrize("yaw", [0.0, 1.3])
+def test_base_roll_penalty_uses_absolute_roll_and_ignores_pitch(yaw):
+    roll = torch.tensor([0.0, 0.0, 0.0, 0.125, -0.125, 0.125, 0.125])
+    pitch = torch.tensor([0.0, 0.125, -0.125, 0.0, 0.0, 0.125, -0.125])
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(
+            root_quat_w=_tensor_data(quat_from_euler_xyz(roll, pitch, torch.full_like(roll, yaw))),
+        )
+    )
+    env = SimpleNamespace(scene=scene)
+
+    penalty = symm_quadruped.base_roll_exp_penalty(env, error_scale=0.25)
+
+    roll_penalty = math.exp(-0.5) - 1.0
+    assert penalty.tolist() == pytest.approx([0.0] * 3 + [roll_penalty] * 4)
 
 
 def test_straight_line_motion_reward_penalizes_world_lateral_position_and_heading():

@@ -972,7 +972,9 @@ def base_roll_exp_penalty(
     error_scale: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalize base roll with a bounded exponential kernel.
+    """Penalize the absolute base roll angle around zero with a bounded exponential kernel.
+
+    The penalty is ``exp(-abs(roll) / error_scale) - 1``. Pitch and yaw do not affect the penalty.
 
     Args:
         env: The environment instance.
@@ -982,9 +984,11 @@ def base_roll_exp_penalty(
     Returns:
         Per-environment roll penalty in ``[-1, 0]``.
     """
+    if error_scale <= 0.0:
+        raise ValueError(f"Tracking error scale must be positive, received {error_scale}.")
     asset: Articulation = env.scene[asset_cfg.name]
     roll, _, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
-    return _tracking_exp(roll, error_scale) - 1.0
+    return torch.exp(-torch.abs(roll) / error_scale) - 1.0
 
 
 def command_tracking_penalty(
@@ -1249,12 +1253,26 @@ def base_height_range_penalty(
     height_range: tuple[float, float],
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalty for base height outside the configured range."""
+    """Penalize absolute base-height error relative to a fixed target of 0.35 m.
+
+    The penalty is ``exp(-20 * abs(0.35 - base_height)) - 1``, with an exponential coefficient of 20 [1/m].
+
+    Args:
+        env: The environment instance.
+        height_range: Previous allowable base-height range [m], retained for compatibility and currently unused.
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Per-environment height penalty in ``[-1, 0]``.
+    """
     asset: Articulation = env.scene[asset_cfg.name]
-    lower_bound, upper_bound = height_range
-    deviation = torch.clamp(lower_bound - asset.data.root_pos_w.torch[:, 2], min=0.0)
-    deviation += torch.clamp(asset.data.root_pos_w.torch[:, 2] - upper_bound, min=0.0)
-    return -(1.0 - torch.exp(-5.0 * deviation))
+    # Previous interval-based height error:
+    # lower_bound, upper_bound = height_range
+    # deviation = torch.clamp(lower_bound - asset.data.root_pos_w.torch[:, 2], min=0.0)
+    # deviation += torch.clamp(asset.data.root_pos_w.torch[:, 2] - upper_bound, min=0.0)
+    deviation = torch.abs(0.35 - asset.data.root_pos_w.torch[:, 2])
+    # return -(1.0 - torch.exp(-5.0 * deviation))
+    return -(1.0 - torch.exp(-20.0 * deviation))
 
 
 def foot_periodicity_penalty(
@@ -1313,10 +1331,14 @@ def foot_clearance_penalty(
     feet_cfg: SceneEntityCfg,
     min_height: float = 0.08,
     height_scale: float = 0.05,
-    min_command_speed: float = 0.2,
+    min_command_speed: float = 0.1,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    min_command_yaw_rate: float = 0.1,
 ) -> torch.Tensor:
     """Penalize feet below a ground-relative swing-height trajectory.
+
+    The command gate uses the maximum of independently normalized planar speed and absolute yaw rate,
+    clipped to ``[0, 1]``, so translation and turning in place both enable swing clearance.
 
     Args:
         env: The environment instance.
@@ -1324,8 +1346,9 @@ def foot_clearance_penalty(
         feet_cfg: Foot body configuration in FL, FR, RL, and RR order.
         min_height: Peak commanded foot-link height above flat ground [m].
         height_scale: Clearance-shortfall shaping scale [m].
-        min_command_speed: Forward command magnitude that fully enables the penalty [m/s].
+        min_command_speed: Planar command magnitude that fully enables the penalty [m/s].
         asset_cfg: Robot articulation configuration.
+        min_command_yaw_rate: Absolute yaw command that fully enables the penalty [rad/s].
 
     Returns:
         The negative bounded swing-clearance penalty.
@@ -1336,6 +1359,8 @@ def foot_clearance_penalty(
         raise ValueError(f"Foot-clearance height scale must be positive, received {height_scale}.")
     if min_command_speed <= 0.0:
         raise ValueError(f"Foot-clearance command scale must be positive, received {min_command_speed}.")
+    if min_command_yaw_rate <= 0.0:
+        raise ValueError(f"Foot-clearance yaw command scale must be positive, received {min_command_yaw_rate}.")
 
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
@@ -1349,7 +1374,9 @@ def foot_clearance_penalty(
     clearance_penalty = -torch.expm1(-shortfall / height_scale)
 
     command = env.command_manager.get_command(command_name)
-    command_gate = (torch.abs(command[:, 0]) / min_command_speed).clamp(0.0, 1.0).unsqueeze(-1)
+    command_speed = torch.linalg.vector_norm(command[:, :2], dim=-1)
+    command_gate = torch.maximum(command_speed / min_command_speed, torch.abs(command[:, 2]) / min_command_yaw_rate)
+    command_gate = command_gate.clamp(0.0, 1.0).unsqueeze(-1)
     active_weight = swing_weight * command_gate
     weighted_penalty = clearance_penalty * active_weight
     penalty = -torch.sum(weighted_penalty, dim=-1)

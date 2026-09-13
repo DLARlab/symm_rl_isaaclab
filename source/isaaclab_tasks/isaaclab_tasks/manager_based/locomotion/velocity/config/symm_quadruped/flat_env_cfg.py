@@ -307,6 +307,7 @@ def configure_rewards(
             "min_height": foot_clearance_height,
             "height_scale": foot_clearance_height_scale,
             "min_command_speed": 0.20,
+            "min_command_yaw_rate": 0.20,
         }
     elif foot_clearance_mode == "current_speed_penalty":
         foot_clearance_func = mdp_module.foot_clearance_current_speed_penalty

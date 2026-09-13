@@ -140,7 +140,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
                 effort_limit=17.0,
                 velocity_limit=30.0,
                 stiffness=30.0,
-                damping=0.65,
+                damping=1.2,
                 friction=0.0,
             ),
             "thigh_legs": IdealPDActuatorCfg(
@@ -151,7 +151,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
                 },
                 velocity_limit=30.0,
                 stiffness=30.0,
-                damping=0.65,
+                damping=1.2,
                 friction=0.0,
             ),
             "calf_legs": IdealPDActuatorCfg(
@@ -159,7 +159,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
                 effort_limit=37.0,
                 velocity_limit=26.0,
                 stiffness=30.0,
-                damping=0.65,
+                damping=1.2,
                 friction=0.0,
             ),
         }
@@ -219,7 +219,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
             base_height_range=_DOBOT_X1_BASE_HEIGHT_RANGE,
-            foot_clearance_height=0.04,
+            foot_clearance_height=0.10,
             foot_clearance_height_scale=0.025,
             foot_clearance_mode="phase_penalty",
             pitch_scale=0.35,
