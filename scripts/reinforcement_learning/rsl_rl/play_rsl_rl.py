@@ -161,6 +161,18 @@ parser.add_argument(
     default="tracking_errors.csv",
     help="Output CSV path for the tracking-error grid table.",
 )
+parser.add_argument(
+    "--symm_command_batch",
+    action="store_true",
+    help="Record six simultaneous fixed-command groups to per-direction NPZ archives.",
+)
+parser.add_argument("--symm_command_batch_envs_per_command", type=int, default=100)
+parser.add_argument(
+    "--symm_command_batch_duration",
+    type=float,
+    default=20.0,
+    help="Simulated duration [s] for every fixed command group.",
+)
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
 args_cli, remaining_args = setup_preset_cli(parser)
@@ -404,6 +416,31 @@ def main(  # noqa: C901
                 flush=True,
             )
 
+        command_batch = None
+        if args_cli.symm_command_batch:
+            if args_cli.tracking_error_grid_test or args_cli.tracking_error_direction_test:
+                raise ValueError("Batched command recording cannot be combined with other tracking tests.")
+            if args_cli.video or args_cli.symm_rollout_plots:
+                raise ValueError("Batched command recording saves NPZ data without videos or single-environment plots.")
+            from symm_command_batch import SymmetricCommandBatchRecorder
+
+            lateral_speed = args_cli.tracking_error_direction_lateral_speed
+            command_batch = SymmetricCommandBatchRecorder(
+                env.unwrapped,
+                output_dir=checkpoint_eval_dir,
+                envs_per_command=args_cli.symm_command_batch_envs_per_command,
+                duration=args_cli.symm_command_batch_duration,
+                forward_speed=args_cli.tracking_error_direction_speed,
+                lateral_speed=args_cli.tracking_error_direction_speed if lateral_speed is None else lateral_speed,
+                yaw_rate=args_cli.tracking_error_direction_yaw_rate,
+            )
+            command_batch.install_command_override()
+            print(
+                f"[symm_locomotion] command batch: 6 x {args_cli.symm_command_batch_envs_per_command} environments, "
+                f"{command_batch.total_steps} steps ({args_cli.symm_command_batch_duration:g} s)",
+                flush=True,
+            )
+
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         if agent_cfg.class_name == "OnPolicyRunner":
@@ -433,7 +470,7 @@ def main(  # noqa: C901
             else:
                 normalizer = None
 
-        if tracking_error_grid is None:
+        if tracking_error_grid is None and command_batch is None:
             # export the trained policy to JIT and ONNX formats during interactive playback
             export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
             if version.parse(installed_version) >= version.parse("4.0.0"):
@@ -457,10 +494,12 @@ def main(  # noqa: C901
             )
 
         # reset environment
-        if tracking_error_grid is None:
+        if tracking_error_grid is None and command_batch is None:
             obs = env.get_observations()
         else:
             obs, _ = env.reset()
+        if command_batch is not None:
+            command_batch.reset_reference()
         timestep = 0
         gait_info_interval = max(args_cli.print_gait_info_interval, 1)
         tracking_error_direction_total_steps = (
@@ -498,6 +537,8 @@ def main(  # noqa: C901
                 if rollout_plotter is not None:
                     # In RSL-RL inference, the policy output is the deterministic actor mean.
                     rollout_plotter.record(actions=actions, actor_means=actions, dones=dones)
+                if command_batch is not None:
+                    command_batch.record(actions=actions, actor_means=actions, dones=dones)
 
                 timestep += 1
                 if args_cli.print_gait_info and timestep % gait_info_interval == 0:
@@ -511,6 +552,8 @@ def main(  # noqa: C901
                     output_path = tracking_error_grid.write_csv()
                     print(f"[symm_locomotion] saved tracking errors: {output_path}", flush=True)
                     break
+                if command_batch is not None and command_batch.is_complete:
+                    break
 
                 sleep_time = dt - (time.time() - start_time)
                 if args_cli.real_time and sleep_time > 0:
@@ -519,9 +562,13 @@ def main(  # noqa: C901
         except KeyboardInterrupt:
             pass
         finally:
-            if rollout_plotter is not None:
-                rollout_plotter.save()
-            env.close()
+            try:
+                if rollout_plotter is not None:
+                    rollout_plotter.save()
+                if command_batch is not None:
+                    command_batch.save()
+            finally:
+                env.close()
 
 
 if __name__ == "__main__":

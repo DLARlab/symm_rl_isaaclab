@@ -35,8 +35,8 @@ DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS = (
 )
 """Per-leg signs mapping Dobot joints into the shared logical quadruped convention."""
 
-DOBOT_X1_SYMM_JOINT_RANGES = (1.3264, 5.236, 5.06)
-"""Dobot X1 hip, thigh, and calf joint ranges [rad]."""
+DOBOT_X1_SYMM_JOINT_RANGES = _symm_quadruped.SYMM_QUADRUPED_JOINT_RANGES
+"""Compatibility alias for shared hip, thigh, and calf symmetry normalization ranges [rad]."""
 
 _MORPHOLOGICAL_SYMMETRY_DEPRECATION_WARNED = False
 

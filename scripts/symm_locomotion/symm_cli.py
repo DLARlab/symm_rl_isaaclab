@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import shlex
@@ -25,6 +26,14 @@ DEFAULT_TR_MIN_ABS_CMD_VEL = 0.0
 DEFAULT_VIDEO_DURATION_S = 30.0
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
 TRACKING_ERROR_GRID_COMMAND_COUNT = 23
+DIFF_CMDS_GAITS = {
+    "trot": (0.0, 0.5, 0.5, 0.0),
+    "bound": (0.0, 0.0, 0.5, 0.5),
+    "half-bound-left": (0.13, -0.13, 0.5, 0.5),
+    "half-bound-right": (-0.13, 0.13, 0.5, 0.5),
+    "rotary-gallop": (-0.13, 0.13, 0.63, 0.37),
+    "transverse-gallop": (0.13, -0.13, 0.63, 0.37),
+}
 
 
 @dataclass(frozen=True)
@@ -634,6 +643,67 @@ def tracking_grid_lab_args(args: argparse.Namespace, extra: list[str]) -> list[s
     return command + extra
 
 
+def add_diff_cmds_args(parser: argparse.ArgumentParser) -> None:
+    """Add fixed six-direction rollout recording options."""
+    add_common_args(parser)
+    add_checkpoint_args(parser)
+    parser.add_argument("--gait", choices=tuple(DIFF_CMDS_GAITS), required=True)
+    parser.add_argument("--envs_per_command", type=int, default=100)
+    parser.add_argument("--duration", type=float, default=20.0, help="Duration of every command [s].")
+    parser.add_argument("--forward_speed", type=float, default=1.0, help="Forward/backward command magnitude [m/s].")
+    parser.add_argument("--lateral_speed", type=float, default=0.5, help="Left/right command magnitude [m/s].")
+    parser.add_argument("--yaw_rate", type=float, default=0.6, help="Turning command magnitude [rad/s].")
+    parser.add_argument("--output_dir", default=None, help="Output root; gait/direction/sim_data.npz is appended.")
+
+
+def diff_cmds_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
+    """Build headless playback arguments for fixed-command batch recordings."""
+    if args.envs_per_command <= 0:
+        raise ValueError("envs_per_command must be positive.")
+    for name in ("duration", "forward_speed", "lateral_speed", "yaw_rate"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be finite and positive.")
+    checkpoint = resolve_checkpoint(args)
+    output_root = (
+        Path(args.output_dir)
+        if args.output_dir
+        else checkpoint.parent
+        / "eval"
+        / (f"{checkpoint.stem}_diff_cmds_x{args.forward_speed:g}_y{args.lateral_speed:g}_yaw{args.yaw_rate:g}")
+    )
+    if not output_root.is_absolute():
+        output_root = repo_root() / output_root
+    theta = ",".join(str(value) for value in DIFF_CMDS_GAITS[args.gait])
+    command = [
+        "play",
+        "--rl_library",
+        "rsl_rl",
+        "--task",
+        args.robot_spec.play_task,
+        "--checkpoint",
+        str(checkpoint),
+        "--num_envs",
+        str(6 * args.envs_per_command),
+        "--symm_command_batch",
+        "--symm_command_batch_envs_per_command",
+        str(args.envs_per_command),
+        "--symm_command_batch_duration",
+        str(args.duration),
+        "--tracking_error_direction_speed",
+        str(args.forward_speed),
+        "--tracking_error_direction_lateral_speed",
+        str(args.lateral_speed),
+        "--tracking_error_direction_yaw_rate",
+        str(args.yaw_rate),
+        "--evaluation_output_dir",
+        str(output_root / args.gait),
+        f"env.commands.base_velocity.init_foot_thetas=[[{theta}]]",
+        "env.commands.base_velocity.add_noise_theta=False",
+    ]
+    return command + extra
+
+
 def add_ablation_args(parser: argparse.ArgumentParser) -> None:
     """Add ablation command options."""
     add_common_args(parser)
@@ -773,6 +843,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_tracking_grid_args(tracking_grid_parser)
 
+    diff_cmds_parser = subparsers.add_parser("diff_cmds", help="Record six fixed command groups in parallel.")
+    add_diff_cmds_args(diff_cmds_parser)
+
     ablation_parser = subparsers.add_parser("ablation", help="Run symmetry ablations.")
     add_ablation_args(ablation_parser)
 
@@ -816,6 +889,8 @@ def main(argv: list[str] | None = None) -> int:
             return convert_latest_video(args, checkpoint, previous_videos)
         if args.command == "tracking-grid":
             return run_isaaclab(args, tracking_grid_lab_args(args, extra))
+        if args.command == "diff_cmds":
+            return run_isaaclab(args, diff_cmds_lab_args(args, extra))
         if args.command == "ablation":
             return run_ablation(args, extra)
         if args.command == "compare":

@@ -48,12 +48,8 @@ SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS = (
 )
 """Default per-leg signs for converting robot joints to the logical quadruped convention."""
 
-SYMM_QUADRUPED_JOINT_RANGES = (
-    96.0 * torch.pi / 180.0,
-    290.0 * torch.pi / 180.0,
-    108.0 * torch.pi / 180.0,
-)
-"""Default hip, thigh, and calf joint ranges [rad] used to normalize morphology errors."""
+SYMM_QUADRUPED_JOINT_RANGES = (1.3264, 5.236, 5.06)
+"""Shared hip, thigh, and calf symmetry normalization ranges [rad], matching X1's reward scales."""
 
 SYMM_QUADRUPED_LEG_PAIRS = (
     ("FL", "FR"),
@@ -1252,15 +1248,17 @@ def base_height_range_penalty(
     env: ManagerBasedRLEnv,
     height_range: tuple[float, float],
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    target_height: float = 0.35,
 ) -> torch.Tensor:
-    """Penalize absolute base-height error relative to a fixed target of 0.35 m.
+    """Penalize absolute base-height error relative to a configurable target.
 
-    The penalty is ``exp(-20 * abs(0.35 - base_height)) - 1``, with an exponential coefficient of 20 [1/m].
+    The penalty is ``exp(-20 * abs(target_height - base_height)) - 1``, with an exponential coefficient of 20 [1/m].
 
     Args:
         env: The environment instance.
         height_range: Previous allowable base-height range [m], retained for compatibility and currently unused.
         asset_cfg: Robot articulation configuration.
+        target_height: Target base height [m]. Defaults to 0.35 m.
 
     Returns:
         Per-environment height penalty in ``[-1, 0]``.
@@ -1270,7 +1268,7 @@ def base_height_range_penalty(
     # lower_bound, upper_bound = height_range
     # deviation = torch.clamp(lower_bound - asset.data.root_pos_w.torch[:, 2], min=0.0)
     # deviation += torch.clamp(asset.data.root_pos_w.torch[:, 2] - upper_bound, min=0.0)
-    deviation = torch.abs(0.35 - asset.data.root_pos_w.torch[:, 2])
+    deviation = torch.abs(target_height - asset.data.root_pos_w.torch[:, 2])
     # return -(1.0 - torch.exp(-5.0 * deviation))
     return -(1.0 - torch.exp(-20.0 * deviation))
 

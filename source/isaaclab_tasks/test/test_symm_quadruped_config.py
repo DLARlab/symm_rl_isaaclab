@@ -14,6 +14,7 @@ import pytest
 import torch
 
 from isaaclab.envs import mdp as base_mdp
+from isaaclab.managers import RewardTermCfg
 from isaaclab.utils.math import quat_from_euler_xyz
 
 from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.flat_env_cfg import (
@@ -855,8 +856,8 @@ def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert env_cfg.rewards.smoothness.weight == 0.10
     assert env_cfg.rewards.foot_clearance.weight == 0.10
-    assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
-    assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
+    assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.10
+    assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
     assert env_cfg.rewards.foot_clearance.params["min_command_speed"] == 0.20
     assert env_cfg.rewards.foot_clearance.params["min_command_yaw_rate"] == 0.20
 
@@ -881,7 +882,7 @@ def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
     assert env_cfg.rewards.track_lin_vel_y_exp is None
     assert env_cfg.rewards.track_ang_vel_z_exp.func is symm_quadruped.track_ang_vel_z_exp
     assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.5
-    assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
+    assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
     assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp_penalty
     assert env_cfg.rewards.base_roll_exp.weight == 0.30
     assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
@@ -909,23 +910,73 @@ def test_rewards_cfg_preserves_deprecated_morphological_symmetry_alias():
     assert configured_rewards.leg_permutation_symmetry.weight == 0.42
 
 
-def test_robot_configs_use_robot_specific_foot_clearance_shaping():
-    x1_cfg = DobotX1SymmFlatEnvCfg()
-    go2_cfg = UnitreeGo2SymmFlatEnvCfg()
+@pytest.mark.parametrize(
+    "go2_cfg_cls, x1_cfg_cls",
+    [
+        (UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg),
+        (UnitreeGo2SymmFlatEnvCfg_PLAY, DobotX1SymmFlatEnvCfg_PLAY),
+    ],
+)
+def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1_cfg_cls):
+    x1_cfg = x1_cfg_cls()
+    go2_cfg = go2_cfg_cls()
 
-    assert x1_cfg.rewards.leg_permutation_symmetry.func is dobot_x1_symm.leg_permutation_symmetry_penalty
+    assert x1_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
     assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.20
-    assert go2_cfg.rewards.leg_permutation_symmetry.weight == 0.20
     assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
-    assert go2_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
     assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.10
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
-    assert go2_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_tracking_reward
-    assert go2_cfg.rewards.foot_clearance.weight == 0.15
-    assert go2_cfg.rewards.foot_clearance.params["target_height"] == 0.08
-    assert go2_cfg.rewards.foot_clearance.params["excess_height_margin"] == 0.03
+    assert x1_cfg.rewards.foot_clearance.weight == 0.10
+    assert go2_cfg.rewards.base_height.params["target_height"] == 0.30
+    assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
+    assert go2_cfg.rewards.foot_clearance.params["min_height"] == 0.08
+
+    # Only robot bindings and the explicitly configured height targets may differ.
+    robot_binding_params = {"feet_cfg", "joint_cfg", "foot_sensor_body_names", "logical_joint_signs"}
+    robot_target_params = {"base_height": {"target_height"}, "foot_clearance": {"min_height"}}
+    assert vars(go2_cfg.rewards).keys() == vars(x1_cfg.rewards).keys()
+    for name, x1_term in vars(x1_cfg.rewards).items():
+        go2_term = getattr(go2_cfg.rewards, name)
+        if not isinstance(x1_term, RewardTermCfg):
+            assert go2_term == x1_term, name
+            continue
+        assert go2_term.func is x1_term.func, name
+        assert go2_term.weight == x1_term.weight, name
+        excluded_params = robot_binding_params | robot_target_params.get(name, set())
+        go2_params = {key: value for key, value in go2_term.params.items() if key not in excluded_params}
+        x1_params = {key: value for key, value in x1_term.params.items() if key not in excluded_params}
+        assert go2_params == x1_params, name
+
+
+def test_robot_symmetry_rewards_match_x1_for_equivalent_logical_joint_states():
+    logical_joint_pos = torch.arange(24, dtype=torch.float32).reshape(2, 12) / 20.0
+    gait_command = SimpleNamespace(foot_thetas=torch.zeros(2, 4))
+    env = SimpleNamespace(
+        num_envs=2,
+        device="cpu",
+        scene=_Scene(),
+        command_manager=SimpleNamespace(get_term=lambda _: gait_command),
+    )
+    joint_cfg = SimpleNamespace(joint_ids=list(range(12)))
+    penalties = []
+    for cfg, signs in (
+        (UnitreeGo2SymmFlatEnvCfg(), symm_quadruped.SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS),
+        (DobotX1SymmFlatEnvCfg(), dobot_x1_symm.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS),
+    ):
+        physical_joint_pos = logical_joint_pos * torch.tensor(signs).reshape(1, 12)
+        env.scene["robot"] = SimpleNamespace(data=SimpleNamespace(joint_pos=_tensor_data(physical_joint_pos)))
+        term = cfg.rewards.leg_permutation_symmetry
+        penalties.append(term.func(env, **{**term.params, "joint_cfg": joint_cfg}))
+
+    # The compatibility adapter preserves X1's original reward semantics.
+    x1_reference = dobot_x1_symm.leg_permutation_symmetry_penalty(
+        env, command_name="base_velocity", joint_cfg=joint_cfg
+    )
+    assert torch.all(x1_reference < 0.0)
+    assert torch.allclose(penalties[0], x1_reference)
+    assert torch.allclose(penalties[1], x1_reference)
 
 
 def test_play_configs_enable_ground_filtered_normal_and_friction_forces():
@@ -1022,18 +1073,19 @@ def test_x1_config_terminates_low_or_face_down_front_body_postures():
     assert x1_cfg.terminations.front_body_height.params["min_height"] == 0.08
 
 
-def test_base_height_penalty_targets_035_m_instead_of_accepting_a_range():
+@pytest.mark.parametrize("target_height", [None, 0.30])
+def test_base_height_penalty_uses_target_instead_of_accepting_a_range(target_height):
+    target = 0.35 if target_height is None else target_height
     scene = _Scene()
     scene["robot"] = SimpleNamespace(
         data=SimpleNamespace(
-            root_pos_w=_tensor_data(
-                torch.tensor([[0.0, 0.0, 0.35], [0.0, 0.0, 0.30], [0.0, 0.0, 0.40], [0.0, 0.0, 0.50]])
-            ),
+            root_pos_w=_tensor_data(torch.tensor([[0.0, 0.0, target + offset] for offset in (0.0, -0.05, 0.05, 0.15)])),
         )
     )
     env = SimpleNamespace(scene=scene)
 
-    penalty = symm_quadruped.base_height_range_penalty(env, height_range=(0.45, 0.60))
+    params = {} if target_height is None else {"target_height": target_height}
+    penalty = symm_quadruped.base_height_range_penalty(env, height_range=(0.45, 0.60), **params)
 
     assert penalty.tolist() == pytest.approx([0.0, math.exp(-1.0) - 1.0, math.exp(-1.0) - 1.0, math.exp(-3.0) - 1.0])
 

@@ -5,7 +5,7 @@ set -euo pipefail
 export LD_LIBRARY_PATH="/home/dlar58/anaconda3/envs/symm_rl_isaaclab/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 export OMNI_KIT_ACCEPT_EULA=YES
 
-checkpoint="logs/rsl_rl/dobot_x1_symm_flat/2026-09-11_03-08-04_x1_with_trs_mirror0p1/model_9999.pt"
+checkpoint="logs/rsl_rl/dobot_x1_symm_flat/2026-09-16_17-05-18_x1_with_trs_mirror0p1/model_9999.pt"
 x_command="1"
 y_command="0.5"
 yaw_command="0.6"

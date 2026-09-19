@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
@@ -24,8 +26,12 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp import symm_quadruped as symm_mdp
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import RewardsCfg
 from isaaclab_tasks.utils import PresetCfg
+
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedRLEnvCfg
 
 SYMM_QUADRUPED_FLAT_TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(160.0, 160.0),
@@ -231,22 +237,45 @@ def configure_policy_observations(env_cfg, mdp_module, joint_names: Sequence[str
 
 
 def configure_rewards(
-    env_cfg,
-    mdp_module,
+    env_cfg: ManagerBasedRLEnvCfg,
+    mdp_module: ModuleType = symm_mdp,
     *,
     joint_names: Sequence[str],
     foot_body_names: Sequence[str],
     foot_sensor_names: Sequence[str],
     foot_sensor_body_names: Sequence[str],
-    base_height_range: tuple[float, float],
-    foot_clearance_height: float = 0.08,
-    foot_clearance_height_scale: float = 0.05,
+    base_height_range: tuple[float, float] = (0.45, 0.60),
+    base_height_target: float = 0.35,
+    foot_clearance_height: float = 0.10,
+    foot_clearance_height_scale: float = 0.025,
     foot_clearance_mode: str = "phase_penalty",
     foot_clearance_weight: float = 0.10,
-    pitch_scale: float = 0.50,
-    yaw_tracking_error_scale: float = 0.20,
+    pitch_scale: float = 0.35,
+    yaw_tracking_error_scale: float = 0.50,
+    logical_joint_signs: Sequence[Sequence[float]] | None = None,
 ) -> None:
-    """Configure the shared symmetric quadruped reward layout."""
+    """Configure shared Go2 and X1 reward functions and coefficients.
+
+    X1 reward settings provide the common defaults. Robot configs supply asset
+    bindings, joint-axis conventions, and overrides such as height targets.
+
+    Args:
+        env_cfg: Environment configuration to update.
+        mdp_module: Reward implementation module. Both tasks use the shared default.
+        joint_names: Joint names in logical FL, FR, RL, RR order.
+        foot_body_names: Foot body names in logical leg order.
+        foot_sensor_names: Contact sensor names in logical leg order.
+        foot_sensor_body_names: Body names selected by the contact sensors.
+        base_height_range: Legacy height range [m], currently ignored by the shared height penalty.
+        base_height_target: Target base height [m].
+        foot_clearance_height: Peak swing foot height [m].
+        foot_clearance_height_scale: Clearance shortfall scale [m].
+        foot_clearance_mode: Foot-clearance reward formulation.
+        foot_clearance_weight: Foot-clearance reward coefficient.
+        pitch_scale: Legacy pitch scale [rad], unused while straight-line shaping is disabled.
+        yaw_tracking_error_scale: Yaw-rate tracking error scale [rad/s].
+        logical_joint_signs: Per-leg signs mapping physical joints into logical joint axes.
+    """
     env_cfg.rewards.track_lin_vel_xy_exp = RewTerm(
         func=base_mdp.track_lin_vel_xy_exp,
         weight=0.5,
@@ -297,7 +326,7 @@ def configure_rewards(
     env_cfg.rewards.base_height = RewTerm(
         func=mdp_module.base_height_range_penalty,
         weight=0.30,
-        params={"height_range": base_height_range},
+        params={"height_range": base_height_range, "target_height": base_height_target},
     )
     if foot_clearance_mode == "phase_penalty":
         foot_clearance_func = mdp_module.foot_clearance_penalty
@@ -349,6 +378,8 @@ def configure_rewards(
         weight=0.20,
         params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
     )
+    if logical_joint_signs is not None:
+        env_cfg.rewards.leg_permutation_symmetry.params["logical_joint_signs"] = logical_joint_signs
     env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
 
 

@@ -52,6 +52,74 @@ python scripts/symm_locomotion/train.py --robot go2 --iterations 30000 --no-trs
 python scripts/symm_locomotion/play.py --robot x1 --checkpoint latest
 ```
 
+## Parallel fixed-command recordings
+
+From the repository root, run:
+
+```bash
+bash test_diff_cmds.sh --checkpoint logs/rsl_rl/dobot_x1_symm_flat/RUN/model_9999.pt
+```
+
+This evaluates trot, bound, both half-bounds, rotary gallop, and transverse
+gallop in six successive simulation launches. Each launch creates **600
+environments simultaneously**, with 100 assigned to each fixed command:
+
+| Direction | Forward velocity [m/s] | Lateral velocity [m/s] | Yaw rate [rad/s] |
+|---|---:|---:|---:|
+| forward | 1.0 | 0.0 | 0.0 |
+| backward | -1.0 | 0.0 | 0.0 |
+| left | 0.0 | 0.5 | 0.0 |
+| right | 0.0 | -0.5 | 0.0 |
+| yaw_left | 0.0 | 0.0 | 0.6 |
+| yaw_right | 0.0 | 0.0 | -0.6 |
+
+Every environment runs for **20 simulated seconds** (1,000 control steps at
+50 Hz). Commands remain assigned across command resampling and episode resets.
+The fixed gait phase template is the same as in `test.sh`, with phase noise
+disabled and observation history length 20. Recording runs headlessly and
+saves data without rendering videos or generating per-environment figures.
+
+One `sim_data.npz` per direction contains all 100 environments, producing 36
+archives across the six gaits. Default paths are:
+
+```text
+<run>/eval/model_9999_diff_cmds_x1_y0.5_yaw0.6/
+  trot/forward/sim_data.npz
+  trot/backward/sim_data.npz
+  ...
+  transverse-gallop/yaw_right/sim_data.npz
+```
+
+The existing raw and derived signal names are preserved, with an additional
+environment axis: `desired_lin_vel` and `true_lin_vel` have shape `(1000, 100, 3)`,
+`joint_torques` and `joint_powers` have shape `(1000, 100, 12)`, foot force
+vectors have shape `(1000, 100, 4, 3)`, and `episode_done` has shape `(1000, 100)`.
+`time_steps` remains a shared `(1000,)` time vector. `env_ids` identifies the
+100 environment columns; `command_name` and `assigned_command` identify the
+fixed command. **No signals are averaged across environments.**
+
+Terminal samples retain the state before the reset, and `episode_done` marks
+each reset independently. Centered moving means are computed per environment
+without crossing resets. If interrupted, the archives contain the samples
+collected so far and `recording_complete=False`; `requested_steps` and
+`recorded_steps` distinguish partial recordings. Twenty seconds is the total
+evaluation duration per environment, including any resets during that period.
+
+Existing analysis routines expecting single-environment arrays must select one
+environment from these batched signals first. For example,
+`data["joint_torques"][:, 0]` selects the first environment in a direction archive.
+
+Use `--dry-run` to inspect all six commands. `--envs_per_command`, `--duration`,
+`--forward_speed`, `--lateral_speed`, and `--yaw_rate` override the defaults;
+`--output_dir PATH` selects the parent directory for the gait folders. Additional
+Hydra settings are forwarded as in `test.sh`. To record just one gait:
+
+```bash
+bash scripts/symm_locomotion/_run.sh diff_cmds.py --robot x1 --gait trot \
+  --checkpoint logs/rsl_rl/dobot_x1_symm_flat/RUN/model_9999.pt \
+  env.policy_observation_history.history_length=20
+```
+
 The generic launcher accepts the command as its first argument:
 
 ```bash
@@ -170,6 +238,22 @@ The main leg-usage arrays in `sim_data.npz` are:
 - `leg_torque_sums`, `leg_power_sums`: signed sums retained for compatibility and analysis.
 - `foot_ground_reaction_forces_w`: `(T, 4, 3)` world-frame force vectors; the
   boolean `ground_reaction_force_includes_friction` records whether each sample contains friction.
+
+`analyze_trs_grid.analyze_rollout()` reports front/hind allocation in `metrics`
+and left/right allocation in `metrics_left_right`. Left combines FL + RL;
+right combines FR + RR, regardless of the movement command. Both mappings
+cover squared torque, normalized torque utilization, absolute/positive/negative
+mechanical work, force-magnitude impulse, vertical-force impulse, and contact
+time. Each includes group totals and signed/absolute imbalance percentages;
+`metrics_left_right["contact_time"]` also includes `left_duty_factor` and
+`right_duty_factor` as fractions between zero and one.
+
+Left/right signed imbalance is `100 * (left - right) / (left + right)`:
+positive means greater left-side contribution, and negative means greater
+right-side contribution. A smaller absolute value means more equal allocation,
+which is not necessarily better for every gait or maneuver. These are allocation
+measurements, not tests of footfall synchronization. Analyze each gait and
+constant-command window separately when comparing policies.
 - `foot_ground_reaction_force_abs_components`, `foot_ground_reaction_force_abs_sums`:
   absolute force components and their L1 sums.
 - Every plotted magnitude key also has a `_centered_moving_mean` array. The scalar

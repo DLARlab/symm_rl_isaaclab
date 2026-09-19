@@ -482,46 +482,7 @@ class SymmetricRolloutPlotter:
             return []
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        data = {name: np.asarray(values) for name, values in self._data.items()}
-        data["joint_names"] = np.asarray(self._joint_names)
-        data["leg_names"] = np.asarray(self._LEG_NAMES)
-        data["motor_role_names"] = np.asarray(self._MOTOR_ROLE_NAMES)
-        data["leg_joint_torques"] = data["joint_torques"].reshape(
-            -1,
-            len(self._LEG_NAMES),
-            self._JOINTS_PER_LEG,
-        )
-        data["leg_joint_powers"] = data["joint_powers"].reshape(
-            -1,
-            len(self._LEG_NAMES),
-            self._JOINTS_PER_LEG,
-        )
-        data["leg_torque_sums"] = data["leg_joint_torques"].sum(axis=-1)
-        data["leg_joint_torque_magnitudes"] = np.abs(data["leg_joint_torques"])
-        data["leg_torque_magnitude_sums"] = data["leg_joint_torque_magnitudes"].sum(axis=-1)
-        data["leg_power_sums"] = data["leg_joint_powers"].sum(axis=-1)
-        data["leg_joint_power_magnitudes"] = np.abs(data["leg_joint_powers"])
-        data["leg_power_magnitude_sums"] = data["leg_joint_power_magnitudes"].sum(axis=-1)
-        data["foot_ground_reaction_force_abs_components"] = np.abs(data["foot_ground_reaction_forces_w"])
-        data["foot_ground_reaction_force_abs_sums"] = data["foot_ground_reaction_force_abs_components"].sum(axis=-1)
-        data.update(self._velocity_tracking_error_data(data))
-        smoothing_half_window_samples = round(0.5 * self._USAGE_SMOOTHING_WINDOW_S / self._step_dt)
-        smoothing_window_samples = 2 * smoothing_half_window_samples + 1
-        data["usage_plot_smoothing_window_s"] = np.asarray(self._USAGE_SMOOTHING_WINDOW_S)
-        data["usage_plot_smoothing_window_samples"] = np.asarray(smoothing_window_samples)
-        for key in (
-            "leg_joint_torque_magnitudes",
-            "leg_torque_magnitude_sums",
-            "leg_joint_power_magnitudes",
-            "leg_power_magnitude_sums",
-            "foot_ground_reaction_force_abs_components",
-            "foot_ground_reaction_force_abs_sums",
-        ):
-            data[f"{key}_centered_moving_mean"] = _centered_moving_mean(
-                data[key],
-                smoothing_window_samples,
-                episode_ends=data["episode_done"],
-            )
+        data = self._prepare_data({name: np.asarray(values) for name, values in self._data.items()})
         data_path = self._output_dir / "sim_data.npz"
         np.savez_compressed(data_path, **data)
         tracking_error_path = self._save_velocity_tracking_error_summary(data)
@@ -575,6 +536,57 @@ class SymmetricRolloutPlotter:
         ]
         print(f"[symm_locomotion] Saved rollout plots to: {self._output_dir}", flush=True)
         return paths
+
+    def _prepare_data(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """Add shared metadata and derived signals, retaining an optional environment axis."""
+        data["joint_names"] = np.asarray(self._joint_names)
+        data["leg_names"] = np.asarray(self._LEG_NAMES)
+        data["motor_role_names"] = np.asarray(self._MOTOR_ROLE_NAMES)
+        data["leg_joint_torques"] = data["joint_torques"].reshape(
+            *data["joint_torques"].shape[:-1],
+            len(self._LEG_NAMES),
+            self._JOINTS_PER_LEG,
+        )
+        data["leg_joint_powers"] = data["joint_powers"].reshape(
+            *data["joint_powers"].shape[:-1],
+            len(self._LEG_NAMES),
+            self._JOINTS_PER_LEG,
+        )
+        data["leg_torque_sums"] = data["leg_joint_torques"].sum(axis=-1)
+        data["leg_joint_torque_magnitudes"] = np.abs(data["leg_joint_torques"])
+        data["leg_torque_magnitude_sums"] = data["leg_joint_torque_magnitudes"].sum(axis=-1)
+        data["leg_power_sums"] = data["leg_joint_powers"].sum(axis=-1)
+        data["leg_joint_power_magnitudes"] = np.abs(data["leg_joint_powers"])
+        data["leg_power_magnitude_sums"] = data["leg_joint_power_magnitudes"].sum(axis=-1)
+        data["foot_ground_reaction_force_abs_components"] = np.abs(data["foot_ground_reaction_forces_w"])
+        data["foot_ground_reaction_force_abs_sums"] = data["foot_ground_reaction_force_abs_components"].sum(axis=-1)
+        data.update(self._velocity_tracking_error_data(data))
+        smoothing_half_window_samples = round(0.5 * self._USAGE_SMOOTHING_WINDOW_S / self._step_dt)
+        smoothing_window_samples = 2 * smoothing_half_window_samples + 1
+        data["usage_plot_smoothing_window_s"] = np.asarray(self._USAGE_SMOOTHING_WINDOW_S)
+        data["usage_plot_smoothing_window_samples"] = np.asarray(smoothing_window_samples)
+        for key in (
+            "leg_joint_torque_magnitudes",
+            "leg_torque_magnitude_sums",
+            "leg_joint_power_magnitudes",
+            "leg_power_magnitude_sums",
+            "foot_ground_reaction_force_abs_components",
+            "foot_ground_reaction_force_abs_sums",
+        ):
+            if data["episode_done"].ndim == 1:
+                smoothed = _centered_moving_mean(data[key], smoothing_window_samples, data["episode_done"])
+            else:
+                smoothed = np.stack(
+                    [
+                        _centered_moving_mean(
+                            data[key][:, index], smoothing_window_samples, data["episode_done"][:, index]
+                        )
+                        for index in range(data["episode_done"].shape[1])
+                    ],
+                    axis=1,
+                )
+            data[f"{key}_centered_moving_mean"] = smoothed
+        return data
 
     def _velocity_tracking_error_data(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Return velocity tracking error arrays derived from sampled command and measured velocity."""

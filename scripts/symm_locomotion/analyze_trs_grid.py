@@ -771,32 +771,61 @@ def summarize_additive_metric(
     dt_s: float,
     block_samples: int,
     rng: random.Random,
+    pair_names: tuple[str, str] = ("front", "hind"),
 ) -> dict[str, float | list[float]]:
-    """Summarize one additive front/hind metric."""
-    front_total = sum(pair[0] for pair in sample_pairs)
-    hind_total = sum(pair[1] for pair in sample_pairs)
-    signed_imbalance = pair_imbalance(front_total, hind_total)
+    """Summarize an additive metric for two named leg groups.
+
+    Args:
+        sample_pairs: Per-sample group totals in the metric's units, such as
+            squared torque [N^2 m^2], power [W], force [N], or contact counts.
+        dt_s: Sampling interval [s].
+        block_samples: Number of samples in each bootstrap block.
+        rng: Random generator used for bootstrap resampling.
+        pair_names: Group labels used in output keys, in sample-pair order.
+
+    Returns:
+        Group means and percentiles in the input units, integrals in input
+        units multiplied by [s], and shares, imbalances, and confidence limits
+        in percent. Positive imbalance means the first group contributes more.
+    """
+    first_name, second_name = pair_names
+    first_total = sum(pair[0] for pair in sample_pairs)
+    second_total = sum(pair[1] for pair in sample_pairs)
+    signed_imbalance = pair_imbalance(first_total, second_total)
     ci_low, ci_high = block_bootstrap_imbalance(sample_pairs, block_samples, rng)
-    front_samples = [pair[0] for pair in sample_pairs]
-    hind_samples = [pair[1] for pair in sample_pairs]
+    first_samples = [pair[0] for pair in sample_pairs]
+    second_samples = [pair[1] for pair in sample_pairs]
     return {
-        "front_sample_mean": statistics.fmean(front_samples),
-        "hind_sample_mean": statistics.fmean(hind_samples),
-        "front_integral": front_total * dt_s,
-        "hind_integral": hind_total * dt_s,
-        "front_share_percent": 100.0 * front_total / (front_total + hind_total),
+        f"{first_name}_sample_mean": statistics.fmean(first_samples),
+        f"{second_name}_sample_mean": statistics.fmean(second_samples),
+        f"{first_name}_integral": first_total * dt_s,
+        f"{second_name}_integral": second_total * dt_s,
+        f"{first_name}_share_percent": 100.0 * first_total / (first_total + second_total),
         "signed_imbalance_percent": signed_imbalance,
         "abs_imbalance_percent": abs(signed_imbalance),
         "bootstrap_95_percent": [ci_low, ci_high],
-        "front_p95": percentile(front_samples, 0.95),
-        "hind_p95": percentile(hind_samples, 0.95),
-        "front_p99": percentile(front_samples, 0.99),
-        "hind_p99": percentile(hind_samples, 0.99),
+        f"{first_name}_p95": percentile(first_samples, 0.95),
+        f"{second_name}_p95": percentile(second_samples, 0.95),
+        f"{first_name}_p99": percentile(first_samples, 0.99),
+        f"{second_name}_p99": percentile(second_samples, 0.99),
     }
 
 
 def analyze_rollout(run: RunSpec) -> dict[str, Any]:
-    """Analyze a matched steady-command window in one raw rollout."""
+    """Analyze a matched steady-command window in one raw rollout.
+
+    Args:
+        run: Run metadata and the path to its rollout archive.
+
+    Returns:
+        Rollout measurements, including front/hind allocation in ``metrics``
+        and left/right allocation in ``metrics_left_right``. Left combines
+        front-left and rear-left; right combines front-right and rear-right.
+        Both mappings contain the same additive metrics and use
+        :func:`summarize_additive_metric` units and sign conventions. Contact
+        duty factors are fractions of the window with force magnitude above
+        :data:`CONTACT_FORCE_THRESHOLD_N` [N], averaged over the two group feet.
+    """
     required_arrays = (
         "time_steps",
         "desired_lin_vel",
@@ -891,6 +920,7 @@ def analyze_rollout(run: RunSpec) -> dict[str, Any]:
             "contact_time",
         )
     }
+    metric_pairs_left_right: dict[str, list[tuple[float, float]]] = {name: [] for name in metric_pairs}
     force_norm_traces: list[list[float]] = [[] for _ in LEG_NAMES]
     vertical_force_traces: list[list[float]] = [[] for _ in LEG_NAMES]
     max_power_identity_error = 0.0 if joint_velocities is not None else None
@@ -941,6 +971,7 @@ def analyze_rollout(run: RunSpec) -> dict[str, Any]:
                 per_leg[name].append(value)
         for name, leg_values in per_leg.items():
             metric_pairs[name].append((sum(leg_values[:2]), sum(leg_values[2:])))
+            metric_pairs_left_right[name].append((leg_values[0] + leg_values[2], leg_values[1] + leg_values[3]))
 
     rng = random.Random(BOOTSTRAP_SEED + sum(ord(character) for character in run.key))
     metrics = {
@@ -951,6 +982,17 @@ def analyze_rollout(run: RunSpec) -> dict[str, Any]:
             rng=rng,
         )
         for name, pairs in metric_pairs.items()
+    }
+    rng_left_right = random.Random(BOOTSTRAP_SEED + sum(ord(character) for character in run.key))
+    metrics_left_right = {
+        name: summarize_additive_metric(
+            pairs,
+            dt_s=dt_s,
+            block_samples=block_samples,
+            rng=rng_left_right,
+            pair_names=("left", "right"),
+        )
+        for name, pairs in metric_pairs_left_right.items()
     }
     path_distance_m = sum(
         math.hypot(
@@ -1007,6 +1049,10 @@ def analyze_rollout(run: RunSpec) -> dict[str, Any]:
         metrics["contact_time"][f"{pair_name}_duty_factor"] = metrics["contact_time"][f"{pair_name}_integral"] / (
             duration_s * 2.0
         )
+    for pair_name in ("left", "right"):
+        metrics_left_right["contact_time"][f"{pair_name}_duty_factor"] = metrics_left_right["contact_time"][
+            f"{pair_name}_integral"
+        ] / (duration_s * 2.0)
     return {
         "path": str(run.evaluation_path.relative_to(ROOT)),
         "sample_count": len(selected),
@@ -1025,6 +1071,7 @@ def analyze_rollout(run: RunSpec) -> dict[str, Any]:
         "lateral_drift_m": lateral_drift_m,
         "planar_tracking_rmse_mps": math.sqrt(statistics.fmean(error * error for error in tracking_errors)),
         "metrics": metrics,
+        "metrics_left_right": metrics_left_right,
         "durability": durability,
         "cost_distance_definition": "absolute progress projected onto the mean commanded planar direction",
         "cost_per_distance": {

@@ -110,8 +110,8 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
                 joint_names_expr=[".*_hip_joint"],
                 effort_limit=23.7,
                 velocity_limit=30.1,
-                stiffness=30.0,
-                damping=0.65,
+                stiffness=25.0,
+                damping=0.6,
                 friction=0.0,
             ),
             "thigh_legs": IdealPDActuatorCfg(
@@ -171,19 +171,15 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         configure_policy_observations(self, go2_symm_mdp, _GO2_LEGGED_GYM_JOINT_ORDER)
 
     def _configure_go2_symm_rewards(self) -> None:
-        """Configure the first migrated Go2 reward terms."""
+        """Configure shared rewards with Go2 bindings and height targets."""
         configure_rewards(
             self,
-            go2_symm_mdp,
             joint_names=_GO2_LEGGED_GYM_JOINT_ORDER,
             foot_body_names=_GO2_FOOT_BODY_NAMES,
             foot_sensor_names=_GO2_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_GO2_FOOT_BODY_NAMES,
-            base_height_range=(0.35, 0.45),
+            base_height_target=0.30,
             foot_clearance_height=0.08,
-            foot_clearance_height_scale=0.03,
-            foot_clearance_mode="tracking_reward",
-            foot_clearance_weight=0.15,
         )
 
     def _configure_go2_symm_terminations(self) -> None:

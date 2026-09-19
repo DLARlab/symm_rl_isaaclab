@@ -210,20 +210,14 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         configure_policy_observations(self, dobot_mdp, _DOBOT_X1_JOINT_ORDER)
 
     def _configure_dobot_x1_symm_rewards(self) -> None:
-        """Configure Dobot rewards with the Go2 symmetric task layout."""
+        """Bind X1 joints and feet to the shared reward settings."""
         configure_rewards(
             self,
-            dobot_mdp,
             joint_names=_DOBOT_X1_JOINT_ORDER,
             foot_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
             foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
-            base_height_range=_DOBOT_X1_BASE_HEIGHT_RANGE,
-            foot_clearance_height=0.10,
-            foot_clearance_height_scale=0.025,
-            foot_clearance_mode="phase_penalty",
-            pitch_scale=0.35,
-            yaw_tracking_error_scale=0.50,
+            logical_joint_signs=dobot_mdp.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
         )
 
     def _configure_dobot_x1_symm_terminations(self) -> None:
