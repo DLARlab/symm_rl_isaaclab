@@ -1,0 +1,377 @@
+--- git commit ---
+42e462e463807f2bfb9a76ef6490f2a6a4363e82
+
+
+--- git status ---
+On branch dlar58/base-pitch-penalty
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+	modified:   source/isaaclab_tasks/test/test_symm_quadruped_config.py
+	modified:   test.sh
+	modified:   train.sh
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	source/isaaclab_tasks/changelog.d/symm-base-pitch-penalty.rst
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+index c847c2cd..20832df9 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py
+@@ -140,7 +140,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+                 effort_limit=17.0,
+                 velocity_limit=30.0,
+                 stiffness=30.0,
+-                damping=0.65,
++                damping=1.2,
+                 friction=0.0,
+             ),
+             "thigh_legs": IdealPDActuatorCfg(
+@@ -151,7 +151,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+                 },
+                 velocity_limit=30.0,
+                 stiffness=30.0,
+-                damping=0.65,
++                damping=1.2,
+                 friction=0.0,
+             ),
+             "calf_legs": IdealPDActuatorCfg(
+@@ -159,7 +159,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+                 effort_limit=37.0,
+                 velocity_limit=26.0,
+                 stiffness=30.0,
+-                damping=0.65,
++                damping=1.2,
+                 friction=0.0,
+             ),
+         }
+@@ -219,7 +219,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
+             foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
+             foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
+             base_height_range=_DOBOT_X1_BASE_HEIGHT_RANGE,
+-            foot_clearance_height=0.04,
++            foot_clearance_height=0.10,
+             foot_clearance_height_scale=0.025,
+             foot_clearance_mode="phase_penalty",
+             pitch_scale=0.35,
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+index 680db2ae..dab043dd 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py
+@@ -307,6 +307,7 @@ def configure_rewards(
+             "min_height": foot_clearance_height,
+             "height_scale": foot_clearance_height_scale,
+             "min_command_speed": 0.20,
++            "min_command_yaw_rate": 0.20,
+         }
+     elif foot_clearance_mode == "current_speed_penalty":
+         foot_clearance_func = mdp_module.foot_clearance_current_speed_penalty
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+index 2fd2e105..d22208fe 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py
+@@ -972,7 +972,9 @@ def base_roll_exp_penalty(
+     error_scale: float,
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+ ) -> torch.Tensor:
+-    """Penalize base roll with a bounded exponential kernel.
++    """Penalize the absolute base roll angle around zero with a bounded exponential kernel.
++
++    The penalty is ``exp(-abs(roll) / error_scale) - 1``. Pitch and yaw do not affect the penalty.
+ 
+     Args:
+         env: The environment instance.
+@@ -982,9 +984,11 @@ def base_roll_exp_penalty(
+     Returns:
+         Per-environment roll penalty in ``[-1, 0]``.
+     """
++    if error_scale <= 0.0:
++        raise ValueError(f"Tracking error scale must be positive, received {error_scale}.")
+     asset: Articulation = env.scene[asset_cfg.name]
+     roll, _, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+-    return _tracking_exp(roll, error_scale) - 1.0
++    return torch.exp(-torch.abs(roll) / error_scale) - 1.0
+ 
+ 
+ def command_tracking_penalty(
+@@ -1249,12 +1253,26 @@ def base_height_range_penalty(
+     height_range: tuple[float, float],
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+ ) -> torch.Tensor:
+-    """Penalty for base height outside the configured range."""
++    """Penalize absolute base-height error relative to a fixed target of 0.35 m.
++
++    The penalty is ``exp(-20 * abs(0.35 - base_height)) - 1``, with an exponential coefficient of 20 [1/m].
++
++    Args:
++        env: The environment instance.
++        height_range: Previous allowable base-height range [m], retained for compatibility and currently unused.
++        asset_cfg: Robot articulation configuration.
++
++    Returns:
++        Per-environment height penalty in ``[-1, 0]``.
++    """
+     asset: Articulation = env.scene[asset_cfg.name]
+-    lower_bound, upper_bound = height_range
+-    deviation = torch.clamp(lower_bound - asset.data.root_pos_w.torch[:, 2], min=0.0)
+-    deviation += torch.clamp(asset.data.root_pos_w.torch[:, 2] - upper_bound, min=0.0)
+-    return -(1.0 - torch.exp(-5.0 * deviation))
++    # Previous interval-based height error:
++    # lower_bound, upper_bound = height_range
++    # deviation = torch.clamp(lower_bound - asset.data.root_pos_w.torch[:, 2], min=0.0)
++    # deviation += torch.clamp(asset.data.root_pos_w.torch[:, 2] - upper_bound, min=0.0)
++    deviation = torch.abs(0.35 - asset.data.root_pos_w.torch[:, 2])
++    # return -(1.0 - torch.exp(-5.0 * deviation))
++    return -(1.0 - torch.exp(-20.0 * deviation))
+ 
+ 
+ def foot_periodicity_penalty(
+@@ -1313,19 +1331,24 @@ def foot_clearance_penalty(
+     feet_cfg: SceneEntityCfg,
+     min_height: float = 0.08,
+     height_scale: float = 0.05,
+-    min_command_speed: float = 0.2,
++    min_command_speed: float = 0.1,
+     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
++    min_command_yaw_rate: float = 0.1,
+ ) -> torch.Tensor:
+     """Penalize feet below a ground-relative swing-height trajectory.
+ 
++    The command gate uses the maximum of independently normalized planar speed and absolute yaw rate,
++    clipped to ``[0, 1]``, so translation and turning in place both enable swing clearance.
++
+     Args:
+         env: The environment instance.
+         command_name: Name of the gait velocity command term.
+         feet_cfg: Foot body configuration in FL, FR, RL, and RR order.
+         min_height: Peak commanded foot-link height above flat ground [m].
+         height_scale: Clearance-shortfall shaping scale [m].
+-        min_command_speed: Forward command magnitude that fully enables the penalty [m/s].
++        min_command_speed: Planar command magnitude that fully enables the penalty [m/s].
+         asset_cfg: Robot articulation configuration.
++        min_command_yaw_rate: Absolute yaw command that fully enables the penalty [rad/s].
+ 
+     Returns:
+         The negative bounded swing-clearance penalty.
+@@ -1336,6 +1359,8 @@ def foot_clearance_penalty(
+         raise ValueError(f"Foot-clearance height scale must be positive, received {height_scale}.")
+     if min_command_speed <= 0.0:
+         raise ValueError(f"Foot-clearance command scale must be positive, received {min_command_speed}.")
++    if min_command_yaw_rate <= 0.0:
++        raise ValueError(f"Foot-clearance yaw command scale must be positive, received {min_command_yaw_rate}.")
+ 
+     asset: Articulation = env.scene[asset_cfg.name]
+     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+@@ -1349,7 +1374,9 @@ def foot_clearance_penalty(
+     clearance_penalty = -torch.expm1(-shortfall / height_scale)
+ 
+     command = env.command_manager.get_command(command_name)
+-    command_gate = (torch.abs(command[:, 0]) / min_command_speed).clamp(0.0, 1.0).unsqueeze(-1)
++    command_speed = torch.linalg.vector_norm(command[:, :2], dim=-1)
++    command_gate = torch.maximum(command_speed / min_command_speed, torch.abs(command[:, 2]) / min_command_yaw_rate)
++    command_gate = command_gate.clamp(0.0, 1.0).unsqueeze(-1)
+     active_weight = swing_weight * command_gate
+     weighted_penalty = clearance_penalty * active_weight
+     penalty = -torch.sum(weighted_penalty, dim=-1)
+diff --git a/source/isaaclab_tasks/test/test_symm_quadruped_config.py b/source/isaaclab_tasks/test/test_symm_quadruped_config.py
+index f0be797d..d592d9cb 100644
+--- a/source/isaaclab_tasks/test/test_symm_quadruped_config.py
++++ b/source/isaaclab_tasks/test/test_symm_quadruped_config.py
+@@ -14,6 +14,7 @@ import pytest
+ import torch
+ 
+ from isaaclab.envs import mdp as base_mdp
++from isaaclab.utils.math import quat_from_euler_xyz
+ 
+ from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.flat_env_cfg import (
+     DobotX1SymmFlatEnvCfg,
+@@ -857,6 +858,7 @@ def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
+     assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.08
+     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.05
+     assert env_cfg.rewards.foot_clearance.params["min_command_speed"] == 0.20
++    assert env_cfg.rewards.foot_clearance.params["min_command_yaw_rate"] == 0.20
+ 
+ 
+ def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
+@@ -918,7 +920,7 @@ def test_robot_configs_use_robot_specific_foot_clearance_shaping():
+     assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
+     assert go2_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
+     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
+-    assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.04
++    assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.10
+     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
+     assert go2_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_tracking_reward
+     assert go2_cfg.rewards.foot_clearance.weight == 0.15
+@@ -1020,6 +1022,22 @@ def test_x1_config_terminates_low_or_face_down_front_body_postures():
+     assert x1_cfg.terminations.front_body_height.params["min_height"] == 0.08
+ 
+ 
++def test_base_height_penalty_targets_035_m_instead_of_accepting_a_range():
++    scene = _Scene()
++    scene["robot"] = SimpleNamespace(
++        data=SimpleNamespace(
++            root_pos_w=_tensor_data(
++                torch.tensor([[0.0, 0.0, 0.35], [0.0, 0.0, 0.30], [0.0, 0.0, 0.40], [0.0, 0.0, 0.50]])
++            ),
++        )
++    )
++    env = SimpleNamespace(scene=scene)
++
++    penalty = symm_quadruped.base_height_range_penalty(env, height_range=(0.45, 0.60))
++
++    assert penalty.tolist() == pytest.approx([0.0, math.exp(-1.0) - 1.0, math.exp(-1.0) - 1.0, math.exp(-3.0) - 1.0])
++
++
+ def test_body_local_point_height_detects_virtual_front_body_ground_contact():
+     scene = _Scene()
+     scene.env_origins = torch.zeros(2, 3)
+@@ -1182,6 +1200,93 @@ def test_foot_clearance_uses_ground_relative_swing_target_without_current_speed_
+     assert env._foot_clearance_diagnostics["shortfall"][0].tolist() == pytest.approx([0.06, 0.03, 0.0, 0.0])
+ 
+ 
++@pytest.mark.parametrize("command_speed, expected_gate", [(0.1, 0.5), (0.2, 1.0), (0.4, 1.0)])
++def test_foot_clearance_gate_uses_planar_speed_in_every_direction(command_speed, expected_gate):
++    directions = torch.tensor(
++        [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0], [0.6, 0.8], [-0.6, 0.8], [0.6, -0.8], [-0.6, -0.8]]
++    )
++    num_envs = len(directions) + 2
++    command = torch.zeros(num_envs, 3)
++    command[0, 0] = 0.2  # Fully active forward reference.
++    command[1:-1, :2] = command_speed * directions
++    scene = _Scene()
++    scene.env_origins = torch.zeros(num_envs, 3)
++    scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(torch.zeros(num_envs, 4, 3))))
++    gait_command = SimpleNamespace(
++        duty_factors=torch.full((num_envs,), 0.5),
++        kappa=torch.full((num_envs,), 16.0),
++        foot_phases=lambda: torch.full((num_envs, 4), 0.25),
++    )
++    env = SimpleNamespace(
++        scene=scene,
++        command_manager=SimpleNamespace(
++            get_term=lambda _: gait_command,
++            get_command=lambda _: command,
++        ),
++    )
++
++    penalty = symm_quadruped.foot_clearance_penalty(
++        env,
++        command_name="base_velocity",
++        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
++        min_height=0.04,
++        height_scale=0.025,
++        min_command_speed=0.2,
++    )
++
++    assert penalty[0] < 0.0
++    torch.testing.assert_close(penalty[1:-1], (expected_gate * penalty[0]).expand(len(directions)))
++    assert penalty[-1].item() == pytest.approx(0.0)
++
++
++@pytest.mark.parametrize("yaw_scale", [0.2, 0.4])
++def test_foot_clearance_gate_includes_yaw_with_an_independent_scale(yaw_scale):
++    command = torch.tensor(
++        [
++            [0.2, 0.0, 0.0],  # Fully active planar reference.
++            [0.0, 0.0, 0.0],
++            [0.0, 0.0, 0.5 * yaw_scale],
++            [0.0, 0.0, -0.5 * yaw_scale],
++            [0.0, 0.0, yaw_scale],
++            [0.0, 0.0, -yaw_scale],
++            [0.0, 0.0, 2.0 * yaw_scale],
++            [0.0, 0.0, -2.0 * yaw_scale],
++            [0.06, 0.08, 0.25 * yaw_scale],  # Planar speed dominates.
++            [0.03, 0.04, -0.75 * yaw_scale],  # Yaw rate dominates.
++            [0.06, 0.08, 0.5 * yaw_scale],  # Equally active gates must not add.
++        ]
++    )
++    num_envs = len(command)
++    scene = _Scene()
++    scene.env_origins = torch.zeros(num_envs, 3)
++    scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(torch.zeros(num_envs, 4, 3))))
++    gait_command = SimpleNamespace(
++        duty_factors=torch.full((num_envs,), 0.5),
++        kappa=torch.full((num_envs,), 16.0),
++        foot_phases=lambda: torch.full((num_envs, 4), 0.25),
++    )
++    env = SimpleNamespace(
++        scene=scene,
++        command_manager=SimpleNamespace(
++            get_term=lambda _: gait_command,
++            get_command=lambda _: command,
++        ),
++    )
++    penalty = symm_quadruped.foot_clearance_penalty(
++        env,
++        command_name="base_velocity",
++        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
++        min_height=0.04,
++        height_scale=0.025,
++        min_command_speed=0.2,
++        min_command_yaw_rate=yaw_scale,
++    )
++
++    assert penalty[0] < 0.0
++    expected_gates = torch.tensor([1.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 0.5, 0.75, 0.5])
++    torch.testing.assert_close(penalty, expected_gates * penalty[0])
++
++
+ def test_straight_line_motion_reward_preserves_forward_signal_and_penalizes_lost_support():
+     pitch = 0.8
+     scene = _Scene()
+@@ -1344,6 +1449,24 @@ def test_independent_velocity_tracking_and_roll_rewards_only_measure_their_compo
+     assert roll_penalty.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0, expected - 1.0])
+ 
+ 
++@pytest.mark.parametrize("yaw", [0.0, 1.3])
++def test_base_roll_penalty_uses_absolute_roll_and_ignores_pitch(yaw):
++    roll = torch.tensor([0.0, 0.0, 0.0, 0.125, -0.125, 0.125, 0.125])
++    pitch = torch.tensor([0.0, 0.125, -0.125, 0.0, 0.0, 0.125, -0.125])
++    scene = _Scene()
++    scene["robot"] = SimpleNamespace(
++        data=SimpleNamespace(
++            root_quat_w=_tensor_data(quat_from_euler_xyz(roll, pitch, torch.full_like(roll, yaw))),
++        )
++    )
++    env = SimpleNamespace(scene=scene)
++
++    penalty = symm_quadruped.base_roll_exp_penalty(env, error_scale=0.25)
++
++    roll_penalty = math.exp(-0.5) - 1.0
++    assert penalty.tolist() == pytest.approx([0.0] * 3 + [roll_penalty] * 4)
++
++
+ def test_straight_line_motion_reward_penalizes_world_lateral_position_and_heading():
+     scene = _Scene()
+     scene.env_origins = torch.zeros(2, 3)
+diff --git a/test.sh b/test.sh
+index 7cf53f16..9c95257a 100755
+--- a/test.sh
++++ b/test.sh
+@@ -5,7 +5,7 @@ set -euo pipefail
+ export LD_LIBRARY_PATH="/home/dlar58/anaconda3/envs/symm_rl_isaaclab/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
+ export OMNI_KIT_ACCEPT_EULA=YES
+ 
+-checkpoint="logs/rsl_rl/dobot_x1_symm_flat/2026-09-07_03-47-11_x1_with_trs_mirror0p1/model_9999.pt"
++checkpoint="logs/rsl_rl/dobot_x1_symm_flat/2026-09-10_02-56-33_x1_with_trs_mirror0p1/model_9999.pt"
+ x_command="1"
+ y_command="0.5"
+ yaw_command="0.6"
+diff --git a/train.sh b/train.sh
+index 6175da16..93efa7f5 100755
+--- a/train.sh
++++ b/train.sh
+@@ -4,4 +4,4 @@ export LD_LIBRARY_PATH=/home/dlar58/anaconda3/envs/symm_rl_isaaclab/lib/python3.
+ export WANDB_API_KEY='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'
+ export WANDB_USERNAME="xchen168-syracuse-university"
+ OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl env.policy_observation_history.history_length=20
+-OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20
++# OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20

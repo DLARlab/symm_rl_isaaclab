@@ -1,0 +1,29 @@
+--- git commit ---
+9dd71668f72e6bf757991ba953c197336e80fe6d
+
+
+--- git status ---
+On branch xchen
+Your branch is up to date with 'origin/xchen'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   train.sh
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/train.sh b/train.sh
+index 93efa7f5..15eca186 100755
+--- a/train.sh
++++ b/train.sh
+@@ -3,5 +3,5 @@
+ export LD_LIBRARY_PATH=/home/dlar58/anaconda3/envs/symm_rl_isaaclab/lib/python3.12/site-packages/nvidia/cu13/lib:$LD_LIBRARY_PATH
+ export WANDB_API_KEY='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'
+ export WANDB_USERNAME="xchen168-syracuse-university"
+-OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl env.policy_observation_history.history_length=20
+-# OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20
++# OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl env.policy_observation_history.history_length=20
++OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20
