@@ -132,6 +132,7 @@ See `tools/changelog/test/integration/` for worked examples that double as integ
 
 Follow conventional commit message practices.
 
+- **Create branches only with explicit user authorization.** Use the existing branch the user requests.
 - **Use feature branches**: All development work should be on branches named `<username>/feature-desc` (e.g., `jdoe/docs-versioning`). Do not commit directly to `main`.
 - Keep commits focused and atomic—one logical change per commit.
 - Reference related issues in commit messages when applicable.

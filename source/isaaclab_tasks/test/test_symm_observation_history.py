@@ -168,6 +168,7 @@ def test_symmetric_environment_installs_history_wrapper(monkeypatch):
     env.scene = SimpleNamespace(num_envs=1)
     env.sim = SimpleNamespace(device="cpu")
     env.observation_manager = manager
+    env.reward_manager = SimpleNamespace(active_terms=["termination_penalty"])
     configured_spaces = []
     env._configure_gym_env_spaces = lambda: configured_spaces.append(True)
     monkeypatch.setattr(symm_quadruped_env.ManagerBasedRLEnv, "load_managers", lambda _self: None)
@@ -189,6 +190,7 @@ def test_symmetric_environment_uses_native_observations_for_history_length_one(m
     env.scene = SimpleNamespace(num_envs=1)
     env.sim = SimpleNamespace(device="cpu")
     env.observation_manager = manager
+    env.reward_manager = SimpleNamespace(active_terms=["termination_penalty"])
     configured_spaces = []
     env._configure_gym_env_spaces = lambda: configured_spaces.append(True)
     monkeypatch.setattr(symm_quadruped_env.ManagerBasedRLEnv, "load_managers", lambda _self: None)

@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
 import math
 import os
 import re
@@ -289,9 +291,13 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add launcher options shared by all subcommands."""
     parser.add_argument("--robot", choices=robot_choices(), default=DEFAULT_ROBOT, help="Robot task to run.")
     parser.add_argument("--conda-env", default=CONDA_ENV, help="Conda env used for Isaac Lab commands.")
-    parser.add_argument("--use-conda-run", action="store_true", help="Force wrapping commands with conda run.")
-    parser.add_argument("--no-conda-run", action="store_true", help="Run the Isaac Lab wrapper directly.")
-    parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
+    parser.add_argument(
+        "--use_conda_run", "--use-conda-run", action="store_true", help="Force wrapping commands with conda run."
+    )
+    parser.add_argument(
+        "--no_conda_run", "--no-conda-run", action="store_true", help="Run the Isaac Lab wrapper directly."
+    )
+    parser.add_argument("--dry_run", "--dry-run", action="store_true", help="Print commands without running them.")
 
 
 def add_train_args(parser: argparse.ArgumentParser) -> None:
@@ -824,10 +830,291 @@ def run_tensorboard(args: argparse.Namespace) -> int:
     return subprocess.run(command, cwd=repo_root(), check=False).returncode
 
 
+DEFAULT_LEG_USAGE_VELOCITIES_MPS = (-1.5, -1.0, -0.5, 0.5, 1.0, 1.5)
+
+DEFAULT_LEG_USAGE_SETTLE_S = 5.0
+
+DEFAULT_LEG_USAGE_MEASURE_S = 10.0
+
+DEFAULT_LEG_USAGE_EVALUATION_SEED = 42
+
+LEG_USAGE_PROTECTED_RUNTIME_OPTIONS = {
+    "--symm_leg_usage_plan",
+    "--symm-leg-usage-plan",
+    "--task",
+    "--checkpoint",
+    "--video",
+    "--num_envs",
+    "--num-envs",
+    "--seed",
+    "--rl_library",
+    "--rl-library",
+}
+
+
+class _StoreExplicitAction(argparse.Action):
+    """Store an argument and record that it was provided on the command line."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        del parser, option_string
+        setattr(namespace, self.dest, values)
+        setattr(namespace, f"_{self.dest}_explicit", True)
+
+
+def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
+    """Add fixed-grid policy evaluation and analysis options."""
+    add_common_args(parser)
+    add_checkpoint_args(parser)
+    parser.set_defaults(_protocol_explicit=False)
+    parser.add_argument(
+        "--protocol",
+        choices=("full", "light", "legacy"),
+        default="full",
+        action=_StoreExplicitAction,
+        help=(
+            "Evaluation profile (default: immutable full 60-cell grid; light: immutable 8-cell screen; "
+            "legacy: deprecated custom v1 grid)."
+        ),
+    )
+    parser.add_argument(
+        "--velocities",
+        "--vx_values",
+        nargs="+",
+        type=float,
+        default=list(DEFAULT_LEG_USAGE_VELOCITIES_MPS),
+        help="Fixed x velocities [m/s] evaluated for every selected gait row.",
+    )
+    parser.add_argument(
+        "--gait_indices",
+        "--gait-indices",
+        nargs="+",
+        type=int,
+        default=list(range(10)),
+        help="Training gait-library row indices to evaluate (default: all ten rows).",
+    )
+    parser.add_argument(
+        "--settle_s",
+        "--settle-s",
+        type=float,
+        default=DEFAULT_LEG_USAGE_SETTLE_S,
+        help="Per-cell settling duration [s], excluded from metrics.",
+    )
+    parser.add_argument(
+        "--measure_s",
+        "--measure-s",
+        type=float,
+        default=DEFAULT_LEG_USAGE_MEASURE_S,
+        help="Per-cell steady-state measurement duration [s].",
+    )
+    parser.add_argument(
+        "--evaluation_seed",
+        "--evaluation-seed",
+        type=int,
+        default=DEFAULT_LEG_USAGE_EVALUATION_SEED,
+        help="Reset seed shared by the fixed grid.",
+    )
+    parser.add_argument(
+        "--render_cell_plots",
+        "--render-cell-plots",
+        action="store_true",
+        help="Also render the plotter's detailed figures inside every cell folder.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume an identical checkpoint/protocol and skip already completed cells.",
+    )
+    parser.add_argument(
+        "--analyze_only",
+        "--analyze-only",
+        action="store_true",
+        help="Regenerate metrics and figures from an existing identical study without simulation.",
+    )
+    parser.add_argument(
+        "--evaluation_config",
+        "--evaluation-config",
+        type=Path,
+        help="Optional JSON file containing nested contact, gait, tracking, load, or success overrides.",
+    )
+
+
+def evaluation_lab_args(
+    args: argparse.Namespace,
+    checkpoint: Path,
+    study_path: Path,
+    extra: list[str],
+) -> list[str]:
+    """Build Isaac Lab arguments for the data-only fixed-scenario grid."""
+    return [
+        "play",
+        "--rl_library",
+        "rsl_rl",
+        "--task",
+        args.robot_spec.play_task,
+        "--num_envs",
+        "1",
+        "--checkpoint",
+        str(checkpoint),
+        "--seed",
+        str(args.evaluation_seed),
+        "--headless",
+        "--symm_leg_usage_plan",
+        str(study_path),
+        *extra,
+    ]
+
+
+def validate_evaluation_runtime_overrides(extra: list[str]) -> None:
+    """Reject forwarded options that could escape the immutable grid plan."""
+    for token in extra:
+        option = token.split("=", 1)[0]
+        if option in LEG_USAGE_PROTECTED_RUNTIME_OPTIONS:
+            raise ValueError(f"Evaluation controls {option} and does not allow overriding it after '--'.")
+
+
+def _load_evaluation_module():
+    """Load the adjacent analysis module without relying on ``sys.path`` setup."""
+    module_name = "_symm_policy_evaluation"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    module_path = Path(__file__).with_name("evaluation.py")
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Unable to load leg-usage analysis module: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
+    """Record, analyze, and report one checkpoint's fixed policy-evaluation grid."""
+    validate_evaluation_runtime_overrides(extra)
+    checkpoint = resolve_checkpoint(args).resolve()
+    analysis = _load_evaluation_module()
+    evaluation_config = None
+    if args.evaluation_config is not None:
+        try:
+            evaluation_config = json.loads(args.evaluation_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Unable to read evaluation config {args.evaluation_config}: {exc}") from exc
+        if not isinstance(evaluation_config, dict):
+            raise ValueError("The evaluation config JSON root must be an object.")
+    if args.protocol == "legacy" and evaluation_config is not None:
+        raise ValueError("The legacy v1 compatibility profile does not accept --evaluation_config.")
+    output_name = analysis.PROTOCOL_OUTPUT_ROOT_NAMES[args.protocol]
+    canonical_study_path = checkpoint.parent / "evaluations" / output_name / "study.json"
+    study_path = (
+        analysis.existing_study_manifest_path(checkpoint.parent, args.protocol)
+        if args.analyze_only or args.resume
+        else canonical_study_path
+    )
+    if args.analyze_only:
+        study = analysis.validate_existing_study_for_analysis(
+            study_path,
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            supplied_runtime_overrides=extra,
+        )
+        analysis.validate_study_profile(study, args.protocol)
+        if evaluation_config is not None and analysis._metrics.evaluation_config(evaluation_config) != study.get(
+            "evaluation_config"
+        ):
+            raise ValueError("Supplied evaluation config does not match the recorded study protocol.")
+    elif args.protocol == "legacy" and args.resume and study_path.is_file():
+        study = analysis.validate_existing_legacy_study_for_resume(
+            study_path,
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            step_dt=args.robot_spec.step_dt,
+            settle_s=args.settle_s,
+            measure_s=args.measure_s,
+            evaluation_seed=args.evaluation_seed,
+            velocities_mps=args.velocities,
+            gait_indices=args.gait_indices,
+            render_cell_plots=args.render_cell_plots,
+            supplied_runtime_overrides=extra,
+        )
+    else:
+        study = analysis.build_study(
+            repo_root=repo_root(),
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            step_dt=args.robot_spec.step_dt,
+            settle_s=args.settle_s,
+            measure_s=args.measure_s,
+            evaluation_seed=args.evaluation_seed,
+            velocities_mps=args.velocities,
+            gait_indices=args.gait_indices,
+            render_cell_plots=args.render_cell_plots,
+            runtime_overrides=extra,
+            protocol=args.protocol,
+            evaluation_config=evaluation_config,
+        )
+        if study_path != canonical_study_path:
+            study["output_root"] = str(study_path.parent)
+        study_path = analysis.prepare_study(
+            study,
+            resume=args.resume,
+            analyze_only=False,
+            dry_run=args.dry_run,
+        )
+    print(f"{log_prefix(args)}checkpoint: {checkpoint}", flush=True)
+    print(f"{log_prefix(args)}output: {study_path.parent}", flush=True)
+    print(
+        f"{log_prefix(args)}profile: {args.protocol}; method: {study.get('method_version')} "
+        f"({len(study['gaits'])} represented gait rows, {len(study['cells'])} cells)",
+        flush=True,
+    )
+    child_code = 0
+    if not args.analyze_only:
+        child_code = run_isaaclab(args, evaluation_lab_args(args, checkpoint, study_path, extra))
+        if args.dry_run:
+            return child_code
+    elif args.dry_run:
+        print(f"{log_prefix(args)}would regenerate analysis from {study_path}", flush=True)
+        return 0
+    try:
+        overall = analysis.analyze_study(study_path)
+    except Exception as exc:
+        if child_code != 0:
+            print(
+                f"{log_prefix(args)}WARNING: evaluator exited with code {child_code}, "
+                f"and partial analysis failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return child_code
+        raise
+    coverage = overall["coverage"]
+    print(
+        f"{log_prefix(args)}analysis: {coverage['valid_cells']}/{coverage['expected_cells']} valid cells; "
+        f"report: {study_path.parent / 'metrics' / 'REPORT.md'}",
+        flush=True,
+    )
+    return child_code
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level CLI parser."""
     parser = argparse.ArgumentParser(description="Convenience scripts for symmetric quadruped Isaac Lab tasks.")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    evaluation_parser = subparsers.add_parser("evaluation", help="Evaluate a local policy.")
+    add_evaluation_args(evaluation_parser)
+    legacy_parser = subparsers.add_parser("analyze_leg_usage", help="Deprecated evaluation alias.")
+    add_evaluation_args(legacy_parser)
+    legacy_parser.set_defaults(protocol="legacy")
 
     train_parser = subparsers.add_parser("train", help="Start training.")
     add_train_args(train_parser)
@@ -866,6 +1153,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         args.robot_spec = get_robot(args.robot)
+        if args.command == "analyze_leg_usage":
+            print("'analyze_leg_usage' is deprecated; use 'evaluation'", file=sys.stderr)
+            return run_evaluation(args, extra)
+        if args.command == "evaluation":
+            return run_evaluation(args, extra)
         if args.command == "train":
             return run_isaaclab(args, train_lab_args(args, extra))
         if args.command == "play":

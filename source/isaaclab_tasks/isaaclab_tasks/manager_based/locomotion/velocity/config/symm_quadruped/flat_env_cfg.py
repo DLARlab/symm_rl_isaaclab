@@ -251,7 +251,7 @@ def configure_rewards(
     foot_clearance_mode: str = "phase_penalty",
     foot_clearance_weight: float = 0.10,
     pitch_scale: float = 0.35,
-    yaw_tracking_error_scale: float = 0.50,
+    yaw_tracking_error_scale: float = 0.20,
     logical_joint_signs: Sequence[Sequence[float]] | None = None,
 ) -> None:
     """Configure shared Go2 and X1 reward functions and coefficients.
@@ -279,7 +279,7 @@ def configure_rewards(
     env_cfg.rewards.track_lin_vel_xy_exp = RewTerm(
         func=base_mdp.track_lin_vel_xy_exp,
         weight=0.5,
-        params={"command_name": "base_velocity", "std": 0.5},
+        params={"command_name": "base_velocity", "std": 0.2},
     )
     env_cfg.rewards.track_ang_vel_z_exp = None
     env_cfg.rewards.lin_vel_z_l2 = None
@@ -320,7 +320,7 @@ def configure_rewards(
             "feet_cfg": feet_cfg,
             "foot_sensor_names": tuple(foot_sensor_names),
             "foot_sensor_body_names": tuple(foot_sensor_body_names),
-            "force_scale": 0.005,
+            "force_scale": 0.025,
         },
     )
     env_cfg.rewards.base_height = RewTerm(

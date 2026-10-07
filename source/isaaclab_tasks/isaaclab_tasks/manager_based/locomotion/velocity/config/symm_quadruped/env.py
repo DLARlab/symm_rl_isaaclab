@@ -283,10 +283,12 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
                 foot_normal_forces_w = []
                 foot_ground_reaction_forces_w = []
                 ground_reaction_force_includes_friction = True
+                ground_filtered_force_source_valid = True
                 for sensor_name in foot_sensor_names:
                     sensor_data = self.scene.sensors[sensor_name].data
                     force_matrix_w = getattr(sensor_data, "force_matrix_w", None)
                     if force_matrix_w is None:
+                        ground_filtered_force_source_valid = False
                         net_forces_w = sensor_data.net_forces_w
                         if net_forces_w is None:
                             raise RuntimeError(f"Foot contact sensor '{sensor_name}' does not expose net_forces_w.")
@@ -307,6 +309,9 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
                     torch.stack(foot_ground_reaction_forces_w, dim=1).detach().clone()
                 )
                 self._last_ground_reaction_force_includes_friction = ground_reaction_force_includes_friction
+                self._last_foot_normal_force_is_ground_filtered = torch.full(
+                    (self.num_envs,), ground_filtered_force_source_valid, dtype=torch.bool, device=self.device
+                )
 
         reward_diagnostics = getattr(self, "_straight_line_motion_diagnostics", {})
         for name in (

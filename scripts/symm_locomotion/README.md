@@ -324,3 +324,407 @@ Add a new robot in four places:
 Keep shared reward math, gait command logic, time-reversal transforms, wrapper
 behavior, and PPO defaults in the `symm_quadruped` modules unless the behavior
 is genuinely robot-specific.
+
+## Policy evaluation
+
+`evaluation.py`, `evaluation.ps1`, and `evaluation.sh` evaluate a checkpoint at
+fixed commands. They report velocity and heading tracking, gait/contact
+fidelity, transient response and progress, actuator/foot loading, leg-use
+balance, and combined success. The default protocol is
+the Cartesian grid of all ten time-reversal-closed v2 evaluation gait rows and
+`vx = -1.5, -1.0, -0.5, +0.5, +1.0, +1.5 m/s`. Every cell runs in its own
+episode with zero lateral/yaw command and the nominal evaluation profile. Its
+first 5 seconds are nominal settling time and the following 10 seconds are the
+nominal measurement window. Analysis trims the post-settle slice to complete
+common gait cycles when at least one full cycle is available, so its actual
+measurement start, stop, duration, and sample count can be shorter and are
+recorded per cell.
+
+Archived 56D MLP policies are detected automatically from the checkpoint's
+`params/env.yaml` and `params/agent.yaml`. Keep both files beside the checkpoint:
+
+```text
+my_policy/
+  model_9999.pt
+  params/
+    env.yaml
+    agent.yaml
+```
+
+For example, evaluate a local X1 policy with the eight-cell screen:
+
+```bash
+conda activate symm_rl_isaaclab
+bash scripts/symm_locomotion/evaluation.sh \
+  --robot x1 --checkpoint /path/to/my_policy/model_9999.pt --protocol light
+```
+
+On Windows, use `evaluation.ps1` with the same arguments. The Python entry point
+also accepts these arguments. Use `--protocol full` for the complete grid.
+
+The compatibility profile restores the saved observation order, scaling, joint
+order, network architecture, actuator settings, joint limits, and action
+convention. A saved history length of 20 supplies `56 * 20 = 1120` inputs,
+with complete frames ordered oldest first and zero padding after reset; no
+manual history override is needed. The 56D frame contains projected gravity,
+velocity commands, joint positions, joint velocities, previous actions, phase
+sine, phase cosine, raw foot offsets, and phase ratios, in that order. The
+profile is recorded in `study.json` and validated against both network input
+sizes before simulation. The evaluator retains xchen's native signed gait-clock convention.
+These policies use the selected evaluation protocol's commands and nominal
+conditions. The `legacy` protocol flag selects an evaluation grid, not a policy
+observation layout.
+
+The publication methods are immutable and distinct: `full` uses
+`leg_usage_grid_full_v3`, while `light` uses `leg_usage_grid_light_v2`. The
+eight-cell light screen resolves rows through stable gait names and declared
+time-reversal partners: trot at `+/-1 m/s`, bound at `+/-1 m/s`,
+`half_bound_front_a` at `+1 m/s` with its partner at `-1 m/s`, and `gallop_a`
+at `+1 m/s` with its partner at `-1 m/s`. It does not select rows by copied
+phase literals. The two protocols use separate output roots and cannot share a
+study identity.
+
+New full-v3 artifacts use `evaluations/leg_usage_grid_full_v3/`. Historical
+and newly requested legacy-v1 custom grids remain under
+`evaluations/leg_usage_grid/`, so either can be analyzed or resumed without
+deleting the other. Legacy resume verifies the existing v1 manifest and every
+requested grid/runtime control, then uses that manifest as the plan of record;
+this avoids rewriting its historical source identity.
+Full-v3 manifests created before the directory split are detected by their
+stored method and remain available to `--resume` and `--analyze_only` in the
+old root; all newly initialized full-v3 studies use the new root.
+
+For each foot, measured contact is a hysteretic state driven only by the
+nonnegative world-vertical force filtered to the literal collision path
+`/World/ground/terrain/mesh`. Contact state starts false at the beginning of
+the analyzed, cycle-trimmed slice. It enters at `Fz >= F_on`, exits at
+`Fz <= F_off`, and confirms a change only after:
+
+```text
+n_dwell = max(1, ceil(minimum_dwell_s / step_dt - 1e-12))
+```
+
+Once confirmed, the new state is backfilled to the first threshold-crossing
+sample. Thresholds satisfy `F_on > F_off >= 0`; body-weight mode uses
+`g=9.80665 m/s^2` and resolves:
+
+```text
+F_on  = max(minimum_on_n,  alpha_on  * mass * g / 4)
+F_off = max(minimum_off_n, alpha_off * mass * g / 4)
+```
+
+The resolved force thresholds, effective sample dwell, robot mass, and ground
+filter paths are recorded and checked against each cell's recording manifest.
+`contact.ground_filtered_required` defaults to `true`; setting it to `false`
+allows contact analysis from a declared but non-ground-filtered force trace.
+With the archived commanded duty trace `beta_k`, swing ratio `s_k=1-beta_k`,
+and wrapped foot phase `psi_ki`, desired stance is
+`c_ki*=1{psi_ki >= s_k}`. Boundary-excluded scores retain a sample only when
+its circular distances from liftoff (`psi=0`) and touchdown (`psi=s_k`) are
+both strictly greater than `boundary_exclusion_cycles`; equality is excluded.
+Contact metrics are:
+
+```text
+A_contact       = 1 - mean(|c_i - c_i*|)
+false swing     = sum(1{c_i=1 and c_i*=0}) / sum(1{c_i*=0})
+missed stance   = sum(1{c_i=0 and c_i*=1}) / sum(1{c_i*=1})
+precision       = TP / (TP + FP)
+recall          = TP / (TP + FN)
+F1              = 2 * precision * recall / (precision + recall)
+beta_i_measured = mean_k(c_ki)
+beta_commanded  = mean_k(beta_k)
+duty error_i    = beta_i_measured - beta_commanded
+abs duty error_i= abs(duty error_i)
+```
+
+The separately reported sampled desired-stance fraction is `mean_k(c_ki*)`;
+it is not substituted for the archived commanded `beta_commanded`. A ratio
+whose denominator is nonpositive is `N/A` (`None`). Thus an empty scored mask
+makes all six classification metrics `N/A`; precision or recall with no
+positive denominator is `N/A`; and F1 is `N/A` if either input is unavailable
+or their sum is zero.
+
+Agreement is reported both with and without event-boundary samples. Event
+errors match measured touchdown/liftoff to commanded events in the same
+complete cycle and use
+`d_S1(a,b)=abs(remainder(a-b+0.5,1)-0.5)`. Mean, median, p95, matched count,
+and per-foot event coverage remain explicit. For `M` matches, `U_e` missing
+expected events, and `U_a` extra actual events, the combined unmatched fraction
+is `(U_e+U_a)/(M+U_e+U_a)`; expected-only and actual-only fractions use
+`U_e/(M+U_e)` and `U_a/(M+U_a)`. A zero denominator is `N/A`; with no match,
+event error summaries are `N/A` and matched count is zero.
+
+Same-phase pairs are configured when their declared circular offset difference
+is at most `phase_sync_tolerance_cycles` (default 0.02, distinct from the 0.04
+simultaneous-order tolerance). A pair-cycle is matched only when each foot has
+exactly one event in that complete cycle. Aggregate coverage is
+`matched_pair_cycles/(configured_pairs*complete_cycles)` and is `N/A` when the
+denominator is zero. Touchdown and liftoff disagreement are reported in seconds
+and, when period is available, cycles.
+
+Cyclic order uses the first touchdown of each foot in each cycle and scores
+only cycles containing all four feet. Events within the simultaneous tolerance
+form an equivalence class, including a merge across the circular cycle
+boundary. Modal ties are resolved lexicographically. For classification, each
+foot's touchdown samples first form a circular mean `phi_bar_i`. Only the six
+pairwise phase differences enter a canonical-row score:
+
+```text
+score_r = (1/6) sum_{i<j} d_S1(phi_bar_j-phi_bar_i,
+                               phi^r_j-phi^r_i)
+```
+
+Here `phi^r_i=(-offset^r_i) mod 1` is the row's canonical touchdown phase.
+
+Classification runs only after the configured complete-cycle and per-foot
+touchdown/liftoff coverage minima are met. It returns `unclassified` if the
+best score exceeds `classifier_max_error_cycles` or the second-best-minus-best
+margin is below `classifier_min_margin_cycles`. Row/family predictions,
+accuracy, confusion, coverage, complete-cycle count, and failure reasons are
+preserved per cell; insufficient domains are never silently averaged.
+
+Velocity and gait fidelity remain separate domains. For measurement samples,
+with `e_x=v_x-v_x_cmd` and configured numerical `epsilon`, the velocity fields
+use:
+
+```text
+vx_RMSE       = sqrt(mean(e_x^2))
+vx_MAE        = mean(abs(e_x))
+vx_bias       = mean(e_x)
+gain          = mean(v_x) / v_x_cmd
+relative_RMSE = vx_RMSE / (abs(v_x_cmd) + epsilon)
+pair_bias(v)  = abs(mean(v_x | +v) + mean(v_x | -v))
+pair_bias_norm(v) = pair_bias(v) / (2*abs(v) + epsilon)
+```
+
+All means above use the cycle-trimmed measurement slice. The command-direction
+sign-error fraction counts only products `v_x_cmd*v_x<0`; an exact zero is not
+a sign error. The 5/10/20-percent bands test
+`abs(e_x)<=p(abs(v_x_cmd)+epsilon)`, and gain is `N/A` when
+`abs(v_x_cmd)<=epsilon`. Lateral-velocity RMSE/MAE, yaw-rate RMSE/MAE, wrapped
+heading-error RMSE/p95, lateral-position RMSE/p95, directed progress, progress
+per commanded distance, and termination/loss-of-progress status are retained.
+The configured `tracking.yaw_rmse_limit_radps` controls yaw tracking
+qualification. `tracking.vx_relative_error_limit` controls the separately
+reported `vx_relative_tracking_success` diagnostic. The established planar
+qualification remains `tracking_rmse_mps <= 0.05 + 0.25*abs(vx_command)` so
+default online report selection is unchanged.
+
+Rise and settling use the complete recorded transient, not the trimmed slice.
+Rise time is the first sample with commanded-direction velocity at least the
+configured fraction of `abs(mean(full command))`. Settling is the first index
+whose entire remaining suffix stays within the configured relative band. If
+`T` is the full sample count, `k_m` the measurement start, and `k_s` the
+settling index, the post-settle measurement fraction is
+`(T-max(k_s,k_m))/(T-k_m)`; settling time and this fraction are `N/A` if no
+such suffix exists. Heading metrics are independently `N/A` when authentic
+heading state is unavailable, without invalidating velocity metrics.
+
+Cell success thresholds live in `study.json`; they are protocol inputs rather
+than scientific constants. Under the default rules, velocity-only success
+requires no termination, positive command-direction progress, bounded relative
+x-velocity RMSE, and bounded yaw-rate RMSE. Gait-only success requires no
+termination, sufficient contact agreement, the correct gait family, and the
+configured cycle/event coverage; it does not require positive progress. The
+resolved `require_no_termination`, `require_positive_progress`, and
+`require_correct_family` flags can disable their respective checks. Joint
+success is the conjunction. When the gait domain is invalid, gait-only and
+joint success are `N/A`, not failures, and their domain coverage remains
+explicit.
+
+Configured actuator limits are resolved from each articulation actuator in the
+exact action-joint order. The archive records joint names, source per joint,
+source-file hash, resolved vector, and fallback status. Publication normalized
+load analysis rejects a missing, non-finite, non-positive, fallback, or solver-
+sentinel limit. For leg `i`, its three joints `J_i`, analyzed samples `k`, and
+control step `dt`, the integrated load definitions are:
+
+```text
+u_tau2_i = dt sum_k sum_{j in J_i} tau_kj^2
+u_norm_i = dt sum_k sum_{j in J_i} (tau_kj / limit_j)^2
+u_work_i = dt sum_k sum_{j in J_i} |power_kj|
+         = dt sum_k sum_{j in J_i} |tau_kj qdot_kj|
+u_grf_i  = dt sum_k max(Fz_ki, 0)
+```
+
+Vertical impulse integrates nonnegative ground-filtered `Fz` over every sample;
+the contact state is required to validate the GRF domain and to compute contact
+and impact summaries, but it does not gate the impulse sum. Totals per second
+divide by `T*dt`; per-cycle totals are `N/A` for zero/unknown complete cycles;
+per-directed-metre totals are `N/A` for nonpositive directed progress.
+
+For any nonnegative per-leg exposure `u`, concentration fields are:
+
+```text
+CV(u)          = std(u) / (mean(u) + epsilon)
+maximum share  = max_i(u_i) / (sum_i(u_i) + epsilon)
+max:min        = max_i(u_i) / (min_i(u_i) + epsilon)
+front/hind     = ((FL+FR) - (RL+RR)) / (sum_i(u_i) + epsilon)
+left/right     = ((FL+RL) - (FR+RR)) / (sum_i(u_i) + epsilon)
+```
+
+Signed and absolute imbalances, worst-leg identity/value, raw and normalized
+torque-squared exposure, absolute work, and vertical impulse are reported per
+second, complete gait cycle, and positive directed metre. Joint tables include
+worst normalized torque-squared and absolute-work identities, p95/p99 torque
+utilization, saturation fraction, processed-target soft-limit utilization,
+and action-clamp fraction. Foot tables include contact-only mean/p95/p99/max
+vertical force, total impulse, and touchdown impact peak/impulse summaries.
+An impact window has
+`max(1,ceil(impact_window_s/dt))` samples beginning at each measured touchdown;
+no pre-impact baseline is subtracted. No contact samples makes force summaries
+`N/A`; no touchdown makes impact event count zero and impact summaries `N/A`.
+
+Concentration ratios remain epsilon-regularized even when all values or a
+minimum leg value are zero. `zero_leg_count` and a max:min reason field expose
+that condition; the deterministic worst-leg tie is FL. The older percent
+front/hind field is instead `N/A` when total exposure is nonpositive. These
+quantities are load-allocation and concentration proxies only; they do not
+estimate fatigue life or failure probability.
+
+```powershell
+.\scripts\symm_locomotion\evaluation.ps1 `
+  --robot go2 --run 2026-08-21_example --model 19999 `
+  --expected_branch 72d-symm-v4-integration
+```
+
+Use the exact light and full commands below for a resolved checkpoint:
+
+```powershell
+.\scripts\symm_locomotion\evaluation.ps1 `
+  --robot go2 --checkpoint C:\path\to\model_19999.pt --protocol light `
+  --expected_branch 72d-symm-v4-integration
+
+.\scripts\symm_locomotion\evaluation.ps1 `
+  --robot go2 --checkpoint C:\path\to\model_19999.pt --protocol full `
+  --expected_branch 72d-symm-v4-integration
+```
+
+The utility resolves `--run`, `--model`, and `--checkpoint latest` in the same
+way as `play` and `record`. It compiles the selected gait and velocity sequence
+into a shared `study.json` plan consumed by the playback process. This keeps
+the model loaded while the runner executes one isolated gait/velocity cell at
+a time and prints completed-cell counts and an ETA. Available plan controls are:
+
+```text
+--protocol full|light|legacy
+--velocities -1.5 -1.0 -0.5 0.5 1.0 1.5
+--gait_indices 0 1 2 3 4 5 6 7 8 9
+--settle_s 5.0
+--measure_s 10.0
+--evaluation_seed 42
+--evaluation_config PATH_TO_JSON
+--render_cell_plots
+--resume
+--analyze_only
+```
+
+Custom `--velocities` and `--gait_indices` belong to the deprecated `legacy`
+profile. Immutable `full` requires its exact ten-by-six inventory, while
+immutable `light` rejects any nondefault list and always resolves its eight
+named/partner cells. Timing, evaluation seed, evaluation-config JSON, plot
+choice, and ordered runtime overrides become part of each publication
+protocol's study identity. Legacy v1 does not accept `--evaluation_config`.
+Settling and measurement durations must be exact positive multiples of the
+robot control step (`0.02 s` for Go2 and X1). Forwarded runtime options cannot
+override the plan, task, checkpoint, video mode, environment count, seed, or RL
+library. Detailed per-cell plots are off by default; the compressed raw arrays
+needed for analysis are always retained.
+
+All artifacts are stored directly under the resolved training run, without a
+checkpoint-named intermediate folder. Full-v3 uses
+`<training-run>/evaluations/leg_usage_grid_full_v3/`; light uses
+`<training-run>/evaluations/leg_usage_grid_light/`; and legacy-v1 uses
+`<training-run>/evaluations/leg_usage_grid/`. Each has this layout:
+
+```text
+<evaluation-root>/
+  study.json
+  cells/gait_00_trot/vx_neg_0p5/seed_0042/
+    sim_data.npz
+    metadata.json
+    status.json
+    recording_manifest.json
+  metrics/cell_metrics.csv
+  metrics/family_metrics.csv
+  metrics/stratified_fidelity.csv
+  metrics/stratified_fidelity.json
+  metrics/overall_metrics.json
+  metrics/analysis_provenance.json
+  metrics/coverage.csv
+  metrics/joint_metrics.csv                    # when rows exist
+  metrics/foot_metrics.csv                     # when rows exist
+  metrics/gait_classifications.csv             # when rows exist
+  metrics/gait_confusion_matrix.csv            # when rows exist
+  metrics/same_phase_pair_metrics.csv          # when pairs exist
+  metrics/directional_pair_metrics.csv         # when partner cells exist
+  metrics/REPORT.md
+  metrics/SCREENING_REPORT.md
+  figures/trot.svg
+  figures/bound.svg
+  figures/half_bound.svg
+  figures/gallop.svg
+  figures/overall.svg
+  figures/coverage.svg
+  figures/screening_report.svg
+```
+
+The manifest records the resolved checkpoint path, iteration and SHA-256,
+source/configuration hashes, exact grid, timing, and seed. A folder can contain
+only one checkpoint/protocol: a mismatch is rejected instead of overwriting or
+mixing data. Use `--resume` to continue an interrupted identical grid, or
+`--analyze_only` (`--analyze-only` remains an alias) to regenerate summaries
+from its existing cell files. Any
+Isaac Lab/Hydra arguments forwarded after `--` are recorded in order as part of
+the immutable protocol; repeat them for `--resume` or `--analyze_only`.
+Analyze-only verifies the recorded manifest and checkpoint without requiring
+the current source hash to equal the recording source. It writes the current
+analyzer, metrics-module, and Git identity to `metrics/analysis_provenance.json`.
+
+Scientific domains remain independent. Velocity is valid from finite required
+kinematic arrays; heading has its own authentic-state mask. Gait requires the
+per-cell recording manifest, the configured force-source policy, valid
+thresholds, and cycle/event coverage. Raw torque/work does not depend on contact or effort
+limits. GRF load requires an available validated ground-force and contact-
+classification path, but not successful gait coverage/classification.
+Normalized load additionally requires the exact non-fallback effort-limit
+provenance. A
+failure in one domain is `N/A` there and does not erase other valid domains.
+`coverage.csv`, both reports, and `overall_metrics.json` expose these counts;
+`stratified_fidelity.*` repeats domain denominators by gait row, family,
+velocity, direction, and checkpoint/policy hash.
+
+Aggregation skips `None` and non-finite values and returns `None` for an empty
+set. Metric-specific headline values are emitted only when every planned cell
+is valid in that metric's domain; explicitly named `observed_*` fields retain
+partial-domain summaries. The overall legacy-compatible `complete` flag uses
+the velocity, gait, and normalized-load intersection, while raw-load, GRF,
+heading, classification, and the three success domains retain separate
+coverage. Reports render unavailable scalars as `N/A`, never as zero.
+
+Front/hind imbalance is `100 * (front - hind) / (front + hind)`. Tables retain
+that signed value for diagnosis, while primary summaries average its absolute
+value so forward/backward or gait-row signs cannot cancel. Rows and velocities
+are equally weighted within each family; the overall value is an equal mean of
+the trot, bound, half-bound, and gallop family means. Missing, short, terminated,
+invalid, and nonpositive-progress cells remain explicit in coverage outputs.
+Per-distance metrics are reported only for positive commanded-direction
+progress. Tracking quality is retained, not filtered: each cell must pass both
+`tracking_rmse_mps <= 0.05 + 0.25 * abs(vx)` and
+the configured yaw limit (`yaw_tracking_rmse_radps <= 0.05` by default).
+Category and overall figures use
+tracking-qualified cells; tables retain both views. Normalized
+torque uses the 12 action-ordered effort limits recorded from the loaded robot.
+Directed progress uses commanded-sign world-x displacement across the same
+intervals as effort integration, with integrated body-x velocity retained as a
+consistency diagnostic.
+
+Extra Isaac Lab or Hydra overrides can be passed after `--`. Launcher arguments
+before that delimiter are parsed strictly, and the delimiter itself is not
+forwarded. For compatibility, delimiter-free Hydra `key=value` overrides are
+also accepted, while unknown `--options` are rejected by the launcher:
+
+```bash
+bash scripts/symm_locomotion/train.sh --robot go2 --no-trs -- \
+  env.commands.base_velocity.ranges.lin_vel_x='(-1.0, 2.0)'
+```

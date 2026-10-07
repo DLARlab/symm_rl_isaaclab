@@ -393,6 +393,7 @@ class GaitVelocityCommand(CommandTerm):
         self._gait_transition_progress = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
         self.gait_periods = torch.full((self.num_envs,), cfg.gait_period, dtype=torch.float32, device=self.device)
         self.gait_phase = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self._gait_direction = torch.ones_like(self.gait_phase)
         self.kappa = torch.full((self.num_envs,), cfg.kappa, dtype=torch.float32, device=self.device)
         self.gait_time_left = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.gait_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -495,6 +496,7 @@ class GaitVelocityCommand(CommandTerm):
         self._completed_command_window_count[env_ids] = 0.0
         self.gait_counter[env_ids] = 0
         self.gait_phase[env_ids] = 0.0
+        self._gait_direction[env_ids] = 1.0
         self._update_command()
         self._resample_gait(env_ids, transition=False)
         return extras
@@ -547,10 +549,41 @@ class GaitVelocityCommand(CommandTerm):
         self.time_left[env_ids_tensor] = self.time_left[env_ids_tensor].uniform_(*self.cfg.resampling_time_range)
         self.gait_time_left[env_ids_tensor] = self.time_left[env_ids_tensor]
 
+    def _update_gait_direction(self, env_ids: torch.Tensor | None = None) -> None:
+        """Select forward, lateral, then yaw direction and retarget offsets on sign changes."""
+        command = self.command if env_ids is None else self.command[env_ids]
+        previous = self._gait_direction if env_ids is None else self._gait_direction[env_ids]
+        linear_deadband = 0.05  # [m/s]
+        yaw_deadband = 0.05  # [rad/s]
+        vx, vy, yaw = command.unbind(dim=-1)
+
+        # Later selections take priority; all-near-zero commands retain the previous direction.
+        direction = torch.where(yaw.abs() > yaw_deadband, torch.sign(yaw), previous)
+        direction = torch.where(vy.abs() > linear_deadband, torch.sign(vy), direction)
+        direction = torch.where(vx.abs() > linear_deadband, torch.sign(vx), direction)
+        changed_ids = (direction != previous).nonzero(as_tuple=False).flatten()
+        if len(changed_ids) == 0:
+            return
+        changed_direction = direction[changed_ids]
+        if env_ids is not None:
+            changed_ids = env_ids[changed_ids]
+        self._gait_direction[changed_ids] = changed_direction
+
+        # Retain the current phases and timing while transitioning to the new signed offsets.
+        target_offsets = changed_direction.unsqueeze(-1) * self._foot_theta_transition_target[changed_ids]
+        self._foot_phase_offset_transition_start[changed_ids] = self._foot_phase_offsets[changed_ids]
+        self._foot_phase_offset_transition_target[changed_ids] = target_offsets
+        if self.cfg.gait_transition_cycles > 0.0:
+            self._foot_theta_transition_start[changed_ids] = self.foot_thetas[changed_ids]
+            self._duty_factor_transition_start[changed_ids] = self.duty_factors[changed_ids]
+            self._gait_transition_progress[changed_ids] = 0.0
+        else:
+            self._foot_phase_offsets[changed_ids] = target_offsets
+
     def _advance_gait_phase(self, dt: float) -> None:
         """Advance the continuous gait phase clock by one environment step."""
-        direction = torch.where(self.command[:, 0] >= 0.0, 1.0, -1.0)
-        self.gait_phase = _wrap_phase(self.gait_phase + direction * dt / self.gait_periods)
+        self._update_gait_direction()
+        self.gait_phase = _wrap_phase(self.gait_phase + self._gait_direction * dt / self.gait_periods)
 
     def _update_gait_transition(self, dt: float) -> None:
         """Blend gait offsets and duty factors without discontinuous phase changes."""
@@ -625,7 +658,8 @@ class GaitVelocityCommand(CommandTerm):
             gait_periods = torch.full_like(self.gait_periods[env_ids_tensor], self.cfg.gait_period)
             duty_factors = torch.full_like(self.duty_factors[env_ids_tensor], self.cfg.duty_factor)
 
-        direction = torch.where(self.command[env_ids_tensor, 0:1] >= 0.0, 1.0, -1.0)
+        self._update_gait_direction(env_ids_tensor)
+        direction = self._gait_direction[env_ids_tensor].unsqueeze(-1)
         target_foot_thetas = self._gait_foot_theta_templates[env_ids_tensor]
         target_foot_phase_offsets = direction * target_foot_thetas
         self.gait_periods[env_ids_tensor] = gait_periods
@@ -758,6 +792,7 @@ class GaitVelocityCommand(CommandTerm):
             )
         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
         self.vel_command_b[standing_env_ids, :] = 0.0
+        self._update_gait_direction()
 
     def _compute_period_from_forward_velocity(self, cmd_forward_velocity: torch.Tensor) -> torch.Tensor:
         lower_bound, upper_bound = self.cfg.base_height_range

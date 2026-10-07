@@ -670,6 +670,122 @@ def test_gait_phase_is_continuous_when_period_or_velocity_direction_changes():
     assert torch.equal(phases_after, phases_before)
 
 
+def _make_gait_direction_command(num_envs=1):
+    cfg = make_gait_velocity_command(symm_quadruped)
+    cfg.curriculum = None
+    cfg.calculate_from_sampling_curve = False
+    cfg.add_noise_theta = False
+    cfg.gait_period = 0.5
+    cfg.gait_transition_cycles = 0.0
+    cfg.init_foot_thetas = ((-0.13, 0.13, 0.63, 0.37),)
+    cfg.ranges.lin_vel_x = (0.0, 0.0)
+    cfg.ranges.lin_vel_y = (0.0, 0.0)
+    cfg.ranges.ang_vel_z = (0.0, 0.0)
+    robot = SimpleNamespace(data=SimpleNamespace(heading_w=_tensor_data(torch.zeros(num_envs))))
+    env = SimpleNamespace(num_envs=num_envs, device="cpu", scene={"robot": robot}, extras={"log": {}})
+    command = symm_quadruped.GaitVelocityCommand(cfg, env)
+    command.reset(torch.arange(num_envs))
+    return command
+
+
+@pytest.mark.parametrize("update_method", ["timing", "command", "clock"])
+def test_gait_direction_prioritizes_forward_lateral_then_yaw(update_method):
+    velocities = torch.tensor(
+        [
+            [1.0, -0.5, -0.6],
+            [-1.0, 0.5, 0.6],
+            [0.0, -0.5, 0.6],
+            [0.0, 0.5, -0.6],
+            [0.0, 0.0, -0.6],
+            [0.0, 0.0, 0.6],
+            [0.05, -0.5, 0.6],
+            [-0.05, 0.5, -0.6],
+            [0.02, 0.05, -0.6],
+            [-0.02, -0.05, 0.6],
+            [0.0, 0.0, -0.0501],
+            [0.0, 0.0, -0.05],
+            [0.0, 0.0, 0.0],
+        ]
+    )
+    expected = torch.tensor([1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1.0])
+    command = _make_gait_direction_command(len(velocities))
+    command.vel_command_b[:] = velocities
+    command.gait_phase[:] = 0.4
+    if update_method == "timing":
+        command._resample_gait_timing(torch.arange(len(velocities)), transition=False)
+    elif update_method == "command":
+        command._update_command()
+    command._advance_gait_phase(0.02)
+
+    expected_clock = 0.4 + expected * 0.04
+    expected_offsets = expected[:, None] * command.init_foot_thetas
+    torch.testing.assert_close(command.gait_phase, expected_clock)
+    torch.testing.assert_close(command._foot_phase_offsets, expected_offsets)
+    torch.testing.assert_close(command.foot_phases(), torch.remainder(expected_clock[:, None] + expected_offsets, 1.0))
+
+
+def test_gait_direction_retains_previous_sign_in_deadband_and_resets_per_environment():
+    command = _make_gait_direction_command(2)
+    command.vel_command_b[:, 2] = -0.6
+    command._update_command()
+    command.vel_command_b[:] = torch.tensor([[0.0, 0.0, 0.0], [0.05, -0.05, 0.05]])
+    command._resample_gait_timing(torch.arange(2), transition=False)
+    command._advance_gait_phase(0.02)
+    torch.testing.assert_close(command.gait_phase, torch.full((2,), 0.96))
+    torch.testing.assert_close(command._foot_phase_offsets, -command.init_foot_thetas.expand(2, -1))
+
+    command.reset(torch.tensor([0]))
+    command.gait_phase[:] = 0.4
+    command._advance_gait_phase(0.02)
+    torch.testing.assert_close(command.gait_phase, torch.tensor([0.44, 0.36]))
+    torch.testing.assert_close(command._foot_phase_offsets, torch.tensor([[1.0], [-1.0]]) * command.init_foot_thetas)
+
+
+def test_gait_direction_change_blends_offsets_without_resampling_timing():
+    command = _make_gait_direction_command(2)
+    command.vel_command_b[:, 1] = -0.5
+    command._update_command()
+    command.cfg.gait_transition_cycles = 1.0
+    command.gait_phase[:] = 0.4
+    phases_before = command.foot_phases().clone()
+    offsets_before = command._foot_phase_offsets.clone()
+    periods_before = command.gait_periods.clone()
+    duty_before = command.duty_factors.clone()
+    command.vel_command_b[0, 1] = 0.5
+
+    command._update_command()
+    torch.testing.assert_close(command.foot_phases(), phases_before)
+    command._advance_gait_phase(0.125)
+    command._update_gait_transition(0.125)
+    torch.testing.assert_close(command.gait_phase, torch.tensor([0.65, 0.15]))
+    torch.testing.assert_close(command._foot_phase_offsets[0], 0.5 * offsets_before[0])
+    torch.testing.assert_close(command._foot_phase_offsets[1], offsets_before[1])
+
+    command._update_command()
+    command._update_gait_transition(0.375)
+    torch.testing.assert_close(command._foot_phase_offsets[0], command.init_foot_thetas[0])
+    torch.testing.assert_close(command.gait_periods, periods_before)
+    torch.testing.assert_close(command.duty_factors, duty_before)
+
+
+def test_gait_direction_follows_heading_yaw_changes():
+    command = _make_gait_direction_command()
+    command.cfg.heading_command = True
+    command.is_heading_env[:] = True
+    command.heading_target[:] = -0.6
+    command._update_command()
+    command._advance_gait_phase(0.02)
+    torch.testing.assert_close(command.gait_phase, torch.tensor([0.96]))
+    torch.testing.assert_close(command._foot_phase_offsets, -command.init_foot_thetas)
+
+    command.heading_target[:] = 0.6
+    command._update_command()
+    command.gait_phase[:] = 0.4
+    command._advance_gait_phase(0.02)
+    torch.testing.assert_close(command.gait_phase, torch.tensor([0.44]))
+    torch.testing.assert_close(command._foot_phase_offsets, command.init_foot_thetas)
+
+
 def test_gait_resampling_transition_modes_are_applied_per_environment(monkeypatch):
     command_cfg = make_gait_velocity_command(symm_quadruped)
     calls = {}
@@ -877,12 +993,12 @@ def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
 
     assert env_cfg.rewards.track_lin_vel_xy_exp.func is base_mdp.track_lin_vel_xy_exp
     assert env_cfg.rewards.track_lin_vel_xy_exp.weight == 0.5
-    assert env_cfg.rewards.track_lin_vel_xy_exp.params["std"] == 0.5
+    assert env_cfg.rewards.track_lin_vel_xy_exp.params["std"] == 0.2
     assert env_cfg.rewards.track_lin_vel_x_exp is None
     assert env_cfg.rewards.track_lin_vel_y_exp is None
     assert env_cfg.rewards.track_ang_vel_z_exp.func is symm_quadruped.track_ang_vel_z_exp
     assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.5
-    assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
+    assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
     assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp_penalty
     assert env_cfg.rewards.base_roll_exp.weight == 0.30
     assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
@@ -924,7 +1040,7 @@ def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1
     assert x1_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
     assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.20
     assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
-    assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.50
+    assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
     assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.10
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
