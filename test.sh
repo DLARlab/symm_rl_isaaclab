@@ -12,7 +12,7 @@ export OMNI_KIT_ACCEPT_EULA=YES
 checkpoints=(
   # "x1|logs/rsl_rl/dobot_x1_symm_flat/2026-10-10_06-57-37_x1_no_trs/model_9999.pt"
   # "go2|logs/rsl_rl/unitree_go2_symm_flat/2026-10-07_03-32-43_go2_with_trs_mirror0p1/model_9999.pt"
-  # "go2|logs/rsl_rl/unitree_go2_symm_flat/2026-10-11_04-06-59_go2_no_trs/model_9999.pt"
+  "go2|logs/rsl_rl/unitree_go2_symm_flat/2026-10-11_04-06-59_go2_no_trs/model_9999.pt"
 )
 x_command="1"
 y_command="0.5"
