@@ -205,13 +205,32 @@ class SymmetricCommandBatchRecorder(SymmetricRolloutPlotter):
             ("foot_clearance_shortfalls", "shortfall"),
             ("foot_clearance_swing_weights", "swing_weight"),
             ("foot_clearance_penalty", "penalty"),
+            ("foot_clearance_reward", "reward"),
+            ("foot_clearance_horizontal_speeds", "horizontal_speed"),
         ):
-            shape = (self._env.num_envs,) if source == "penalty" else (self._env.num_envs, 4)
+            shape = (self._env.num_envs,) if source in ("penalty", "reward") else (self._env.num_envs, 4)
             values[name] = clearance.get(source, np.full(shape, np.nan, dtype=np.float32))
+        periodicity = getattr(self._env, "_foot_periodicity_diagnostics", {})
+        if periodicity or "foot_periodicity_phases" in self._samples:
+            for name in (
+                "phases",
+                "swing_ratios",
+                "forces",
+                "speeds",
+                "force_penalty",
+                "speed_penalty",
+                "force_cost",
+                "speed_cost",
+            ):
+                values[f"foot_periodicity_{name}"] = periodicity.get(
+                    name, np.full((self._env.num_envs, 4), np.nan, dtype=np.float32)
+                )
         for name, value in values.items():
             array = value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else np.asarray(value)
             if name not in self._samples:
                 self._samples[name] = np.empty((self.total_steps, *array.shape), dtype=array.dtype)
+                if name.startswith("foot_periodicity_"):
+                    self._samples[name][: self._step_count] = np.nan
             self._samples[name][self._step_count] = array
         self._step_count += 1
         # Resume the desired trajectory from each environment's post-reset pose on its next step.

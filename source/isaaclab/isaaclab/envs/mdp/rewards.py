@@ -314,7 +314,18 @@ Velocity-tracking rewards.
 def track_lin_vel_xy_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
+    """Reward body-frame planar velocity tracking with an exponential kernel.
+
+    Args:
+        env: The environment instance.
+        std: Direct denominator for summed squared velocity errors [(m/s)^2].
+            Despite the retained parameter name, this value is not squared.
+        command_name: Name of the velocity command term.
+        asset_cfg: Robot asset configuration.
+
+    Returns:
+        Per-environment tracking reward in ``[0, 1]``.
+    """
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     # compute the error
@@ -322,17 +333,28 @@ def track_lin_vel_xy_exp(
         torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_lin_vel_b.torch[:, :2]),
         dim=1,
     )
-    return torch.exp(-lin_vel_error / std**2)
+    return torch.exp(-lin_vel_error / std)
 
 
 def track_ang_vel_z_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """Reward tracking of angular velocity commands (yaw) using exponential kernel."""
+    """Reward body-frame yaw-rate tracking with an exponential kernel.
+
+    Args:
+        env: The environment instance.
+        std: Direct denominator for squared yaw-rate error [(rad/s)^2].
+            Despite the retained parameter name, this value is not squared.
+        command_name: Name of the velocity command term.
+        asset_cfg: Robot asset configuration.
+
+    Returns:
+        Per-environment tracking reward in ``[0, 1]``.
+    """
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     # compute the error
     ang_vel_error = torch.square(
         env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b.torch[:, 2]
     )
-    return torch.exp(-ang_vel_error / std**2)
+    return torch.exp(-ang_vel_error / std)

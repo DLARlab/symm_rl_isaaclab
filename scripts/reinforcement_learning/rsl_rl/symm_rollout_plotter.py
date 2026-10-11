@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import matplotlib
@@ -206,6 +207,8 @@ class SymmetricRolloutPlotter:
             "foot_clearance_shortfalls": [],
             "foot_clearance_swing_weights": [],
             "foot_clearance_penalty": [],
+            "foot_clearance_reward": [],
+            "foot_clearance_horizontal_speeds": [],
         }
 
     @torch.no_grad()
@@ -438,6 +441,25 @@ class SymmetricRolloutPlotter:
         self._data["episode_done"].append(episode_done)
         self._data["foot_forces"].append(contact_force_norms.numpy())
         self._data["foot_velocities"].append(torch.linalg.norm(foot_velocity, dim=-1).detach().cpu().numpy())
+        periodicity = getattr(self._env, "_foot_periodicity_diagnostics", {})
+        if periodicity or "foot_periodicity_phases" in self._data:
+            for name in (
+                "phases",
+                "swing_ratios",
+                "forces",
+                "speeds",
+                "force_penalty",
+                "speed_penalty",
+                "force_cost",
+                "speed_cost",
+            ):
+                key = f"foot_periodicity_{name}"
+                if key not in self._data:
+                    self._data[key] = [np.full(4, np.nan) for _ in range(len(self._data["time_steps"]) - 1)]
+                value = periodicity.get(name)
+                self._data[key].append(
+                    np.full(4, np.nan) if value is None else value[env_index].detach().cpu().numpy().copy()
+                )
         self._data["raw_actions"].append(actions[env_index].detach().cpu().numpy())
         self._data["actor_means"].append(actor_means[env_index].detach().cpu().numpy())
         self._data["applied_actions"].append(joint_position_targets.numpy())
@@ -467,6 +489,8 @@ class SymmetricRolloutPlotter:
         self._data["foot_clearance_shortfalls"].append(foot_clearance_component("shortfall"))
         self._data["foot_clearance_swing_weights"].append(foot_clearance_component("swing_weight"))
         self._data["foot_clearance_penalty"].append(foot_clearance_component("penalty", per_foot=False))
+        self._data["foot_clearance_reward"].append(foot_clearance_component("reward", per_foot=False))
+        self._data["foot_clearance_horizontal_speeds"].append(foot_clearance_component("horizontal_speed"))
         if self._max_samples is not None and len(self._data["time_steps"]) >= self._max_samples:
             self._env._capture_rollout_diagnostics = False
 
@@ -534,8 +558,118 @@ class SymmetricRolloutPlotter:
             ),
             self._save_leg_ground_reaction_force_plot(data),
         ]
+        if "foot_periodicity_phases" in data:
+            paths.extend((self._save_foot_periodicity_summary(data), self._save_foot_periodicity_plot(data)))
         print(f"[symm_locomotion] Saved rollout plots to: {self._output_dir}", flush=True)
         return paths
+
+    def _foot_periodicity_rows(self, data: dict[str, np.ndarray]) -> list[dict[str, str | int | float]]:
+        """Summarize reward-time force and speed by commanded phase and command direction."""
+        phases = data["foot_periodicity_phases"]
+        swing_ratios = data["foot_periodicity_swing_ratios"]
+        valid = np.isfinite(phases) & np.isfinite(swing_ratios)
+        swing = phases < swing_ratios
+        use_costs = "foot_periodicity_force_cost" in data and np.isfinite(data["foot_periodicity_force_cost"]).any()
+        force_component = "force_cost" if use_costs else "force_penalty"
+        speed_component = "speed_cost" if use_costs else "speed_penalty"
+        groups = [("all", np.ones(len(phases), dtype=bool))]
+        for direction, component, sign, _ in self._TRACKING_DIRECTION_SPECS:
+            groups.append(
+                (
+                    direction,
+                    sign * data["desired_lin_vel"][:, component] > self._TRACKING_DIRECTION_COMMAND_THRESHOLD,
+                )
+            )
+        rows = []
+        for direction, command_mask in groups:
+            if not command_mask.any():
+                continue
+            for leg_index, leg in enumerate(("FL", "FR", "RL", "RR")):
+                for phase, phase_mask in (("stance", ~swing), ("swing", swing)):
+                    mask = command_mask & valid[:, leg_index] & phase_mask[:, leg_index]
+                    row = {"direction": direction, "leg": leg, "phase": phase, "samples": int(mask.sum())}
+                    for name, column in (
+                        ("forces", "mean_contact_force_N"),
+                        ("speeds", "mean_foot_speed_m_s"),
+                        (force_component, f"mean_{force_component}"),
+                        (speed_component, f"mean_{speed_component}"),
+                    ):
+                        values = data[f"foot_periodicity_{name}"][mask, leg_index]
+                        row[column] = float(np.mean(values)) if len(values) else float("nan")
+                    rows.append(row)
+        return rows
+
+    def _save_foot_periodicity_summary(self, data: dict[str, np.ndarray]) -> Path:
+        """Save phase-conditioned means; components exclude external weights and step duration."""
+        rows = self._foot_periodicity_rows(data)
+        path = self._output_dir / "foot_periodicity.csv"
+        with path.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        print("[symm_locomotion] Foot periodicity: force is penalized in swing; speed in stance.", flush=True)
+        print("[symm_locomotion] Contact force = history-max net force; speed = world-frame foot speed.", flush=True)
+        for row in rows:
+            if row["direction"] == "all":
+                print(
+                    f"[symm_locomotion]   {row['leg']} {row['phase']:<6}: n={row['samples']}, "
+                    f"force={row['mean_contact_force_N']:.3f} N, speed={row['mean_foot_speed_m_s']:.3f} m/s",
+                    flush=True,
+                )
+        return path
+
+    def _save_foot_periodicity_plot(self, data: dict[str, np.ndarray]) -> Path:
+        """Plot actual reward inputs and components with commanded stance/swing shading."""
+        time_steps = data["time_steps"]
+        # Samples represent control intervals; include the final interval in the shading.
+        edges = np.append(time_steps, time_steps[-1] + self._step_dt)
+        phases = data["foot_periodicity_phases"]
+        swing_ratios = data["foot_periodicity_swing_ratios"]
+        swing = phases < swing_ratios
+        valid = np.isfinite(phases) & np.isfinite(swing_ratios)
+        use_costs = "foot_periodicity_force_cost" in data and np.isfinite(data["foot_periodicity_force_cost"]).any()
+        fig, axes = plt.subplots(4, 3, figsize=(18, 12), sharex=True)
+        for leg_index, leg in enumerate(self._LEG_NAMES):
+            for column, axis in enumerate(axes[leg_index]):
+                for name, mask, color in (
+                    ("Stance", valid[:, leg_index] & ~swing[:, leg_index], "tab:orange"),
+                    ("Swing", valid[:, leg_index] & swing[:, leg_index], "tab:blue"),
+                ):
+                    axis.fill_between(
+                        edges,
+                        0,
+                        np.append(mask, mask[-1]).astype(float),
+                        step="post",
+                        transform=axis.get_xaxis_transform(),
+                        color=color,
+                        alpha=0.12,
+                        label=name,
+                    )
+                if column < 2:
+                    key, label = (
+                        ("forces", "History-max net force [N]") if column == 0 else ("speeds", "World foot speed [m/s]")
+                    )
+                    axis.plot(time_steps, data[f"foot_periodicity_{key}"][:, leg_index], color="black", linewidth=0.8)
+                else:
+                    label = "Cost inside exponential" if use_costs else "Unweighted penalty"
+                    for key, color, name in (
+                        ("force_cost" if use_costs else "force_penalty", "tab:red", "Swing force component"),
+                        ("speed_cost" if use_costs else "speed_penalty", "tab:green", "Stance speed component"),
+                    ):
+                        axis.plot(time_steps, data[f"foot_periodicity_{key}"][:, leg_index], color=color, label=name)
+                axis.set_title(f"{leg}: {label}")
+                axis.set_ylabel(label)
+                axis.grid(alpha=0.2)
+                if leg_index == 0:
+                    axis.legend(loc="upper right", fontsize="small")
+                if leg_index == 3:
+                    axis.set_xlabel("Time [s]")
+        fig.suptitle("Foot periodicity: penalize swing contact and stance motion (commanded phases)")
+        fig.tight_layout()
+        path = self._output_dir / "figure11_foot_periodicity.png"
+        fig.savefig(path, dpi=180)
+        plt.close(fig)
+        return path
 
     def _prepare_data(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Add shared metadata and derived signals, retaining an optional environment axis."""
@@ -871,6 +1005,8 @@ class SymmetricRolloutPlotter:
 
     def _save_foot_clearance_plot(self, data: dict[str, np.ndarray]) -> Path:
         time_steps = data["time_steps"]
+        horizontal_speeds = data.get("foot_clearance_horizontal_speeds")
+        speed_weighted = horizontal_speeds is not None and np.isfinite(horizontal_speeds).any()
         fig, axes = plt.subplots(4, 1, figsize=(10, 16), sharex=True)
         for index, axis in enumerate(axes):
             axis.plot(time_steps, data["foot_heights"][:, index], label="Measured height")
@@ -878,15 +1014,20 @@ class SymmetricRolloutPlotter:
                 time_steps,
                 data["foot_clearance_targets"][:, index],
                 linestyle="--",
-                label="Swing target",
+                label="Clearance target" if speed_weighted else "Swing target",
             )
-            axis.fill_between(
-                time_steps,
-                0.0,
-                data["foot_clearance_swing_weights"][:, index] * np.nanmax(data["foot_clearance_targets"]),
-                alpha=0.15,
-                label="Active swing weight",
-            )
+            if speed_weighted:
+                speed_axis = axis.twinx()
+                speed_axis.plot(time_steps, horizontal_speeds[:, index], color="tab:green", alpha=0.4)
+                speed_axis.set_ylabel("Horizontal speed weight [m/s]", color="tab:green")
+            else:
+                axis.fill_between(
+                    time_steps,
+                    0.0,
+                    data["foot_clearance_swing_weights"][:, index] * np.nanmax(data["foot_clearance_targets"]),
+                    alpha=0.15,
+                    label="Active swing weight",
+                )
             axis.set_ylabel("Height (m)")
             axis.set_title(f"{self._LEG_NAMES[index]} Foot Clearance")
             axis.legend()

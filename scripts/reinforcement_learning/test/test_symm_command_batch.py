@@ -105,13 +105,31 @@ def test_default_assigns_600_environments_and_preserves_commands_after_reset(bat
             assert not data["recording_complete"].item()
 
 
-def test_completed_recordings_preserve_existing_schema_and_every_environment(batch_module, tmp_path):
+@pytest.mark.parametrize("positive_diagnostics", [False, True])
+def test_completed_recordings_preserve_existing_schema_and_every_environment(
+    batch_module, tmp_path, positive_diagnostics
+):
     env, command, robot = _make_batch_env(12)
     recorder = batch_module.SymmetricCommandBatchRecorder(env, tmp_path, envs_per_command=2, duration=0.04)
     recorder.install_command_override()
     single = batch_module.SymmetricRolloutPlotter(env, tmp_path / "single", env_index=0)
     for step in range(2):
         robot.data.applied_torque.torch[:] = torch.arange(12)[:, None] + step + 1.0
+        if positive_diagnostics:
+            env._foot_clearance_diagnostics = {
+                "foot_height": torch.full((12, 4), 0.09),
+                "target_height": torch.full((12, 4), 0.102),
+                "horizontal_speed": torch.full((12, 4), 0.5),
+                "reward": torch.full((12,), 0.8),
+            }
+            env._foot_periodicity_diagnostics = {
+                "phases": torch.full((12, 4), 0.1),
+                "swing_ratios": torch.full((12, 4), 0.5),
+                "forces": torch.full((12, 4), 2.0),
+                "speeds": torch.full((12, 4), 0.4),
+                "force_cost": torch.full((12, 4), 1.0),
+                "speed_cost": torch.full((12, 4), 0.1),
+            }
         _cache_step(env, command, robot)
         recorder.record()
         single.record()

@@ -179,7 +179,8 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_sensor_names=_GO2_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_GO2_FOOT_BODY_NAMES,
             base_height_target=0.30,
-            foot_clearance_height=0.08,
+            foot_clearance_height=0.06,
+            foot_height_offset=0.022,
         )
 
     def _configure_go2_symm_terminations(self) -> None:

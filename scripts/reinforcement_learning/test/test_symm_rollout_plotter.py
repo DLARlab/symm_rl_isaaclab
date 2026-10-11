@@ -155,6 +155,75 @@ def test_plotter_records_symmetric_rollout_signals(tmp_path):
     assert plotter._data["foot_clearance_targets"][0].tolist() == pytest.approx([0.08] * 4)
 
 
+@pytest.mark.parametrize("split_rewards", [False, True])
+def test_plotter_exports_reward_inputs_by_phase_and_direction(tmp_path, split_rewards):
+    module = _load_plotter_module()
+    env, command, _ = _make_env()
+    plotter = module.SymmetricRolloutPlotter(env, tmp_path)
+    # Unequal stance/swing durations and nonzero Y/Z speed components are already
+    # resolved by the reward; the plotter must retain those exact measurements.
+    for velocity, phase, force, speed in ((1.0, 0.1, 2.0, 3.0), (-1.0, 0.4, 90.0, 0.02)):
+        command.command = torch.tensor([[velocity, 0.0, 0.0]])
+        env._foot_periodicity_diagnostics = {
+            "phases": torch.full((1, 4), phase),
+            "swing_ratios": torch.full((1, 4), 0.3),
+            "forces": torch.full((1, 4), force),
+            "speeds": torch.full((1, 4), speed),
+            "force_penalty": torch.full((1, 4), -0.05 if phase < 0.3 else 0.0),
+            "speed_penalty": torch.full((1, 4), 0.0 if phase < 0.3 else -0.04),
+        }
+        if split_rewards:
+            diagnostics = env._foot_periodicity_diagnostics
+            diagnostics["force_cost"] = -diagnostics.pop("force_penalty")
+            diagnostics["speed_cost"] = -diagnostics.pop("speed_penalty")
+            env._foot_clearance_diagnostics = {
+                "foot_height": torch.full((1, 4), 0.09),
+                "target_height": torch.full((1, 4), 0.102),
+                "horizontal_speed": torch.full((1, 4), speed),
+                "reward": torch.tensor([0.75]),
+            }
+        plotter.record(dones=torch.tensor([True]))
+        # Simulate mutable buffers being cleared by a subsequent reset.
+        for value in env._foot_periodicity_diagnostics.values():
+            value.zero_()
+
+    data = {name: np.asarray(values) for name, values in plotter._data.items()}
+    rows = plotter._foot_periodicity_rows(data)
+    forward_swing = next(
+        row for row in rows if (row["direction"], row["leg"], row["phase"]) == ("forward", "FL", "swing")
+    )
+    assert forward_swing["samples"] == 1
+    assert forward_swing["mean_contact_force_N"] == pytest.approx(2.0)
+    assert forward_swing["mean_foot_speed_m_s"] == pytest.approx(3.0)
+    backward_stance = next(
+        row for row in rows if (row["direction"], row["leg"], row["phase"]) == ("backward", "FL", "stance")
+    )
+    assert backward_stance["samples"] == 1
+    assert backward_stance["mean_contact_force_N"] == pytest.approx(90.0)
+    assert backward_stance["mean_foot_speed_m_s"] == pytest.approx(0.02)
+    if split_rewards:
+        assert backward_stance["mean_speed_cost"] == pytest.approx(0.04)
+        assert forward_swing["mean_force_cost"] == pytest.approx(0.05)
+    else:
+        assert backward_stance["mean_speed_penalty"] == pytest.approx(-0.04)
+    missing = next(row for row in rows if (row["direction"], row["leg"], row["phase"]) == ("forward", "FL", "stance"))
+    assert missing["samples"] == 0
+    assert np.isnan(missing["mean_contact_force_N"])
+
+    paths = plotter.save()
+    assert {"foot_periodicity.csv", "figure11_foot_periodicity.png"} <= {path.name for path in paths}
+    assert all(path.stat().st_size > 0 for path in paths)
+    with np.load(tmp_path / "sim_data.npz") as archive:
+        assert archive["foot_periodicity_forces"][:, 0].tolist() == pytest.approx([2.0, 90.0])
+        assert archive["foot_periodicity_phases"][:, 0].tolist() == pytest.approx([0.1, 0.4])
+        if split_rewards:
+            assert archive["foot_clearance_reward"].tolist() == pytest.approx([0.75, 0.75])
+            assert archive["foot_clearance_horizontal_speeds"][:, 0].tolist() == pytest.approx([3.0, 0.02])
+    summary = (tmp_path / "foot_periodicity.csv").read_text()
+    assert "mean_contact_force_N" in summary
+    assert "backward,FL,stance,1" in summary
+
+
 def test_plotter_saves_isaacgym_compatible_outputs(tmp_path, capsys):
     module = _load_plotter_module()
     env, command_term, robot = _make_env()

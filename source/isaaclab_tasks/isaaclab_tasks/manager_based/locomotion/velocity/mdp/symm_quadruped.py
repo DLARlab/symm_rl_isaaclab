@@ -978,6 +978,26 @@ def track_ang_vel_z_exp(
     return _tracking_exp(error, error_scale)
 
 
+def base_roll_pitch_exp(
+    env: ManagerBasedRLEnv,
+    scale: float = 10.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward zero roll and pitch using their summed squared errors.
+
+    Args:
+        env: The environment instance.
+        scale: Exponential coefficient [rad^-2].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Per-environment reward in ``[0, 1]``.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    roll, pitch, _ = euler_xyz_from_quat(asset.data.root_quat_w.torch)
+    return torch.exp(-scale * (roll.square() + pitch.square()))
+
+
 def base_roll_exp(
     env: ManagerBasedRLEnv,
     error_scale: float,
@@ -1279,6 +1299,28 @@ def sagittal_plane_penalty(
     return -(pose_weight * pose_penalty + secondary_weight * motion_penalty + low_height_weight * low_height_penalty)
 
 
+def base_height_exp(
+    env: ManagerBasedRLEnv,
+    target_height: float = 0.35,
+    scale: float = 100.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward tracking of a base-height target above flat ground.
+
+    Args:
+        env: The environment instance.
+        target_height: Target base height above the environment origin [m].
+        scale: Exponential coefficient [m^-2].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Per-environment reward in ``[0, 1]``.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    height = asset.data.root_pos_w.torch[:, 2] - env.scene.env_origins[:, 2]
+    return torch.exp(-scale * (height - target_height).square())
+
+
 def base_height_range_penalty(
     env: ManagerBasedRLEnv,
     height_range: tuple[float, float],
@@ -1308,6 +1350,140 @@ def base_height_range_penalty(
     return -(1.0 - torch.exp(-20.0 * deviation))
 
 
+def foot_periodicity_force_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    foot_sensor_names: Sequence[str],
+    foot_sensor_body_names: Sequence[str] | None = None,
+    scale: float = 1.0,
+) -> torch.Tensor:
+    """Reward low swing contact force using an exponential of the summed foot costs.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        foot_sensor_names: Single-body contact sensors in FL, FR, RL, RR order.
+        foot_sensor_body_names: Optional body names in the same order.
+        scale: Exponential force coefficient [N^-1].
+
+    Returns:
+        Per-environment reward in ``[0, 1]``. Forces are full 3D net magnitudes [N],
+        maximized over the sensor history.
+    """
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
+    cost = -gait_command.periodic_force_weights() * forces * scale
+    _record_foot_periodicity_component(env, gait_command, forces=forces, force_cost=cost)
+    return torch.exp(-cost.sum(dim=-1))
+
+
+def foot_periodicity_velocity_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    feet_cfg: SceneEntityCfg,
+    scale: float = 1.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward low stance foot speed using an exponential of the summed foot costs.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        feet_cfg: Foot bodies in FL, FR, RL, RR order.
+        scale: Exponential speed coefficient [s/m].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Per-environment reward in ``[0, 1]``. Speeds are full 3D world-frame
+        foot-velocity magnitudes [m/s].
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    speeds = torch.linalg.vector_norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
+    cost = -gait_command.periodic_speed_weights() * speeds * scale
+    _record_foot_periodicity_component(env, gait_command, speeds=speeds, speed_cost=cost)
+    return torch.exp(-cost.sum(dim=-1))
+
+
+def foot_periodicity_force_exp_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    foot_sensor_names: Sequence[str],
+    foot_sensor_body_names: Sequence[str] | None = None,
+    scale: float = 0.05,
+) -> torch.Tensor:
+    """Penalize each foot's swing contact force with a bounded exponential.
+
+    Each foot contributes ``S * (exp(-scale * F) - 1)`` before summation,
+    where ``S`` is the nonnegative swing gate. Force ``F`` is the maximum
+    full 3D net contact-force magnitude [N] over the sensor history.
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        foot_sensor_names: Single-body contact sensors in FL, FR, RL, RR order.
+        foot_sensor_body_names: Optional body names in the same order.
+        scale: Exponential force coefficient [N^-1].
+
+    Returns:
+        Summed per-environment penalty in ``[-sum(S), 0]``, before the outer
+        reward weight and timestep scaling.
+    """
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
+    penalty = -gait_command.periodic_force_weights() * torch.expm1(-scale * forces)
+    _record_foot_periodicity_component(env, gait_command, forces=forces, force_penalty=penalty)
+    return penalty.sum(dim=-1)
+
+
+def foot_periodicity_velocity_exp_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    feet_cfg: SceneEntityCfg,
+    scale: float = 2.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize each foot's stance speed with a bounded exponential.
+
+    Each foot contributes ``T * (exp(-scale * u) - 1)`` before summation,
+    where ``T`` is the nonnegative stance gate and ``u`` is the full 3D
+    world-frame foot speed [m/s].
+
+    Args:
+        env: The environment instance.
+        command_name: Name of the gait velocity command term.
+        feet_cfg: Foot bodies in FL, FR, RL, RR order.
+        scale: Exponential speed coefficient [s/m].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Summed per-environment penalty in ``[-sum(T), 0]``, before the outer
+        reward weight and timestep scaling.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
+    speeds = torch.linalg.vector_norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
+    penalty = -gait_command.periodic_speed_weights() * torch.expm1(-scale * speeds)
+    _record_foot_periodicity_component(env, gait_command, speeds=speeds, speed_penalty=penalty)
+    return penalty.sum(dim=-1)
+
+
+def _record_foot_periodicity_component(
+    env: ManagerBasedRLEnv, gait_command: GaitVelocityCommand, **components: torch.Tensor
+) -> None:
+    """Merge split reward diagnostics before resets or command resampling."""
+    if not getattr(env, "_capture_rollout_diagnostics", False):
+        return
+    phases = gait_command.foot_phases()
+    components.update(
+        phases=phases,
+        swing_ratios=(1.0 - gait_command.duty_factors).unsqueeze(-1).expand_as(phases),
+    )
+    diagnostics = getattr(env, "_foot_periodicity_diagnostics", {})
+    diagnostics.update({name: value.detach().clone() for name, value in components.items()})
+    env._foot_periodicity_diagnostics = diagnostics
+
+
 def foot_periodicity_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -1320,15 +1496,27 @@ def foot_periodicity_penalty(
     """Penalty for foot contact in swing and foot speed in stance."""
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
-    reward = torch.zeros(env.num_envs, device=env.device)
+    force_penalty = torch.zeros(env.num_envs, 4, device=env.device)
+    foot_forces = None
     if foot_sensor_names is not None:
         foot_forces = _collect_single_body_contact_force_norms(env, foot_sensor_names, foot_sensor_body_names)
-        reward += torch.sum(
-            (1.0 - torch.exp(-force_scale * foot_forces)) * gait_command.periodic_force_weights(), dim=-1
-        )
+        force_penalty = (1.0 - torch.exp(-force_scale * foot_forces)) * gait_command.periodic_force_weights()
     foot_speeds = torch.linalg.norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :], dim=-1)
-    reward += torch.sum((1.0 - torch.exp(-2.0 * foot_speeds)) * gait_command.periodic_speed_weights(), dim=-1)
-    return reward
+    speed_penalty = (1.0 - torch.exp(-2.0 * foot_speeds)) * gait_command.periodic_speed_weights()
+    if getattr(env, "_capture_rollout_diagnostics", False):
+        # Preserve reward-time signals before resets or command resampling can change them.
+        env._foot_periodicity_diagnostics = {
+            name: value.detach().clone()
+            for name, value in {
+                "phases": gait_command.foot_phases(),
+                "swing_ratios": (1.0 - gait_command.duty_factors).unsqueeze(-1).expand_as(foot_speeds),
+                "forces": foot_forces if foot_forces is not None else torch.full_like(foot_speeds, torch.nan),
+                "speeds": foot_speeds,
+                "force_penalty": force_penalty,
+                "speed_penalty": speed_penalty,
+            }.items()
+        }
+    return force_penalty.sum(dim=-1) + speed_penalty.sum(dim=-1)
 
 
 def contact_collision_count(
@@ -1358,6 +1546,51 @@ def illegal_contact_any_sensor(
     return contact
 
 
+def foot_clearance_speed_exp(
+    env: ManagerBasedRLEnv,
+    feet_cfg: SceneEntityCfg,
+    target_height: float = 0.08,
+    foot_height_offset: float = 0.022,
+    sigma: float = 0.01,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track foot clearance with squared height errors weighted by horizontal speed.
+
+    There is no phase or command gate. Heights above and below the constant
+    target contribute equally; a foot with zero horizontal speed contributes no error.
+
+    Args:
+        env: The environment instance.
+        feet_cfg: Foot body configuration in FL, FR, RL, RR order.
+        target_height: Desired clearance above ground after subtracting the foot offset [m].
+        foot_height_offset: Foot-link origin height when resting on flat ground [m].
+        sigma: Exponential denominator for speed-weighted squared height error [m^3/s].
+        asset_cfg: Robot articulation configuration.
+
+    Returns:
+        Per-environment reward in ``[0, 1]``.
+    """
+    if sigma <= 0.0:
+        raise ValueError(f"Foot-clearance sigma must be positive, received {sigma}.")
+    asset: Articulation = env.scene[asset_cfg.name]
+    height = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2] - env.scene.env_origins[:, 2:3]
+    speed = torch.linalg.vector_norm(asset.data.body_lin_vel_w.torch[:, feet_cfg.body_ids, :2], dim=-1)
+    target = torch.full_like(height, target_height + foot_height_offset)
+    error = height - target
+    reward = torch.exp(-(speed * error.square()).sum(dim=-1) / sigma)
+    env._foot_clearance_diagnostics = {
+        "foot_height": height.detach(),
+        "target_height": target.detach(),
+        "shortfall": torch.relu(-error).detach(),
+        "horizontal_speed": speed.detach(),
+        "mean_height": height.mean(dim=-1).detach(),
+        "mean_target_height": target.mean(dim=-1).detach(),
+        "mean_shortfall": torch.relu(-error).mean(dim=-1).detach(),
+        "reward": reward.detach(),
+    }
+    return reward
+
+
 def foot_clearance_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -1367,11 +1600,13 @@ def foot_clearance_penalty(
     min_command_speed: float = 0.1,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     min_command_yaw_rate: float = 0.1,
+    use_command_gate: bool = True,
 ) -> torch.Tensor:
     """Penalize feet below a ground-relative swing-height trajectory.
 
-    The command gate uses the maximum of independently normalized planar speed and absolute yaw rate,
-    clipped to ``[0, 1]``, so translation and turning in place both enable swing clearance.
+    The optional command gate uses the maximum of independently normalized planar speed and absolute yaw rate,
+    clipped to ``[0, 1]``. When disabled, only the swing-phase gate scales the penalty,
+    including for zero velocity commands and stationary feet.
 
     Args:
         env: The environment instance.
@@ -1382,6 +1617,8 @@ def foot_clearance_penalty(
         min_command_speed: Planar command magnitude that fully enables the penalty [m/s].
         asset_cfg: Robot articulation configuration.
         min_command_yaw_rate: Absolute yaw command that fully enables the penalty [rad/s].
+        use_command_gate: Whether commanded velocity scales the swing penalty.
+            The command thresholds are unused when this is false.
 
     Returns:
         The negative bounded swing-clearance penalty.
@@ -1390,9 +1627,9 @@ def foot_clearance_penalty(
         raise ValueError(f"Foot-clearance peak height must be non-negative, received {min_height}.")
     if height_scale <= 0.0:
         raise ValueError(f"Foot-clearance height scale must be positive, received {height_scale}.")
-    if min_command_speed <= 0.0:
+    if use_command_gate and min_command_speed <= 0.0:
         raise ValueError(f"Foot-clearance command scale must be positive, received {min_command_speed}.")
-    if min_command_yaw_rate <= 0.0:
+    if use_command_gate and min_command_yaw_rate <= 0.0:
         raise ValueError(f"Foot-clearance yaw command scale must be positive, received {min_command_yaw_rate}.")
 
     asset: Articulation = env.scene[asset_cfg.name]
@@ -1406,11 +1643,13 @@ def foot_clearance_penalty(
     shortfall = torch.relu(target_height - foot_height)
     clearance_penalty = -torch.expm1(-shortfall / height_scale)
 
-    command = env.command_manager.get_command(command_name)
-    command_speed = torch.linalg.vector_norm(command[:, :2], dim=-1)
-    command_gate = torch.maximum(command_speed / min_command_speed, torch.abs(command[:, 2]) / min_command_yaw_rate)
-    command_gate = command_gate.clamp(0.0, 1.0).unsqueeze(-1)
-    active_weight = swing_weight * command_gate
+    active_weight = swing_weight
+    if use_command_gate:
+        command = env.command_manager.get_command(command_name)
+        command_speed = torch.linalg.vector_norm(command[:, :2], dim=-1)
+        command_gate = torch.maximum(command_speed / min_command_speed, torch.abs(command[:, 2]) / min_command_yaw_rate)
+        command_gate = command_gate.clamp(0.0, 1.0).unsqueeze(-1)
+        active_weight = swing_weight * command_gate
     weighted_penalty = clearance_penalty * active_weight
     penalty = -torch.sum(weighted_penalty, dim=-1)
 
@@ -1582,6 +1821,222 @@ def foot_clearance_tracking_reward(
     return reward
 
 
+def hip_joint_position_exp_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    scale: float = 1.0,
+) -> torch.Tensor:
+    """Penalize squared measured hip-position deviations from the default pose.
+
+    Args:
+        env: The environment instance.
+        asset_cfg: Robot and hip joints to select. Joint positions are in [rad].
+        scale: Exponential coefficient [rad^-2] for the summed squared error.
+
+    Returns:
+        Dimensionless penalty ``exp(-scale * error) - 1`` for each environment.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = (
+        asset.data.joint_pos.torch[:, asset_cfg.joint_ids] - asset.data.default_joint_pos.torch[:, asset_cfg.joint_ids]
+    )
+    return torch.expm1(-scale * error.square().sum(dim=-1))
+
+
+def joint_position_limits_exp_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    limit_fraction: float = 0.9,
+    scale: float = 10.0,
+) -> torch.Tensor:
+    """Penalize measured joint positions outside a central fraction of their range.
+
+    Args:
+        env: The environment instance.
+        asset_cfg: Robot and joints to select. Positions and full runtime limits are in [rad].
+        limit_fraction: Fraction of each full joint range allowed without penalty.
+        scale: Exponential coefficient [rad^-1] for the summed linear limit violation.
+
+    Returns:
+        Dimensionless penalty ``exp(-scale * error) - 1`` for each environment.
+    """
+    if not 0.0 < limit_fraction <= 1.0:
+        raise ValueError(f"Joint-limit fraction must be in (0, 1], received {limit_fraction}.")
+    asset: Articulation = env.scene[asset_cfg.name]
+    positions = asset.data.joint_pos.torch[:, asset_cfg.joint_ids]
+    # Use full limits so already-softened limits are not shrunk a second time.
+    limits = asset.data.joint_pos_limits.torch[:, asset_cfg.joint_ids]
+    midpoint = limits.mean(dim=-1)
+    half_range = 0.5 * limit_fraction * (limits[..., 1] - limits[..., 0])
+    error = (midpoint - half_range - positions).clamp_min(0.0)
+    error += (positions - midpoint - half_range).clamp_min(0.0)
+    return torch.expm1(-scale * error.sum(dim=-1))
+
+
+def lin_vel_z_exp_penalty(
+    env: ManagerBasedRLEnv,
+    scale: float = 5.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize squared body-frame vertical velocity [m/s].
+
+    Args:
+        env: The environment instance.
+        scale: Exponential coefficient [s^2/m^2].
+        asset_cfg: The robot asset.
+
+    Returns:
+        Dimensionless nonpositive penalty for each environment.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.expm1(-scale * asset.data.root_lin_vel_b.torch[:, 2].square())
+
+
+def ang_vel_xy_exp_penalty(
+    env: ManagerBasedRLEnv,
+    scale: float = 1.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize summed squared body-frame roll and pitch angular velocities [rad/s].
+
+    Args:
+        env: The environment instance.
+        scale: Exponential coefficient [s^2/rad^2].
+        asset_cfg: The robot asset.
+
+    Returns:
+        Dimensionless nonpositive penalty for each environment.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.expm1(-scale * asset.data.root_ang_vel_b.torch[:, :2].square().sum(dim=-1))
+
+
+def joint_vel_exp_penalty(
+    env: ManagerBasedRLEnv,
+    scale: float = 0.01,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize summed squared joint velocities [rad/s].
+
+    Args:
+        env: The environment instance.
+        scale: Exponential coefficient [s^2/rad^2].
+        asset_cfg: Robot and joints to select.
+
+    Returns:
+        Dimensionless nonpositive penalty for each environment.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.expm1(-scale * asset.data.joint_vel.torch[:, asset_cfg.joint_ids].square().sum(dim=-1))
+
+
+def joint_torques_exp_penalty(
+    env: ManagerBasedRLEnv,
+    scale: float = 0.004,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize summed squared applied joint torques [N·m].
+
+    Args:
+        env: The environment instance.
+        scale: Exponential coefficient [(N·m)^-2].
+        asset_cfg: Robot and joints to select.
+
+    Returns:
+        Dimensionless nonpositive penalty for each environment.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.expm1(-scale * asset.data.applied_torque.torch[:, asset_cfg.joint_ids].square().sum(dim=-1))
+
+
+def action_rate_l2_exp_penalty(env: ManagerBasedRLEnv, scale: float = 1.0) -> torch.Tensor:
+    """Penalize the summed squared difference between consecutive raw actions.
+
+    Args:
+        env: The environment instance.
+        scale: Exponential coefficient for the dimensionless summed squared error.
+
+    Returns:
+        Dimensionless nonpositive penalty, without a stability gate or timestep division.
+    """
+    error = (env.action_manager.action - env.action_manager.prev_action).square().sum(dim=-1)
+    return torch.expm1(-scale * error)
+
+
+class ActionSmoothnessExpPenalty(ManagerTermBase):
+    """Penalize the summed squared second difference of raw, dimensionless actions.
+
+    Action history starts at zero after each environment reset. The second
+    difference is not divided by the control-step duration.
+    """
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self._previous_previous_action = torch.zeros_like(env.action_manager.action)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Clear the second-previous action for the selected environments."""
+        if env_ids is None:
+            env_ids = slice(None)
+        self._previous_previous_action[env_ids] = 0.0
+
+    def __call__(self, env: ManagerBasedRLEnv, scale: float = 0.4) -> torch.Tensor:
+        """Evaluate the penalty once per control step and advance action history.
+
+        Args:
+            env: The environment instance.
+            scale: Exponential coefficient for the dimensionless summed squared error.
+
+        Returns:
+            Dimensionless nonpositive penalty for each environment.
+        """
+        difference = env.action_manager.action - 2.0 * env.action_manager.prev_action + self._previous_previous_action
+        self._previous_previous_action.copy_(env.action_manager.prev_action)
+        return torch.expm1(-scale * difference.square().sum(dim=-1))
+
+
+class JointAccelerationExpPenalty(ManagerTermBase):
+    """Penalize squared joint acceleration [rad/s^2] over one control step.
+
+    Velocity history is initialized from the robot state and refreshed after
+    reset, preventing differences across episode boundaries.
+    """
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self._asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
+        self._asset: Articulation = env.scene[self._asset_cfg.name]
+        self._previous_velocity = self._asset.data.joint_vel.torch[:, self._asset_cfg.joint_ids].clone()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Store reset joint velocities [rad/s] for the selected environments."""
+        if env_ids is None:
+            env_ids = slice(None)
+        self._previous_velocity[env_ids] = self._asset.data.joint_vel.torch[env_ids][:, self._asset_cfg.joint_ids]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        scale: float = 4.0e-6,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+        """Evaluate the penalty once per control step and advance velocity history.
+
+        Args:
+            env: The environment instance, with control-step duration [s].
+            scale: Exponential coefficient [s^4/rad^2].
+            asset_cfg: Robot and joints, matching those supplied at construction.
+
+        Returns:
+            Dimensionless nonpositive penalty for each environment.
+        """
+        asset: Articulation = env.scene[asset_cfg.name]
+        velocity = asset.data.joint_vel.torch[:, asset_cfg.joint_ids]
+        acceleration = (velocity - self._previous_velocity) / env.step_dt
+        self._previous_velocity.copy_(velocity)
+        return torch.expm1(-scale * acceleration.square().sum(dim=-1))
+
+
 def hip_action_penalty(
     env: ManagerBasedRLEnv,
     tau: float = 0.5,
@@ -1644,11 +2099,14 @@ def action_rate_exp_penalty(
     use_stability_gate: bool = True,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalty on action changes using bounded exponential shaping.
+    """Penalize the L1 norm of raw action changes using bounded exponential shaping.
+
+    Absolute differences are summed over all action dimensions without averaging
+    or dividing by the control-step duration.
 
     Args:
         env: The environment instance.
-        scale: Exponential scale applied to the mean squared action difference.
+        scale: Exponential scale applied to the L1 action difference.
         use_stability_gate: Whether to soften the penalty while the robot is unstable.
         asset_cfg: The robot asset used for the stability gate.
 
@@ -1656,7 +2114,7 @@ def action_rate_exp_penalty(
         The negative action-rate penalty.
     """
     action_diff = env.action_manager.action - env.action_manager.prev_action
-    action_rate = torch.mean(torch.square(action_diff), dim=-1)
+    action_rate = torch.sum(torch.abs(action_diff), dim=-1)
     penalty = 1.0 - torch.exp(-scale * action_rate)
     if use_stability_gate:
         penalty = penalty * _base_stability_gate(env, asset_cfg=asset_cfg)

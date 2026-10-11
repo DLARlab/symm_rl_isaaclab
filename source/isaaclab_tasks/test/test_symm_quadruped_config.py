@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from isaaclab.envs import mdp as base_mdp
-from isaaclab.managers import RewardTermCfg
+from isaaclab.managers import RewardTermCfg, SceneEntityCfg
 from isaaclab.utils.math import quat_from_euler_xyz
 
 from isaaclab_tasks.manager_based.locomotion.velocity.config.dobot_x1_symm.flat_env_cfg import (
@@ -48,6 +48,288 @@ class _Scene(dict):
 
 def _tensor_data(value: torch.Tensor) -> SimpleNamespace:
     return SimpleNamespace(torch=value)
+
+
+@pytest.mark.parametrize("capture", [False, True])
+@pytest.mark.parametrize("use_sensors", [False, True])
+def test_foot_periodicity_diagnostics_match_reward_and_preserve_reward_time_inputs(capture, use_sensors):
+    phases = torch.tensor([[0.1, 0.75, 0.2, 0.9]])
+    duty_factors = torch.tensor([0.5])
+    command = SimpleNamespace(
+        foot_phases=lambda: phases,
+        duty_factors=duty_factors,
+        periodic_force_weights=lambda: torch.tensor([[-1.0, 0.0, -0.25, 0.0]]),
+        periodic_speed_weights=lambda: torch.tensor([[0.0, -1.0, 0.0, -0.75]]),
+    )
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(body_lin_vel_w=_tensor_data(torch.tensor([[[3.0, 4.0, 0.0], [0.0, 0.2, 0.0]] * 2])))
+    )
+    sensor_names = ("FL", "FR", "RL", "RR")
+    scene.sensors = {
+        name: SimpleNamespace(
+            num_sensors=1,
+            data=SimpleNamespace(
+                net_forces_w_history=_tensor_data(
+                    torch.tensor([[[[0.0, 0.0, 8.0]], [[0.0, 3.0, 4.0]], [[0.0, 0.0, 1.0]]]])
+                )
+            ),
+        )
+        for name in sensor_names
+    }
+    env = SimpleNamespace(
+        scene=scene,
+        command_manager=SimpleNamespace(get_term=lambda _: command),
+        num_envs=1,
+        device="cpu",
+        _capture_rollout_diagnostics=capture,
+    )
+    reward = symm_quadruped.foot_periodicity_penalty(
+        env,
+        "base_velocity",
+        SimpleNamespace(body_ids=[0, 1, 2, 3]),
+        foot_sensor_names=sensor_names if use_sensors else None,
+        force_scale=0.025,
+    )
+    expected_force = torch.tensor([[math.expm1(-0.2), 0.0, 0.25 * math.expm1(-0.2), 0.0]])
+    if not use_sensors:
+        expected_force.zero_()
+    expected_speed = torch.tensor([[0.0, math.expm1(-0.4), 0.0, 0.75 * math.expm1(-0.4)]])
+    torch.testing.assert_close(reward, (expected_force + expected_speed).sum(dim=-1))
+    if not capture:
+        assert not hasattr(env, "_foot_periodicity_diagnostics")
+        return
+
+    diagnostics = env._foot_periodicity_diagnostics
+    torch.testing.assert_close(diagnostics["force_penalty"], expected_force)
+    torch.testing.assert_close(diagnostics["speed_penalty"], expected_speed)
+    torch.testing.assert_close(diagnostics["speeds"], torch.tensor([[5.0, 0.2, 5.0, 0.2]]))
+    if use_sensors:
+        torch.testing.assert_close(diagnostics["forces"], torch.full((1, 4), 8.0))
+    else:
+        assert torch.isnan(diagnostics["forces"]).all()
+    phases.zero_()
+    duty_factors.zero_()
+    torch.testing.assert_close(diagnostics["phases"], torch.tensor([[0.1, 0.75, 0.2, 0.9]]))
+    torch.testing.assert_close(diagnostics["swing_ratios"], torch.full((1, 4), 0.5))
+
+
+@pytest.mark.parametrize("capture", [False, True])
+@pytest.mark.parametrize("velocity_first", [False, True])
+@pytest.mark.parametrize("penalty", [False, True])
+def test_split_periodicity_rewards_use_raw_magnitudes_and_preserve_diagnostics(capture, velocity_first, penalty):
+    phases = torch.tensor([[0.1, 0.75, 0.2, 0.9]])
+    duty_factors = torch.tensor([0.5])
+    gait = SimpleNamespace(
+        foot_phases=lambda: phases,
+        duty_factors=duty_factors,
+        periodic_force_weights=lambda: torch.tensor([[-1.0, 0.0, -0.25, 0.0]]),
+        periodic_speed_weights=lambda: torch.tensor([[0.0, -1.0, 0.0, -0.75]]),
+    )
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(body_lin_vel_w=_tensor_data(torch.tensor([[[0.0, 0.0, 5.0], [0.0, 0.0, 0.2]] * 2])))
+    )
+    scene.sensors = {
+        name: SimpleNamespace(
+            num_sensors=1,
+            data=SimpleNamespace(
+                net_forces_w_history=_tensor_data(torch.tensor([[[[0.0, 8.0, 0.0]], [[0.0, 0.0, 1.0]]]]))
+            ),
+        )
+        for name in ("FL", "FR", "RL", "RR")
+    }
+    env = SimpleNamespace(
+        scene=scene,
+        command_manager=SimpleNamespace(get_term=lambda _: gait),
+        _capture_rollout_diagnostics=capture,
+        num_envs=1,
+        device="cpu",
+    )
+    if penalty:
+        rewards_cfg = UnitreeGo2SymmFlatEnvCfg().rewards
+        force_func = rewards_cfg.foot_periodicity_force.func
+        speed_func = rewards_cfg.foot_periodicity_velocity.func
+        force_scale = rewards_cfg.foot_periodicity_force.params["scale"]
+        speed_scale = rewards_cfg.foot_periodicity_velocity.params["scale"]
+    else:
+        force_func = symm_quadruped.foot_periodicity_force_exp
+        speed_func = symm_quadruped.foot_periodicity_velocity_exp
+        force_scale = speed_scale = 1.0
+    calls = [
+        ("force", lambda: force_func(env, "base_velocity", tuple(scene.sensors), scale=force_scale)),
+        (
+            "speed",
+            lambda: speed_func(env, "base_velocity", SimpleNamespace(body_ids=[0, 1, 2, 3]), scale=speed_scale),
+        ),
+    ]
+    if velocity_first:
+        calls.reverse()
+    rewards = {name: call() for name, call in calls}
+    if penalty:
+        # Fractional gates must multiply each exponential, and each foot must contribute independently.
+        expected_force = torch.tensor([[math.expm1(-0.4), 0.0, 0.25 * math.expm1(-0.4), 0.0]])
+        expected_speed = torch.tensor([[0.0, math.expm1(-0.4), 0.0, 0.75 * math.expm1(-0.4)]])
+        torch.testing.assert_close(rewards["force"], expected_force.sum(dim=-1))
+        torch.testing.assert_close(rewards["speed"], expected_speed.sum(dim=-1))
+    else:
+        assert rewards["force"].item() == pytest.approx(math.exp(-10.0))
+        assert rewards["speed"].item() == pytest.approx(math.exp(-0.35))
+    if capture:
+        diagnostics = env._foot_periodicity_diagnostics
+        if penalty:
+            torch.testing.assert_close(diagnostics["force_penalty"], expected_force)
+            torch.testing.assert_close(diagnostics["speed_penalty"], expected_speed)
+            assert "force_cost" not in diagnostics
+            assert "speed_cost" not in diagnostics
+        else:
+            torch.testing.assert_close(diagnostics["force_cost"], torch.tensor([[8.0, 0.0, 2.0, 0.0]]))
+            torch.testing.assert_close(diagnostics["speed_cost"], torch.tensor([[0.0, 0.2, 0.0, 0.15]]))
+        torch.testing.assert_close(diagnostics["forces"], torch.full((1, 4), 8.0))
+        torch.testing.assert_close(diagnostics["speeds"], torch.tensor([[5.0, 0.2, 5.0, 0.2]]))
+        phases.zero_()
+        duty_factors.zero_()
+        assert diagnostics["phases"][0, 0].item() == pytest.approx(0.1)
+        torch.testing.assert_close(diagnostics["swing_ratios"], torch.full((1, 4), 0.5))
+    else:
+        assert not hasattr(env, "_foot_periodicity_diagnostics")
+
+
+def test_configured_periodicity_penalties_are_zero_at_zero_error_and_bounded_together():
+    rewards_cfg = UnitreeGo2SymmFlatEnvCfg().rewards
+    swing_weights = torch.tensor([[0.0, 0.25, 0.75, 1.0]]).expand(2, -1)
+    gait = SimpleNamespace(
+        periodic_force_weights=lambda: -swing_weights,
+        periodic_speed_weights=lambda: -(1.0 - swing_weights),
+    )
+    velocities = torch.zeros(2, 4, 3)
+    velocities[1, :, 2] = 100.0
+    scene = _Scene(robot=SimpleNamespace(data=SimpleNamespace(body_lin_vel_w=_tensor_data(velocities))))
+    scene.sensors = {
+        name: SimpleNamespace(
+            num_sensors=1,
+            data=SimpleNamespace(
+                net_forces_w_history=_tensor_data(torch.tensor([[[[0.0, 0.0, 0.0]]], [[[0.0, 0.0, 1000.0]]]]))
+            ),
+        )
+        for name in ("FL", "FR", "RL", "RR")
+    }
+    env = SimpleNamespace(scene=scene, command_manager=SimpleNamespace(get_term=lambda _: gait))
+    force = rewards_cfg.foot_periodicity_force
+    speed = rewards_cfg.foot_periodicity_velocity
+    force_reward = force.weight * force.func(env, "base_velocity", tuple(scene.sensors), scale=force.params["scale"])
+    speed_reward = speed.weight * speed.func(
+        env, "base_velocity", SimpleNamespace(body_ids=[0, 1, 2, 3]), scale=speed.params["scale"]
+    )
+    assert force_reward.tolist() == pytest.approx([0.0, -0.2])
+    assert speed_reward.tolist() == pytest.approx([0.0, -0.2])
+    assert (force_reward + speed_reward).tolist() == pytest.approx([0.0, -0.4])
+
+
+def test_positive_base_height_reward_uses_squared_ground_relative_error():
+    scene = _Scene()
+    scene.env_origins = torch.tensor([[0.0, 0.0, 2.0]] * 4)
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(root_pos_w=_tensor_data(torch.tensor([[0.0, 0.0, z] for z in (2.35, 2.25, 2.45, 2.55)])))
+    )
+    result = symm_quadruped.base_height_exp(SimpleNamespace(scene=scene))
+    assert result.tolist() == pytest.approx([1.0, math.exp(-1.0), math.exp(-1.0), math.exp(-4.0)], rel=1e-5)
+
+
+@pytest.mark.parametrize("yaw", [0.0, 1.3])
+def test_positive_roll_pitch_reward_penalizes_both_angles_symmetrically(yaw):
+    roll = torch.tensor([0.0, 0.1, -0.1, 0.0, 0.0, 0.1])
+    pitch = torch.tensor([0.0, 0.0, 0.0, 0.1, -0.1, 0.1])
+    env = SimpleNamespace(
+        scene={
+            "robot": SimpleNamespace(
+                data=SimpleNamespace(
+                    root_quat_w=_tensor_data(quat_from_euler_xyz(roll, pitch, torch.full_like(roll, yaw)))
+                )
+            )
+        }
+    )
+    result = symm_quadruped.base_roll_pitch_exp(env)
+    assert result.tolist() == pytest.approx([1.0] + [math.exp(-0.1)] * 4 + [math.exp(-0.2)])
+
+
+def test_speed_weighted_clearance_tracks_both_sides_without_a_phase_or_command_gate():
+    scene = _Scene()
+    scene.env_origins = torch.tensor([[0.0, 0.0, 2.0]] * 6)
+    positions = torch.full((6, 4, 3), 2.0)
+    positions[:, :, 2] = 2.102
+    positions[0, 0, 2] += 0.05
+    positions[1, 0, 2] -= 0.05
+    positions[2:4, :, 2] = 2.0
+    positions[4, :2, 2] += 0.05
+    velocities = torch.zeros(6, 4, 3)
+    velocities[[0, 1, 4, 5], 0] = torch.tensor([3.0, 4.0, 12.0])
+    velocities[4, 1] = torch.tensor([0.0, -5.0, 0.0])
+    velocities[3, :, 2] = 12.0
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(body_pos_w=_tensor_data(positions), body_lin_vel_w=_tensor_data(velocities))
+    )
+    env = SimpleNamespace(scene=scene)
+    reward = symm_quadruped.foot_clearance_speed_exp(env, SimpleNamespace(body_ids=[0, 1, 2, 3]))
+    assert reward.tolist() == pytest.approx([math.exp(-1.25), math.exp(-1.25), 1.0, 1.0, math.exp(-2.5), 1.0], rel=2e-5)
+    torch.testing.assert_close(env._foot_clearance_diagnostics["target_height"], torch.full((6, 4), 0.102))
+    torch.testing.assert_close(env._foot_clearance_diagnostics["reward"], reward)
+
+
+@pytest.mark.parametrize(
+    "cfg_cls, peak_height, foot_offset",
+    [(UnitreeGo2SymmFlatEnvCfg, 0.082, 0.022), (DobotX1SymmFlatEnvCfg, 0.1075, 0.0275)],
+)
+def test_configured_clearance_uses_swing_trajectory_without_command_or_speed_gate(cfg_cls, peak_height, foot_offset):
+    term = cfg_cls().rewards.foot_clearance
+    term.params["feet_cfg"].body_ids = [0, 1, 2, 3]
+    scene = _Scene()
+    scene.env_origins = torch.zeros(7, 3)
+    scene.env_origins[1, 2] = 1.0
+    positions = torch.zeros(7, 4, 3)
+    positions[:, :, 2] = (
+        torch.tensor(
+            [
+                peak_height - 0.025,
+                peak_height - 0.025,
+                peak_height,
+                peak_height + 0.02,
+                foot_offset,
+                foot_offset,
+                foot_offset,
+            ]
+        ).unsqueeze(-1)
+        + scene.env_origins[:, 2:3]
+    )
+    velocities = torch.zeros_like(positions)
+    velocities[1, :, 0] = 3.0
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(body_pos_w=_tensor_data(positions), body_lin_vel_w=_tensor_data(velocities))
+    )
+    phases = torch.full((7, 4), 0.25)
+    phases[4] = 0.0
+    phases[5] = 0.5
+    phases[6] = torch.tensor([0.0, 0.125, 0.25, 0.5])
+    gait = SimpleNamespace(duty_factors=torch.full((7,), 0.5), kappa=torch.full((7,), 16.0), foot_phases=lambda: phases)
+    command = torch.zeros(7, 3)
+    command[1, 0] = 1.0
+    env = SimpleNamespace(
+        scene=scene, command_manager=SimpleNamespace(get_term=lambda _: gait, get_command=lambda _: command)
+    )
+    reward = term.weight * term.func(env, **term.params)
+    expected_mid_swing = 0.1 * 4.0 * math.expm1(-1.0) / (1.0 + math.exp(-4.0))
+    assert reward[:2].tolist() == pytest.approx([expected_mid_swing] * 2, rel=1e-5)
+    torch.testing.assert_close(reward[2:6], torch.zeros(4))
+    diagnostics = env._foot_clearance_diagnostics
+    torch.testing.assert_close(diagnostics["target_height"][0], torch.full((4,), peak_height))
+    torch.testing.assert_close(
+        diagnostics["target_height"][6],
+        torch.tensor([0.0, peak_height / math.sqrt(2.0), peak_height, 0.0]),
+        atol=1e-7,
+        rtol=1e-5,
+    )
+    assert diagnostics["shortfall"][6, 2].item() == pytest.approx(peak_height - foot_offset)
+    torch.testing.assert_close(diagnostics["penalty"] * term.weight, reward)
 
 
 def test_training_physics_uses_proven_2048_env_pair_capacities():
@@ -128,7 +410,19 @@ def test_ji22_reward_exponentially_scales_positive_reward_before_termination():
     assert torch.allclose(reward, expected_reward)
 
 
-def test_symmetric_environment_applies_pending_commands_after_reward():
+@pytest.mark.parametrize(
+    "reward_terms, terminated, expected_reward",
+    [
+        ([2.0, -1.0], False, 0.02),
+        ([0.5, -0.5], False, 0.0),
+        ([0.5, -1.0], False, 0.0),
+        ([0.5, 0.0], True, 0.0),
+        ([2.0, 0.0], True, 0.02),
+    ],
+)
+def test_symmetric_environment_clips_total_reward_and_applies_pending_commands_after_reward(
+    reward_terms, terminated, expected_reward
+):
     calls = []
     command_term = SimpleNamespace(command=torch.tensor([[1.0]]))
 
@@ -146,7 +440,7 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
     def compute_reward(**_):
         calls.append("reward")
         assert torch.equal(command_term.command, torch.tensor([[1.0]]))
-        return torch.tensor([-0.01])
+        return torch.tensor([0.02 * (sum(reward_terms) - float(terminated))])
 
     def compute_observation(**_):
         calls.append("observation")
@@ -164,8 +458,12 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
             active_terms=[],
             record_pre_step=lambda: None,
             record_post_physics_decimation_step=lambda: None,
+            record_pre_reset=lambda _: None,
+            record_post_reset=lambda _: None,
         ),
         sim=SimpleNamespace(is_rendering=False, step=lambda **_: None),
+        render_enabled=False,
+        _reset_idx=lambda _: None,
         scene=SimpleNamespace(write_data_to_sim=lambda: None, update=lambda **_: None),
         _physics_handles_decimation=True,
         _sim_step_counter=0,
@@ -175,14 +473,14 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
         command_manager=command_manager,
         event_manager=SimpleNamespace(available_modes=[]),
         termination_manager=SimpleNamespace(
-            compute=lambda: torch.tensor([False]),
-            terminated=torch.tensor([False]),
+            compute=lambda: torch.tensor([terminated]),
+            terminated=torch.tensor([terminated]),
             time_outs=torch.tensor([False]),
         ),
         reward_manager=SimpleNamespace(
             compute=compute_reward,
             get_term_cfg=lambda _: SimpleNamespace(weight=-1.0),
-            _step_reward=torch.tensor([[0.5, -1.0]]),
+            _step_reward=torch.tensor([reward_terms]),
         ),
         step_dt=0.02,
         _ji22_nontermination_reward_indices=torch.tensor([0, 1]),
@@ -197,7 +495,8 @@ def test_symmetric_environment_applies_pending_commands_after_reward():
     _, reward, _, _, _ = symm_quadruped_env.SymmQuadrupedManagerBasedRLEnv.step(env, torch.zeros(1, 1))
 
     assert calls == ["prepare_command", "reward", "apply_pending", "observation"]
-    assert torch.allclose(reward, torch.tensor([0.01 * math.exp(-1.0)]))
+    assert torch.allclose(reward, torch.tensor([expected_reward]))
+    assert torch.all(reward >= 0.0)
 
 
 @pytest.mark.parametrize("env_cfg_cls", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
@@ -462,7 +761,7 @@ def test_soft_joint_limit_diagnostics_detect_proximity_and_violation():
 
 
 def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_components():
-    env = SimpleNamespace(_capture_rollout_diagnostics=True)
+    env = SimpleNamespace(_capture_rollout_diagnostics=True, num_envs=3, device="cpu")
     joint_pos = torch.tensor([[0.0, 0.95], [0.0, 0.0], [0.0, 0.0]])
     soft_limits = torch.tensor([[[-1.0, 1.0], [-1.0, 1.0]]] * 3)
     joint_target = torch.tensor([[0.0, 1.20], [0.0, 0.0], [0.0, 0.0]])
@@ -513,6 +812,7 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
         "reward": torch.tensor([1.0, 0.5, -0.1]),
     }
     env._foot_clearance_diagnostics = {
+        "mean_height": torch.tensor([0.04, 0.05, 0.06]),
         "mean_swing_height": torch.tensor([0.04, 0.05, 0.06]),
         "mean_target_height": torch.tensor([0.08, 0.08, 0.08]),
         "mean_shortfall": torch.tensor([0.04, 0.03, 0.02]),
@@ -533,6 +833,7 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
     assert diagnostics["Diagnostics/joint_target_limit_violation_fraction"].item() == pytest.approx(1.0 / 6.0)
     assert diagnostics["Diagnostics/straight_line_forward_score"].item() == pytest.approx(0.5)
     assert diagnostics["Diagnostics/foot_clearance_mean_swing_height"].item() == pytest.approx(0.05)
+    assert diagnostics["Diagnostics/foot_clearance_mean_height"].item() == pytest.approx(0.05)
     assert diagnostics["Diagnostics/foot_clearance_mean_shortfall"].item() == pytest.approx(0.03)
     assert torch.equal(env._last_policy_actions, actions)
     assert torch.equal(env._last_joint_position_targets, joint_target)
@@ -943,7 +1244,7 @@ def test_gait_transition_blends_offsets_and_duty_factor_over_one_cycle():
     assert torch.equal(command.duty_factors, torch.tensor([0.5]))
 
 
-def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
+def test_rewards_disable_straight_line_motion_and_configure_exponential_penalties():
     env_cfg = SimpleNamespace(rewards=SimpleNamespace())
 
     configure_rewards(
@@ -956,29 +1257,48 @@ def test_rewards_disable_straight_line_motion_and_preserve_hip_action_penalty():
         base_height_range=(0.35, 0.45),
     )
 
-    assert env_cfg.rewards.foot_periodicity.weight == 0.30
-    assert env_cfg.rewards.base_height.weight == 0.30
-    assert env_cfg.rewards.hip_action_penalty.weight == 0.15
+    assert env_cfg.rewards.foot_periodicity is None
+    assert env_cfg.rewards.foot_periodicity_force.func is symm_quadruped.foot_periodicity_force_exp_penalty
+    assert env_cfg.rewards.foot_periodicity_force.weight == 0.10
+    assert env_cfg.rewards.foot_periodicity_force.params["scale"] == 0.05
+    assert env_cfg.rewards.foot_periodicity_velocity.func is symm_quadruped.foot_periodicity_velocity_exp_penalty
+    assert env_cfg.rewards.foot_periodicity_velocity.weight == 0.10
+    assert env_cfg.rewards.foot_periodicity_velocity.params["scale"] == 2.0
+    assert env_cfg.rewards.base_height.func is symm_quadruped.base_height_exp
+    assert env_cfg.rewards.base_height.weight == 0.15
+    assert env_cfg.rewards.hip_action_penalty.func is symm_quadruped.hip_joint_position_exp_penalty
+    assert env_cfg.rewards.hip_action_penalty.weight == 0.10
+    assert env_cfg.rewards.hip_action_penalty.params["asset_cfg"].joint_names == [
+        "joint_0",
+        "joint_3",
+        "joint_6",
+        "joint_9",
+    ]
     assert env_cfg.rewards.alive_bonus.weight == 0.0
     assert env_cfg.rewards.cmd is None
     assert env_cfg.rewards.sagittal_plane is None
     assert env_cfg.rewards.straight_line_motion is None
     assert env_cfg.rewards.termination_penalty.func is base_mdp.is_terminated
     assert env_cfg.rewards.termination_penalty.weight == 0.0
-    assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_target_limit_penalty
-    assert env_cfg.rewards.joint_target_limits.weight == 0.05
+    assert env_cfg.rewards.joint_target_limits.func is symm_quadruped.joint_position_limits_exp_penalty
+    assert env_cfg.rewards.joint_target_limits.weight == 2.0
+    assert env_cfg.rewards.joint_target_limits.params["limit_fraction"] == 0.9
+    assert env_cfg.rewards.joint_target_limits.params["scale"] == 10.0
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.0
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
-    assert env_cfg.rewards.smoothness.weight == 0.10
+    assert env_cfg.rewards.smoothness.weight == 0.0
+    assert env_cfg.rewards.action_rate_l2.func is symm_quadruped.action_rate_l2_exp_penalty
+    assert env_cfg.rewards.action_rate_l2.weight == 0.05
+    assert env_cfg.rewards.action_rate_l2.params["scale"] == 0.05
     assert env_cfg.rewards.foot_clearance.weight == 0.10
-    assert env_cfg.rewards.foot_clearance.params["min_height"] == 0.10
+    assert env_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
+    assert env_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.1075)
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
-    assert env_cfg.rewards.foot_clearance.params["min_command_speed"] == 0.20
-    assert env_cfg.rewards.foot_clearance.params["min_command_yaw_rate"] == 0.20
+    assert env_cfg.rewards.foot_clearance.params["use_command_gate"] is False
 
 
-def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
+def test_rewards_use_combined_xy_tracking_and_standard_yaw_and_roll_pitch_terms():
     env_cfg = SimpleNamespace(rewards=SimpleNamespace())
 
     configure_rewards(
@@ -992,17 +1312,52 @@ def test_rewards_use_combined_xy_tracking_and_independent_yaw_and_roll_terms():
     )
 
     assert env_cfg.rewards.track_lin_vel_xy_exp.func is base_mdp.track_lin_vel_xy_exp
-    assert env_cfg.rewards.track_lin_vel_xy_exp.weight == 0.5
-    assert env_cfg.rewards.track_lin_vel_xy_exp.params["std"] == 0.2
+    assert env_cfg.rewards.track_lin_vel_xy_exp.weight == 0.4
+    assert env_cfg.rewards.track_lin_vel_xy_exp.params["std"] == 0.25
     assert env_cfg.rewards.track_lin_vel_x_exp is None
     assert env_cfg.rewards.track_lin_vel_y_exp is None
-    assert env_cfg.rewards.track_ang_vel_z_exp.func is symm_quadruped.track_ang_vel_z_exp
-    assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.5
-    assert env_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
-    assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp_penalty
-    assert env_cfg.rewards.base_roll_exp.weight == 0.30
-    assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
+    assert env_cfg.rewards.track_ang_vel_z_exp.func is base_mdp.track_ang_vel_z_exp
+    assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.3
+    assert env_cfg.rewards.track_ang_vel_z_exp.params["std"] == 0.25
+    assert env_cfg.rewards.base_roll_exp is None
+    assert env_cfg.rewards.base_roll_pitch_exp.func is symm_quadruped.base_roll_pitch_exp
+    assert env_cfg.rewards.base_roll_pitch_exp.weight == 0.15
+    assert env_cfg.rewards.base_roll_pitch_exp.params["scale"] == 10.0
     assert env_cfg.rewards.straight_line_motion is None
+
+    # Exercise the configured functions: the old custom yaw path squares the denominator.
+    env = SimpleNamespace(
+        scene={
+            "robot": SimpleNamespace(
+                data=SimpleNamespace(
+                    root_lin_vel_b=_tensor_data(torch.tensor([[0.3, 0.4, 9.0]])),
+                    root_ang_vel_b=_tensor_data(torch.tensor([[9.0, 9.0, 0.5]])),
+                )
+            )
+        },
+        command_manager=SimpleNamespace(get_command=lambda _: torch.zeros(1, 3)),
+    )
+    for term in (env_cfg.rewards.track_lin_vel_xy_exp, env_cfg.rewards.track_ang_vel_z_exp):
+        assert term.func(env, **term.params).item() == pytest.approx(math.exp(-1.0))
+
+    positive_names = (
+        "track_lin_vel_xy_exp",
+        "track_ang_vel_z_exp",
+        "base_height",
+        "base_roll_pitch_exp",
+    )
+    assert sum(getattr(env_cfg.rewards, name).weight for name in positive_names) == pytest.approx(1.0)
+
+
+def test_configured_yaw_tracking_uses_direct_error_denominator():
+    term = UnitreeGo2SymmFlatEnvCfg().rewards.track_ang_vel_z_exp
+    env = SimpleNamespace(
+        scene={
+            "robot": SimpleNamespace(data=SimpleNamespace(root_ang_vel_b=_tensor_data(torch.tensor([[0.0, 0.0, 0.5]]))))
+        },
+        command_manager=SimpleNamespace(get_command=lambda _: torch.zeros(1, 3)),
+    )
+    assert term.func(env, **term.params).item() == pytest.approx(math.exp(-1.0))
 
 
 def test_rewards_cfg_preserves_deprecated_morphological_symmetry_alias():
@@ -1038,19 +1393,20 @@ def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1
     go2_cfg = go2_cfg_cls()
 
     assert x1_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.20
+    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.0
     assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
-    assert x1_cfg.rewards.track_ang_vel_z_exp.params["error_scale"] == 0.20
+    assert x1_cfg.rewards.track_ang_vel_z_exp.params["std"] == 0.25
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
-    assert x1_cfg.rewards.foot_clearance.params["min_height"] == 0.10
+    assert x1_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.1075)
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
+    assert x1_cfg.rewards.foot_clearance.params["use_command_gate"] is False
     assert x1_cfg.rewards.foot_clearance.weight == 0.10
     assert go2_cfg.rewards.base_height.params["target_height"] == 0.30
     assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
-    assert go2_cfg.rewards.foot_clearance.params["min_height"] == 0.08
+    assert go2_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.082)
 
     # Only robot bindings and the explicitly configured height targets may differ.
-    robot_binding_params = {"feet_cfg", "joint_cfg", "foot_sensor_body_names", "logical_joint_signs"}
+    robot_binding_params = {"feet_cfg", "joint_cfg", "asset_cfg", "foot_sensor_body_names", "logical_joint_signs"}
     robot_target_params = {"base_height": {"target_height"}, "foot_clearance": {"min_height"}}
     assert vars(go2_cfg.rewards).keys() == vars(x1_cfg.rewards).keys()
     for name, x1_term in vars(x1_cfg.rewards).items():
@@ -1113,7 +1469,7 @@ def test_robot_configs_use_requested_height_ranges_and_orientation_terminations(
     assert x1_cfg.terminations.base_orientation.params["max_pitch"] == 0.70
 
     assert x1_cfg.commands.base_velocity.base_height_range == (0.45, 0.60)
-    assert x1_cfg.rewards.base_height.params["height_range"] == (0.45, 0.60)
+    assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
     assert x1_cfg.scene.robot.init_state.pos == (0.0, 0.0, 0.5)
     default_joint_pos = x1_cfg.scene.robot.init_state.joint_pos
     assert default_joint_pos["joint_front_left_abad"] == 0.0
@@ -1701,6 +2057,203 @@ def test_straight_line_motion_reward_components_are_bounded_and_reusable():
     assert 0.60 < components["support_loss"][0].item() < 0.70
     assert components["support_loss"][1].item() == 0.0
     assert all(torch.all((value >= 0.0) & (value <= 1.0)) for value in components.values())
+
+
+@pytest.mark.parametrize(
+    "cfg_cls",
+    [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg, UnitreeGo2SymmFlatEnvCfg_PLAY, DobotX1SymmFlatEnvCfg_PLAY],
+)
+def test_robot_negative_reward_weights_scales_and_hip_selection(cfg_cls):
+    cfg = cfg_cls()
+    expected = {
+        "hip_action_penalty": (0.1, 1.0),
+        "joint_target_limits": (2.0, 10.0),
+        "action_rate_l2": (0.05, 0.05),
+        "lin_vel_z_l2": (0.1, 5.0),
+        "dof_vel_l2": (0.05, 0.01),
+        "dof_torques_l2": (0.05, 0.004),
+        "action_smoothness": (0.05, 0.05),
+        "ang_vel_xy_l2": (0.05, 1.0),
+        "dof_acc_l2": (0.05, 4.0e-6),
+    }
+    for name, (weight, scale) in expected.items():
+        term = getattr(cfg.rewards, name)
+        assert term.weight == weight, name
+        assert term.params["scale"] == scale, name
+    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 16
+
+    # Simulate an articulation whose storage order differs from the policy joint order.
+    logical_names = cfg.actions.joint_pos.joint_names
+    storage_names = logical_names[1::3] + logical_names[2::3] + logical_names[::3]
+    defaults = torch.arange(36, dtype=torch.float32).reshape(3, 12) * 0.01
+    positions = defaults.clone()
+    positions[:, :8] += 3.0  # Non-hip deviations must not enter the hip error.
+    positions[1, 8:] += torch.tensor([0.1, -0.2, 0.3, -0.4])
+    positions[2, 8:] -= torch.tensor([0.1, -0.2, 0.3, -0.4])
+    asset = SimpleNamespace(
+        joint_names=storage_names,
+        num_joints=12,
+        find_joints=lambda names, preserve_order: ([storage_names.index(name) for name in names], names),
+        data=SimpleNamespace(joint_pos=_tensor_data(positions), default_joint_pos=_tensor_data(defaults)),
+    )
+    env = SimpleNamespace(scene={"robot": asset})
+    term = cfg.rewards.hip_action_penalty
+    term.params["asset_cfg"].resolve(env.scene)
+    assert term.params["asset_cfg"].joint_ids == [8, 9, 10, 11]
+    torch.testing.assert_close(term.func(env, **term.params), torch.tensor([0.0, math.expm1(-0.3), math.expm1(-0.3)]))
+
+
+def test_joint_limits_use_measured_positions_and_ninety_percent_of_full_runtime_range():
+    positions = torch.tensor([[0.9, 3.9, 99.0], [0.95, 4.0, 99.0], [-1.0, 2.0, 99.0], [100.0, -100.0, 99.0]])
+    limits = torch.tensor([[[-1.0, 1.0], [2.0, 4.0], [-200.0, 200.0]]]).repeat(4, 1, 1)
+    env = SimpleNamespace(
+        scene={
+            "robot": SimpleNamespace(
+                data=SimpleNamespace(
+                    joint_pos=_tensor_data(positions),
+                    joint_pos_limits=_tensor_data(limits),
+                    soft_joint_pos_limits=_tensor_data(limits * 0.5),
+                )
+            )
+        }
+    )
+    result = symm_quadruped.joint_position_limits_exp_penalty(env, asset_cfg=SceneEntityCfg("robot", joint_ids=[1, 0]))
+    torch.testing.assert_close(result, torch.tensor([0.0, math.expm1(-1.5), math.expm1(-2.0), -1.0]))
+    # Runtime limit changes, including X1's calf limits, take effect immediately.
+    limits[0, 0] = torch.tensor([-2.0, 0.0])
+    result = symm_quadruped.joint_position_limits_exp_penalty(env, asset_cfg=SceneEntityCfg("robot", joint_ids=[0]))
+    assert result[0].item() == pytest.approx(math.expm1(-10.0))
+
+
+@pytest.mark.parametrize("limit_fraction", [0.0, -0.1, 1.1])
+def test_joint_limits_reject_invalid_range_fraction(limit_fraction):
+    with pytest.raises(ValueError, match="Joint-limit fraction"):
+        symm_quadruped.joint_position_limits_exp_penalty(SimpleNamespace(), limit_fraction=limit_fraction)
+
+
+@pytest.mark.parametrize(
+    "term_name, field_name, values, expected_errors",
+    [
+        ("lin_vel_z_l2", "root_lin_vel_b", [[9.0, 8.0, 0.0], [9.0, 8.0, -0.5]], [0.0, 0.25]),
+        ("ang_vel_xy_l2", "root_ang_vel_b", [[0.0, 0.0, 9.0], [-0.3, 0.4, 9.0]], [0.0, 0.25]),
+        ("dof_vel_l2", "joint_vel", [[0.0, 9.0, 0.0], [-3.0, 9.0, 4.0]], [0.0, 25.0]),
+        ("dof_torques_l2", "applied_torque", [[0.0, 9.0, 0.0], [-3.0, 9.0, 4.0]], [0.0, 25.0]),
+    ],
+)
+def test_configured_velocity_and_torque_penalties_use_selected_squared_errors(
+    term_name, field_name, values, expected_errors
+):
+    term = getattr(UnitreeGo2SymmFlatEnvCfg().rewards, term_name)
+    env = SimpleNamespace(
+        scene={"robot": SimpleNamespace(data=SimpleNamespace(**{field_name: _tensor_data(torch.tensor(values))}))}
+    )
+    params = {**term.params, "asset_cfg": SceneEntityCfg("robot", joint_ids=[2, 0])}
+    expected = torch.tensor([math.expm1(-term.params["scale"] * error) for error in expected_errors])
+    torch.testing.assert_close(term.func(env, **params), expected)
+
+
+def test_action_smoothness_tracks_second_difference_and_clears_only_reset_environments():
+    actions = torch.zeros(2, 12)
+    previous = torch.zeros_like(actions)
+    env = SimpleNamespace(action_manager=SimpleNamespace(action=actions, prev_action=previous))
+    cfg = UnitreeGo2SymmFlatEnvCfg().rewards.action_smoothness
+    term = cfg.func(cfg, env)
+
+    actions[:, 0] = 1.0
+    torch.testing.assert_close(term(env, **cfg.params), torch.full((2,), math.expm1(-0.05)))
+    previous.copy_(actions)
+    actions[:, 0] = 2.0
+    torch.testing.assert_close(term(env, **cfg.params), torch.zeros(2))
+    previous.copy_(actions)
+    actions[:, 0] = 3.0
+    torch.testing.assert_close(term(env, **cfg.params), torch.zeros(2))
+
+    term.reset([0])
+    previous.copy_(actions)
+    previous[0] = 0.0  # ActionManager resets the same environment's history.
+    actions[0] = 0.0
+    actions[0, 0] = 1.0
+    actions[1, 0] = 4.0
+    torch.testing.assert_close(term(env, **cfg.params), torch.tensor([math.expm1(-0.05), 0.0]))
+    term.reset()
+    previous.zero_()
+    actions.zero_()
+    torch.testing.assert_close(term(env, **cfg.params), torch.zeros(2))
+
+
+@pytest.mark.parametrize("step_dt", [0.02, 0.04])
+def test_joint_acceleration_uses_control_step_difference_and_reset_velocities(step_dt):
+    velocity = torch.tensor([[1.0, 99.0, -1.0], [-2.0, 99.0, 2.0]])
+    env = SimpleNamespace(
+        step_dt=step_dt,
+        scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_vel=_tensor_data(velocity)))},
+    )
+    cfg = UnitreeGo2SymmFlatEnvCfg().rewards.dof_acc_l2
+    cfg.params["asset_cfg"] = SceneEntityCfg("robot", joint_ids=[2, 0])
+    term = cfg.func(cfg, env)
+    velocity[:, 0] += 0.2
+    velocity[:, 2] -= 0.4
+    expected = math.expm1(-4.0e-6 * 0.2 / step_dt**2)
+    torch.testing.assert_close(term(env, **cfg.params), torch.full((2,), expected))
+
+    velocity[0] = torch.tensor([10.0, -99.0, -10.0])
+    term.reset(torch.tensor([0]))
+    velocity[:, 0] += 0.2
+    velocity[:, 2] -= 0.4
+    torch.testing.assert_close(term(env, **cfg.params), torch.full((2,), expected))
+    term.reset()
+    torch.testing.assert_close(term(env, **cfg.params), torch.zeros(2))
+
+
+def test_configured_action_rate_uses_squared_changes_without_stability_gate():
+    term = UnitreeGo2SymmFlatEnvCfg().rewards.action_rate_l2
+    actions = torch.zeros(3, 12)
+    actions[1, :2] = torch.tensor([0.25, -0.25])
+    actions[2, :4] = torch.tensor([0.125, -0.125, 0.125, -0.125])
+    env = SimpleNamespace(
+        action_manager=SimpleNamespace(action=actions, prev_action=torch.zeros_like(actions)),
+        scene={
+            "robot": SimpleNamespace(
+                data=SimpleNamespace(
+                    root_pos_w=_tensor_data(torch.zeros(3, 3)),
+                    root_quat_w=_tensor_data(torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(3, 1)),
+                )
+            )
+        },
+    )
+    # Equal L1 errors have distinct squared costs, even with the base at ground height.
+    expected = torch.tensor([0.0, math.expm1(-0.05 * 0.125), math.expm1(-0.05 * 0.0625)])
+    torch.testing.assert_close(term.func(env, **term.params), expected)
+
+
+@pytest.mark.parametrize("use_stability_gate", [False, True])
+def test_action_rate_penalty_uses_l1_change_and_preserves_stability_gate(use_stability_gate):
+    action_delta = torch.zeros(5, 12)
+    action_delta[1, :3] = torch.tensor([0.125, -0.25, 0.125])
+    action_delta[2, :8] = torch.tensor([0.0625, -0.0625] * 4)
+    action_delta[3] = -action_delta[1]
+    action_delta[4] = 10.0
+    previous_action = torch.full_like(action_delta, 0.25)
+    scene = _Scene()
+    scene["robot"] = SimpleNamespace(
+        data=SimpleNamespace(
+            root_pos_w=_tensor_data(torch.tensor([[0.0, 0.0, 0.25]]).repeat(5, 1)),
+            root_quat_w=_tensor_data(torch.tensor([[0.0, 0.0, 0.0, 1.0]]).repeat(5, 1)),
+        )
+    )
+    env = SimpleNamespace(
+        scene=scene,
+        action_manager=SimpleNamespace(action=previous_action + action_delta, prev_action=previous_action),
+    )
+
+    penalty = symm_quadruped.action_rate_exp_penalty(env, scale=4.0, use_stability_gate=use_stability_gate)
+
+    # Equal L1 changes must cost the same regardless of sign or distribution across joints.
+    # Constant nonzero actions cost nothing; very large changes saturate at the gate magnitude.
+    expected = torch.tensor([0.0, math.expm1(-2.0), math.expm1(-2.0), math.expm1(-2.0), -1.0])
+    if use_stability_gate:
+        expected *= 0.5  # Upright at the height threshold gives a gate of exactly one half.
+    torch.testing.assert_close(penalty, expected)
 
 
 def test_joint_position_target_limit_penalty_activates_only_inside_limit_margin():

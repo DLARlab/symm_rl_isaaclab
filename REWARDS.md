@@ -7,24 +7,24 @@ SPDX-License-Identifier: BSD-3-Clause
 
 # Reward functions used by `train.sh`
 
-Snapshot of the current workspace configuration on **2026-10-06**.
-The active command in [train.sh](train.sh) selects
-`Isaac-Velocity-Flat-Dobot-X1-Symm-v0` with TRS enabled, 10,000 training iterations,
-2,048 environments, and 20 frames of policy observation history. It uses
-**11 nonzero environment reward terms** and supplies no reward overrides.
+Snapshot of the shared X1 and Go2 configuration on **2026-10-11**.
 
-The second command, which includes `--no-trs`, is currently commented out. If
-enabled, it would use the same environment rewards: `--no-trs` disables symmetry
-data augmentation and learning-time symmetry losses, while the environment's
-`leg_permutation_symmetry` reward remains enabled. The observation-history setting
-does not change these reward functions.
+Both robots use **four positive reward terms and twelve nonzero penalty terms**.
+The positive weights sum to **1.0**. Nine penalties use
+$f_i=\exp(-k_i E_i)-1$, with nonnegative errors summed without averaging;
+their combined weighted penalty is bounded by $[-2.5,0]$. The two foot-periodicity
+terms apply a gated exponential-minus-one to each foot before summing, with
+weight 0.1 per foot for each component and a combined bound of $[-0.4,0]$.
+Foot clearance adds a per-foot swing-trajectory shortfall penalty with weight 0.1
+and no command gate. Leg-permutation
+symmetry and torque-difference smoothness remain disabled by zero weights. `--no-trs`
+controls learning-time symmetry separately from the environment rewards.
 
-These equations describe the current source configuration. Previously trained
-checkpoints may have used different settings.
-
-Compared with the 2026-10-05 documentation, the foot-periodicity contact-force
-coefficient is now **0.025 N⁻¹**, up from 0.005 N⁻¹. Its weight remains **0.30**;
-all other reward formulas and weights in the table remain unchanged.
+The positive terms use exponential tracking scores for velocity, squared base-height
+error, and squared roll plus pitch. Swing force, stance speed, and swing-height
+shortfall contribute separate penalties. Both velocity-tracking terms use
+the edited standard implementations with a direct denominator of 0.25.
+Previously trained checkpoints may have used different settings.
 
 ## Reward table
 
@@ -34,23 +34,43 @@ penalty functions themselves return nonpositive values.
 
 | Configuration term | Raw reward or penalty $f_i$ | Weight $w_i$ |
 | --- | --- | ---: |
-| `track_lin_vel_xy_exp` | $f_{xy}=\exp\!\left[-\dfrac{(v_x-v_x^*)^2+(v_y-v_y^*)^2}{0.20^2}\right]$ | 0.50 |
-| `track_ang_vel_z_exp` | $f_{\mathrm{yaw}}=\exp\!\left[-\left(\dfrac{\omega_z-\omega_z^*}{0.20}\right)^2\right]$ | 0.50 |
-| `base_roll_exp` | $f_{\mathrm{roll}}=e^{-\lvert\rho\rvert/0.25}-1$ | 0.30 |
-| `foot_periodicity` | $f_{\mathrm{period}}=-\displaystyle\sum_{\ell=1}^{4}\left[S_\ell(1-e^{-0.025F_\ell})+T_\ell(1-e^{-2u_\ell})\right]$ | 0.30 |
-| `base_height` | $f_{\mathrm{height}}=e^{-20\lvert z-0.35\rvert}-1$ | 0.30 |
-| `foot_clearance` | $f_{\mathrm{clear}}=-G_{\mathrm{cmd}}\displaystyle\sum_{\ell=1}^{4}W_\ell\left(1-e^{-[h_\ell^*-h_\ell]_+/0.025}\right)$ | 0.10 |
-| `hip_action_penalty` | $f_{\mathrm{hip}}=e^{-0.5H}-1$ | 0.15 |
-| `joint_target_limits` | $f_{\mathrm{limit}}=-\dfrac1{12}\displaystyle\sum_{j=1}^{12}\left[\operatorname{clip}\!\left(\dfrac{x_j-0.90}{0.10},0,1\right)\right]^2$ | 0.05 |
-| `action_rate_l2` | $f_{\mathrm{rate}}=-G_{\mathrm{stable}}\left(1-e^{-0.10D_a}\right)$ | 0.05 |
-| `leg_permutation_symmetry` | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0.20 |
-| `smoothness` | $f_{\mathrm{smooth}}=-G_{\mathrm{stable}}\left(1-e^{-0.10D_\tau}\right)$ | 0.10 |
+| `track_lin_vel_xy_exp` | $f_{xy}=\exp[-((v_x-v_x^*)^2+(v_y-v_y^*)^2)/0.25]$ | 0.40 |
+| `track_ang_vel_z_exp` | $f_{\mathrm{yaw}}=\exp[-(\omega_z-\omega_z^*)^2/0.25]$ | 0.30 |
+| `base_height` | $f_{\mathrm{height}}=\exp[-100(h-h^*)^2]$ | 0.15 |
+| `base_roll_pitch_exp` | $f_{\mathrm{orientation}}=\exp[-10(\rho^2+\eta^2)]$ | 0.15 |
+| `foot_clearance` | $f_{\mathrm{clear}}=\sum_\ell s_\ell[\exp(-40[z_\ell^*-z_\ell]_+)-1]$ | 0.10 |
+| `foot_periodicity_force` | $f_F=\sum_\ell S_\ell[\exp(-0.05F_\ell)-1]$ | 0.10 |
+| `foot_periodicity_velocity` | $f_u=\sum_\ell T_\ell[\exp(-2u_\ell)-1]$ | 0.10 |
+| `hip_action_penalty` | $f_{\mathrm{hip}}=\exp[-\sum_{j\in\mathrm{hips}}(q_j-q_j^{\mathrm{default}})^2]-1$ | 0.10 |
+| `joint_target_limits` | $f_{\mathrm{limit}}=\exp[-10E_{\mathrm{limit}}]-1$ | 2.00 |
+| `action_rate_l2` | $f_{\mathrm{rate}}=\exp[-0.05\sum_j(a_{t,j}-a_{t-1,j})^2]-1$ | 0.05 |
+| `lin_vel_z_l2` | $f_{v_z}=\exp[-5(v_z^b)^2]-1$ | 0.10 |
+| `dof_vel_l2` | $f_{\dot q}=\exp[-0.01\sum_j\dot q_j^2]-1$ | 0.05 |
+| `dof_torques_l2` | $f_\tau=\exp[-0.004\sum_j\tau_j^2]-1$ | 0.05 |
+| `action_smoothness` | $f_{\Delta^2a}=\exp[-0.05\sum_j(a_{t,j}-2a_{t-1,j}+a_{t-2,j})^2]-1$ | 0.05 |
+| `ang_vel_xy_l2` | $f_{\omega_{xy}}=\exp[-((\omega_x^b)^2+(\omega_y^b)^2)]-1$ | 0.05 |
+| `dof_acc_l2` | $f_{\ddot q}=\exp[-4\times10^{-6}\sum_j((\dot q_{t,j}-\dot q_{t-1,j})/\Delta t)^2]-1$ | 0.05 |
+| `leg_permutation_symmetry` (zero weight) | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0 |
+| `smoothness` (zero weight) | $f_{\mathrm{smooth}}=-G_{\mathrm{stable}}\left(1-e^{-0.10D_\tau}\right)$ | 0 |
 | `alive_bonus` (zero weight) | $f_{\mathrm{alive}}=1$ | 0 |
 | `termination_penalty` (zero weight) | $f_{\mathrm{term}}=\mathbf 1[\text{non-timeout termination}]$ | 0 |
 
-The `action_rate_l2` key selects `action_rate_exp_penalty`, a bounded exponential
-of the mean squared action difference. The base-height reward target is **0.35 m**;
-the command's nominal height range of 0.45–0.60 m is a separate gait-timing setting.
+The retained `hip_action_penalty` and `joint_target_limits` configuration keys
+now select measured-position penalties. `action_rate_l2` selects
+`action_rate_l2_exp_penalty`, using squared action differences. The nine
+joint, body-velocity, and action penalties have no stability gate. The old action-based hip, L1 action-rate,
+and target-limit helpers remain available for explicit legacy configurations.
+Both robots use the same weights, with these height settings:
+
+| Robot | Base-height target $h^*$ [m] | Clearance target $H$ [m] | Foot offset $o$ [m] | Command nominal height range [m] |
+| --- | ---: | ---: | ---: | --- |
+| X1 | 0.35 | 0.08 | 0.0275 | 0.45–0.60 |
+| Go2 | 0.30 | 0.06 | 0.022 | 0.35–0.45 |
+
+The foot offsets match the spherical foot collision radii in the robot URDFs.
+The peak commanded foot-link height is $H+o$: 0.1075 m for X1 and
+0.082 m for Go2. Each foot follows a sinusoidal swing-height target with that
+peak. The command nominal height range remains a separate gait-timing setting.
 
 ## Final reward composition
 
@@ -61,40 +81,43 @@ $$
 r_i=\Delta t\,w_i f_i.
 $$
 
-The environment then applies its Ji22 composition. With $\mathcal I$ containing
-all configured terms except `termination_penalty`,
+The environment sums all terms, including any `termination_penalty`, and clips
+the final reward to $[0,\infty)$:
 
 $$
-P=\sum_{i\in\mathcal I}\max(r_i,0),\qquad
-N=\sum_{i\in\mathcal I}\min(r_i,0),\qquad
-R=P\exp\!\left(\frac{N}{0.02}\right)+r_{\mathrm{term}}.
+R=\max\!\left(\sum_i r_i,0\right).
 $$
 
-The current termination weight is zero. Define the weighted penalty sum before
-multiplication by $\Delta t$:
+Ji22 composition and its diagnostics are commented out. Its helper remains
+available for restoring the previous experiment. Termination penalties, if
+enabled, are included before clipping so the delivered reward remains nonnegative.
+
+The current termination weight is zero. Before timestep scaling, define
 
 $$
 \begin{aligned}
-B={}&0.30f_{\mathrm{roll}}+0.30f_{\mathrm{period}}+0.30f_{\mathrm{height}}
-     +0.10f_{\mathrm{clear}}+0.15f_{\mathrm{hip}}\\
-   &+0.05f_{\mathrm{limit}}+0.05f_{\mathrm{rate}}+0.20f_{\mathrm{sym}}
-     +0.10f_{\mathrm{smooth}}.
+A={}&0.40f_{xy}+0.30f_{\mathrm{yaw}}+0.15f_{\mathrm{height}}
++0.15f_{\mathrm{orientation}},\\
+B={}&0.10f_{\mathrm{hip}}+2.00f_{\mathrm{limit}}+0.05f_{\mathrm{rate}}+0.10f_{v_z}\\
+&+0.05f_{\dot q}+0.05f_\tau+0.05f_{\Delta^2a}+0.05f_{\omega_{xy}}+0.05f_{\ddot q}
++0.10f_F+0.10f_u+0.10f_{\mathrm{clear}}.
 \end{aligned}
 $$
 
 At the current step duration, the delivered reward is therefore
 
 $$
-\boxed{R=0.02\left(0.50f_{xy}+0.50f_{\mathrm{yaw}}\right)e^B.}
+\boxed{R=0.02\max(A+B,0).}
 $$
 
-The two tracking rewards provide the positive component; the nine penalties
-reduce it through the exponential multiplier. `Episode_Reward/<term>` logs use
-the accumulated individual weighted terms before this composition, averaged over
-reset environments and divided by the configured episode duration (30 s). Their
-sum does not reconstruct the delivered reward. The reward manager skips the two
-zero-weight terms; episode termination conditions remain active despite the zero
-explicit termination reward.
+Each positive raw term is at most 1, so $A\le1$. The total reward is bounded
+by **$[0,1]$ before timestep scaling**, or **$[0,0.02]$ per step**. The twelve
+penalty terms are added to the positive sum before clipping at zero.
+
+`Episode_Reward/<term>` logs report individual weighted terms before this
+clipping, averaged over reset environments and normalized by episode length.
+Their sum does not reconstruct the delivered reward when clipping occurs. The
+four zero-weight terms are skipped; termination conditions remain active.
 
 ## Notation
 
@@ -103,8 +126,13 @@ explicit termination reward.
 | $v_x^*,v_y^*,\omega_z^*$ | Commanded body-frame planar velocity [m/s] and yaw rate [rad/s] |
 | $v_x,v_y,\omega_z$ | Measured body-frame planar velocity [m/s] and yaw rate [rad/s] |
 | $z,\rho,\eta$ | Base world height [m], roll [rad], and pitch [rad] |
+| $h,h^*$ | Ground-relative base height and its robot-specific target [m] |
+| $z_\ell,H,o$ | Ground-relative foot-link height, clearance target, and resting foot offset [m] |
+| $z_\ell^*,s_\ell$ | Commanded swing-height trajectory [m] and sigmoid swing gate |
 | $a_{t,j}$ | Dimensionless action stored in the action manager |
 | $q_j,\widehat q_j$ | Measured joint position and processed, clamped joint target [rad] |
+| $q_j^{\mathrm{default}},\dot q_j$ | Default joint position [rad] and measured joint velocity [rad/s] |
+| $v_z^b,\omega_x^b,\omega_y^b$ | Body-frame vertical velocity [m/s] and roll/pitch angular velocities [rad/s] |
 | $\tau_{t,j}$ | Applied joint torque [N·m] at reward evaluation |
 | $\phi_\ell,d,\theta_\ell$ | Foot phase [cycles], stance duty factor, and sampled foot offset [cycles] |
 | $\ell$ | Leg in FL, FR, RL, RR order |
@@ -126,19 +154,19 @@ F_\ell=\max_{h\in\{1,2,3\}}\lVert\mathbf F^w_{\ell,h}\rVert_2,
 \qquad u_\ell=\lVert\mathbf v^w_{\mathrm{foot},\ell}\rVert_2.
 $$
 
-The periodicity penalty discourages contact force during swing and foot motion
-during stance. The coefficients are $0.025\,\mathrm{N}^{-1}$ and
-$2\,\mathrm{s/m}$, respectively. The term sums over the four feet. The training
-configuration explicitly passes `force_scale=0.025`, overriding the function's
-standalone default of 0.001.
+Two periodicity penalties discourage contact force during swing and foot
+motion during stance. Their internal coefficients are $w_S=0.05\,\mathrm{N}^{-1}$
+and $w_T=2\,\mathrm{s/m}$. Each foot contributes
 
-For example, a 100 N contact force with swing weight $S_\ell=1$ contributes
-$-(1-e^{-2.5})\approx-0.9179$ before the reward weight and step duration are
-applied. The previously documented coefficient of 0.005 would give about
-$-0.3935$. Increasing the coefficient strengthens swing-contact penalties, with
-the exponential still saturating toward $-1$ per foot's force component. This
-term does not directly require stance contact: its stance component only
-penalizes foot speed.
+$$
+r_{F,\ell}=0.1S_\ell[\exp(-0.05F_\ell)-1],\qquad
+r_{u,\ell}=0.1T_\ell[\exp(-2u_\ell)-1].
+$$
+
+The swing and stance gates multiply the per-foot exponential-minus-one outputs.
+The four foot contributions are summed afterwards, without averaging. Configuring
+weight 0.1 on each summed component gives every foot that same weight. Stance
+contact itself is not required by these functions; stance motion incurs a penalty.
 
 Let $C_{16}$ be the zero-location CDF used by `scipy.stats.vonmises_line`, with
 concentration $\kappa=16$. The implemented smoothed periodic interval weight is
@@ -153,84 +181,166 @@ $$
 S_\ell=V(\phi_\ell;0,1-d),\qquad T_\ell=V(\phi_\ell;1-d,1).
 $$
 
+The command helpers return negative weights, so the penalty functions negate
+them to obtain the nonnegative gates $S_\ell$ and $T_\ell$. These complementary
+gates satisfy $S_\ell+T_\ell=1$. Each foot's combined weighted penalty is bounded
+by $[-0.1,0]$, giving $[-0.4,0]$ over all four feet. The lower bound is
+approached as force and speed errors increase.
+
 The duty factor varies with the gait command. Foot phases follow the signed
 clock and signed offsets implemented by `GaitVelocityCommand`.
 
-### Swing foot clearance
+Running `bash test.sh` saves `figure11_foot_periodicity.png` and
+`foot_periodicity.csv` in each checkpoint/gait output directory. The plot shows
+history-max net contact force [N], world-frame foot speed [m/s], and each foot's
+force and velocity penalties, with commanded stance and swing shaded. The CSV
+reports mean force, speed, `mean_force_penalty`, and `mean_speed_penalty` per leg,
+phase, and command direction. These penalties include the exponential transformation
+and phase gates but exclude the external 0.1 weights and timestep scaling.
+Missing phases have zero samples and `nan` means.
 
-Foot height $h_\ell$ is the foot-link world height minus the environment-origin
-height [m]. The peak target is 0.10 m:
+Reward-time signals are captured before resets or gait resampling and saved as
+`foot_periodicity_*` arrays in `sim_data.npz`. Previous positive-reward recordings
+remain readable using their `mean_force_cost` and `mean_speed_cost` columns.
+The existing ground-reaction-force plots use instantaneous force,
+including available friction, rather than the history-max net force used here.
+
+### Foot clearance
+
+The active `swing_trajectory_penalty` mode restores the previous sinusoidal
+swing-height shortfall penalty, with the command gate removed and current
+foot-link peak heights retained:
 
 $$
-\xi_\ell=\operatorname{clip}\!\left(\frac{\phi_\ell}{\max(1-d,10^{-6})},0,1\right),
-\qquad h_\ell^*=0.10\sin(\pi\xi_\ell),
-\qquad W_\ell=\sigma\!\left(16[(1-d)-\phi_\ell]\right).
+p_\ell=\operatorname{clip}\!\left(\frac{\phi_\ell}{1-d},0,1\right),\qquad
+z_\ell^*=(H+o)\sin(\pi p_\ell),\qquad
+s_\ell=\sigma\!\left(\kappa[(1-d)-\phi_\ell]\right),
 $$
 
-The command gate allows either translation or turning to enable the penalty:
-
 $$
-G_{\mathrm{cmd}}=\operatorname{clip}\!\left(
-\max\!\left[
-\frac{\sqrt{(v_x^*)^2+(v_y^*)^2}}{0.20\,\mathrm{m/s}},
-\frac{\lvert\omega_z^*\rvert}{0.20\,\mathrm{rad/s}}
-\right],0,1\right).
+e_\ell=[z_\ell^*-z_\ell]_+,\qquad
+f_{\mathrm{clear}}=\sum_\ell s_\ell\left[\exp\!\left(-\frac{e_\ell}{0.025}\right)-1\right].
 $$
 
-Only clearance shortfall is penalized, with scale 0.025 m. The sigmoid weight
-$W_\ell$ differs from the periodicity weight $S_\ell$.
+The denominator is the previous `height_scale=0.025` m, giving coefficient
+$40\,\mathrm{m}^{-1}$ on linear shortfall. The outer weight is 0.1. Each foot's
+exponential is evaluated before summing; there is no averaging. The sigmoid
+swing gate $s_\ell$ uses $\kappa=16$ and differs from the von Mises periodicity
+gate $S_\ell$.
 
-### Stability, action change, and torque smoothness
+Foot height is measured above the environment origin. The trajectory rises
+from zero to the peak at mid-swing and returns to zero at swing end. Heights
+at or above the trajectory receive zero penalty. The active configuration
+sets `use_command_gate=False`, so stationary feet and zero velocity commands
+still incur a penalty when a foot is below its commanded swing trajectory.
+The weighted clearance term is bounded by $[-0.1\sum_\ell s_\ell,0]$, contained
+within $[-0.4,0]$ for four feet.
+
+Playback records the negative clearance penalty, foot heights, trajectory
+targets, and swing weights. `figure7_foot_clearance.png` shows the trajectory
+and shades the active swing weight. Explicit legacy modes remain available:
+`phase_penalty` retains the command gate, and `speed_tracking_reward` selects
+the previous positive speed-weighted clearance reward with `sigma=0.01`.
+
+### Action rate and action smoothness
+
+$$
+E_{\mathrm{rate}}=\sum_{j=1}^{12}(a_{t,j}-a_{t-1,j})^2,
+\qquad
+E_{\mathrm{smooth}}=\sum_{j=1}^{12}(a_{t,j}-2a_{t-1,j}+a_{t-2,j})^2.
+$$
+
+Both terms use raw, dimensionless policy actions before target scaling and
+clamping, without averaging, timestep division, or stability gates. Their
+exponential coefficients are both 0.05; both outer weights are
+0.05. Action histories are initialized to zero independently for each reset
+environment. The first action therefore contributes to both penalties.
+
+### Velocity, torque, and acceleration
+
+Base linear and angular velocities use the body frame. `ang_vel_xy_l2`
+penalizes both roll and pitch angular velocity, while excluding yaw. Joint
+velocity and torque errors sum squares over the 12 configured robot joints.
+Torques are the applied torques at reward evaluation.
+
+`JointAccelerationExpPenalty` differences measured joint velocities between
+consecutive control steps and divides by $\Delta t=0.02$ s. It keeps its own
+history instead of using a backend's physics-substep acceleration. Reset
+environments initialize that history from their reset joint velocities; other
+environments retain their history.
+
+### Torque smoothness (disabled by zero weight)
+
+The retained `SmoothnessPenalty` function measures
+
+$$
+D_\tau=\sum_{j=1}^{12}\lvert\tau_{t,j}-\tau_{t-1,j}\rvert.
+$$
+
+Its legacy stability gate is
 
 $$
 G_{\mathrm{stable}}=\operatorname{clip}\!\left(
-\sigma(20(z-0.25))e^{-2(\rho^2+\eta^2)},0,1\right),
+\sigma(20(z-0.25))e^{-2(\rho^2+\eta^2)},0,1\right).
+$$
+
+With the current weight of 0.0, the reward manager skips its evaluation and it
+does not enter the penalty sum $B$. If enabled, the function sets $D_\tau$ to zero
+on the first reward evaluation after reset, uses the stability gate above, and
+applies exponential scale $0.10\,(\mathrm{N\,m})^{-1}$. The torque difference is
+not divided by $\Delta t$.
+
+### Hip joint position
+
+The configured term uses the four measured hip angles and their default
+positions, with weight 0.10:
+
+$$
+E_{\mathrm{hip}}=\sum_{j\in\mathrm{hips}}(q_j-q_j^{\mathrm{default}})^2,
+\qquad f_{\mathrm{hip}}=\exp(-E_{\mathrm{hip}})-1.
+$$
+
+Hip joint names come from positions 0, 3, 6, and 9 in the logical joint order
+and are resolved to articulation indices. This selects Go2's hip joints and
+X1's abduction joints even when simulator storage order differs. Angles are
+in radians; the exponential coefficient is $1\,\mathrm{rad}^{-2}$.
+
+### Measured joint-position limits
+
+Let $L_j,U_j$ be the full runtime joint limits [rad], including X1's startup
+calf-limit overrides. The allowed region covers their central 90%:
+
+$$
+L_j^{\mathrm{soft}}=L_j+0.05(U_j-L_j),\qquad
+U_j^{\mathrm{soft}}=U_j-0.05(U_j-L_j),
 $$
 
 $$
-D_a=\frac1{12}\sum_{j=1}^{12}(a_{t,j}-a_{t-1,j})^2,
-\qquad D_\tau=\sum_{j=1}^{12}\lvert\tau_{t,j}-\tau_{t-1,j}\rvert.
+E_{\mathrm{limit}}=\sum_j\left([L_j^{\mathrm{soft}}-q_j]_+
++[q_j-U_j^{\mathrm{soft}}]_+\right),\qquad
+f_{\mathrm{limit}}=\exp(-10E_{\mathrm{limit}})-1.
 $$
 
-The stability gate uses a 0.25 m height threshold, height coefficient
-$20\,\mathrm{m}^{-1}$, and orientation coefficient $2\,\mathrm{rad}^{-2}$.
-$D_\tau$ is set to zero on the first reward evaluation after reset. Neither
-difference is divided by $\Delta t$. The torque-change scale is
-$0.10\,(\mathrm{N\,m})^{-1}$.
+This uses measured joint angles and linear violations in radians, without
+squaring or averaging. The coefficient is $10\,\mathrm{rad}^{-1}$ and weight
+is 2.0. The bounds are computed from full limits so existing soft limits are
+not shrunk twice. Target clamping remains a separate simulator safety step.
 
-### Hip action magnitude
+### Leg-permutation symmetry (disabled by zero weight)
 
-For zero-based hip-action indices $\mathcal A=\{0,3,6,9\}$,
+The function is retained for reference and optional explicit re-enabling. With
+the current weight of 0.0, the reward manager skips its evaluation and it does
+not enter the penalty sum $B$.
 
-$$
-\alpha_j=\frac{e^{\lvert a_{t,j}\rvert/0.5}}
-{\sum_{k\in\mathcal A}e^{\lvert a_{t,k}\rvert/0.5}},
-\qquad H=\sum_{j\in\mathcal A}\alpha_j\lvert a_{t,j}\rvert.
-$$
-
-These are unscaled actions, rather than measured hip angles or joint targets.
-
-### Joint-target limits
-
-Let $L_j,U_j$ be the current soft joint-position limits [rad]. With $\epsilon$
-equal to the machine epsilon of the limit tensor's dtype,
+Map the measured joint angles into logical coordinates:
 
 $$
-x_j=\left\lvert\frac{2(\widehat q_j-L_j)}{\max(U_j-L_j,\epsilon)}-1\right\rvert.
+\overline{\mathbf q}_\ell=\mathbf s_\ell\odot\mathbf q_\ell.
 $$
 
-The penalty activates within 5% of the full joint range at each end. It uses
-processed targets after the environment's soft-limit clamp.
-
-### Leg-permutation symmetry
-
-Map the measured joint angles into the X1 logical convention:
-
-$$
-\overline{\mathbf q}_\ell=\mathbf s_\ell\odot\mathbf q_\ell,
-\qquad \mathbf s_{FL}=\mathbf s_{FR}=(1,1,1),
-\qquad \mathbf s_{RL}=\mathbf s_{RR}=(1,-1,-1).
-$$
+Go2 uses $\mathbf s_\ell=(1,1,1)$ for all legs. X1 uses
+$\mathbf s_{FL}=\mathbf s_{FR}=(1,1,1)$ and
+$\mathbf s_{RL}=\mathbf s_{RR}=(1,-1,-1)$ to express its mirrored front–rear posture.
 
 Joint order within each leg is hip abduction, thigh pitch, and calf pitch.
 The six candidate pairs are
@@ -261,24 +371,33 @@ $$
 {\max\!\left(1,\sum_{(a,b)\in\mathcal P}I_{ab}\right)}.
 $$
 
-The penalty is zero when no pair is synchronous. It uses measured joint angles
-without subtracting the default pose, and remains active with `--no-trs`.
+If evaluated directly, the raw penalty is zero when no pair is synchronous.
+It uses measured joint angles without subtracting the default pose. Changing
+`--no-trs` does not change the environment reward's weight.
 
 ## Disabled terms
 
-The following terms are set to `None`: `lin_vel_z_l2`, `ang_vel_xy_l2`,
-`dof_torques_l2`, `dof_acc_l2`, `feet_air_time`, `flat_orientation_l2`,
+`smoothness`, `leg_permutation_symmetry`, `alive_bonus`, and `termination_penalty`
+are retained in the configuration with weight 0.0 and skipped during reward
+computation. To restore either previous penalty explicitly, pass its override
+when launching training:
+
+- Torque smoothness: `env.rewards.smoothness.weight=0.1`.
+- Leg-permutation symmetry: `env.rewards.leg_permutation_symmetry.weight=0.2`.
+
+The following terms are set to `None`: `feet_air_time`, `flat_orientation_l2`,
 `dof_pos_limits`, `undesired_contacts`, `cmd`, `track_lin_vel_x_exp`,
-`track_lin_vel_y_exp`, `sagittal_plane`, and `straight_line_motion`.
+`track_lin_vel_y_exp`, `base_roll_exp`, `foot_periodicity`, `sagittal_plane`, and `straight_line_motion`.
 
 ## Sources and other formats
 
 - [Training launcher](train.sh) and [CLI options](scripts/symm_locomotion/symm_cli.py).
 - [X1 reward binding](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/dobot_x1_symm/flat_env_cfg.py).
+- [Go2 reward binding](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2_symm/flat_env_cfg.py).
 - [Shared reward weights and parameters](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/flat_env_cfg.py).
 - [Shared reward functions](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/symm_quadruped.py).
 - [Standard planar tracking reward](source/isaaclab/isaaclab/envs/mdp/rewards.py).
-- [X1 joint-axis signs](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py).
+- [X1 logical joint signs](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/dobot_x1_symm.py).
 - [Final reward composition](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/symm_quadruped/env.py) and [reward manager](source/isaaclab/isaaclab/managers/reward_manager.py).
 - [Inherited configuration disabling undesired contacts](source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/go2/rough_env_cfg.py).
-- Earlier **2026-10-05 snapshot**: [LaTeX source](logs/reward_documentation/train_rewards_2026-10-05.tex) and [compiled PDF](logs/reward_documentation/train_rewards_2026-10-05.pdf). These retain the earlier force coefficient; the current configuration is documented above.
+- Earlier **2026-10-05 X1 snapshot**: [LaTeX source](logs/reward_documentation/train_rewards_2026-10-05.tex) and [compiled PDF](logs/reward_documentation/train_rewards_2026-10-05.pdf). These retain the earlier force coefficient, mean-squared action-rate formula, and nonzero torque-smoothness and leg-permutation symmetry weights; the current configuration is documented above.

@@ -69,6 +69,21 @@ class SymmQuadrupedRewardsCfg(RewardsCfg):
     base_roll_exp: RewTerm | None = None
     """Independent base-roll stability term."""
 
+    base_roll_pitch_exp: RewTerm | None = None
+    """Positive reward for a level base roll and pitch."""
+
+    foot_periodicity_force: RewTerm | None = None
+    """Sum of per-foot exponential contact-force penalties during commanded swing."""
+
+    foot_periodicity_velocity: RewTerm | None = None
+    """Sum of per-foot exponential foot-speed penalties during commanded stance."""
+
+    dof_vel_l2: RewTerm | None = None
+    """Bounded exponential penalty for summed squared joint velocities."""
+
+    action_smoothness: RewTerm | None = None
+    """Bounded exponential penalty for second differences of raw actions."""
+
     leg_permutation_symmetry: RewTerm | None = None
     """Phase-weighted joint symmetry under configured leg permutations."""
 
@@ -246,12 +261,13 @@ def configure_rewards(
     foot_sensor_body_names: Sequence[str],
     base_height_range: tuple[float, float] = (0.45, 0.60),
     base_height_target: float = 0.35,
-    foot_clearance_height: float = 0.10,
+    foot_clearance_height: float = 0.08,
     foot_clearance_height_scale: float = 0.025,
-    foot_clearance_mode: str = "phase_penalty",
+    foot_clearance_mode: str = "swing_trajectory_penalty",
     foot_clearance_weight: float = 0.10,
+    foot_height_offset: float = 0.0275,
     pitch_scale: float = 0.35,
-    yaw_tracking_error_scale: float = 0.20,
+    yaw_tracking_error_scale: float = 0.25,
     logical_joint_signs: Sequence[Sequence[float]] | None = None,
 ) -> None:
     """Configure shared Go2 and X1 reward functions and coefficients.
@@ -266,69 +282,109 @@ def configure_rewards(
         foot_body_names: Foot body names in logical leg order.
         foot_sensor_names: Contact sensor names in logical leg order.
         foot_sensor_body_names: Body names selected by the contact sensors.
-        base_height_range: Legacy height range [m], currently ignored by the shared height penalty.
+        base_height_range: Legacy height range [m], unused by the target-height reward.
         base_height_target: Target base height [m].
-        foot_clearance_height: Peak swing foot height [m].
-        foot_clearance_height_scale: Clearance shortfall scale [m].
+        foot_clearance_height: Clearance above the resting foot offset [m] for swing-trajectory and
+            speed-tracking modes; peak foot-link height [m] in legacy phase-penalty mode.
+        foot_clearance_height_scale: Clearance shortfall scale [m] for trajectory and legacy modes.
         foot_clearance_mode: Foot-clearance reward formulation.
         foot_clearance_weight: Foot-clearance reward coefficient.
+        foot_height_offset: Resting foot-link origin height above ground [m].
         pitch_scale: Legacy pitch scale [rad], unused while straight-line shaping is disabled.
-        yaw_tracking_error_scale: Yaw-rate tracking error scale [rad/s].
+        yaw_tracking_error_scale: Exponential denominator for squared yaw-rate error [(rad/s)^2].
         logical_joint_signs: Per-leg signs mapping physical joints into logical joint axes.
     """
+    feet_cfg = SceneEntityCfg("robot", body_names=list(foot_body_names), preserve_order=True)
+    joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
+    hip_cfg = SceneEntityCfg(
+        "robot",
+        joint_names=[joint_names[index] for index in symm_mdp.SYMM_QUADRUPED_HIP_ACTION_IDS],
+        preserve_order=True,
+    )
     env_cfg.rewards.track_lin_vel_xy_exp = RewTerm(
         func=base_mdp.track_lin_vel_xy_exp,
-        weight=0.5,
-        params={"command_name": "base_velocity", "std": 0.2},
+        weight=0.4,
+        params={"command_name": "base_velocity", "std": 0.25},
     )
     env_cfg.rewards.track_ang_vel_z_exp = None
-    env_cfg.rewards.lin_vel_z_l2 = None
-    env_cfg.rewards.ang_vel_xy_l2 = None
-    env_cfg.rewards.dof_torques_l2 = None
-    env_cfg.rewards.dof_acc_l2 = None
+    env_cfg.rewards.lin_vel_z_l2 = RewTerm(func=mdp_module.lin_vel_z_exp_penalty, weight=0.10, params={"scale": 5.0})
+    env_cfg.rewards.ang_vel_xy_l2 = RewTerm(func=mdp_module.ang_vel_xy_exp_penalty, weight=0.05, params={"scale": 1.0})
+    env_cfg.rewards.dof_vel_l2 = RewTerm(
+        func=mdp_module.joint_vel_exp_penalty, weight=0.05, params={"scale": 0.01, "asset_cfg": joint_cfg}
+    )
+    env_cfg.rewards.dof_torques_l2 = RewTerm(
+        func=mdp_module.joint_torques_exp_penalty, weight=0.05, params={"scale": 0.004, "asset_cfg": joint_cfg}
+    )
+    env_cfg.rewards.dof_acc_l2 = RewTerm(
+        func=mdp_module.JointAccelerationExpPenalty, weight=0.05, params={"scale": 4.0e-6, "asset_cfg": joint_cfg}
+    )
     env_cfg.rewards.action_rate_l2 = RewTerm(
-        func=mdp_module.action_rate_exp_penalty,
+        func=mdp_module.action_rate_l2_exp_penalty,
         weight=0.05,
-        params={"scale": 0.1},
+        params={"scale": 0.05},
+    )
+    env_cfg.rewards.action_smoothness = RewTerm(
+        func=mdp_module.ActionSmoothnessExpPenalty, weight=0.05, params={"scale": 0.05}
     )
     env_cfg.rewards.feet_air_time = None
     env_cfg.rewards.flat_orientation_l2 = None
     env_cfg.rewards.dof_pos_limits = None
 
-    feet_cfg = SceneEntityCfg("robot", body_names=list(foot_body_names), preserve_order=True)
-    joint_cfg = SceneEntityCfg("robot", joint_names=list(joint_names), preserve_order=True)
     env_cfg.rewards.alive_bonus = RewTerm(func=mdp_module.alive_bonus, weight=0.0)
     env_cfg.rewards.termination_penalty = RewTerm(func=base_mdp.is_terminated, weight=0.0)
     env_cfg.rewards.cmd = None
     env_cfg.rewards.track_lin_vel_x_exp = None
     env_cfg.rewards.track_lin_vel_y_exp = None
     env_cfg.rewards.track_ang_vel_z_exp = RewTerm(
-        func=mdp_module.track_ang_vel_z_exp,
-        weight=0.5,
-        params={"command_name": "base_velocity", "error_scale": yaw_tracking_error_scale},
+        func=base_mdp.track_ang_vel_z_exp,
+        weight=0.3,
+        params={"command_name": "base_velocity", "std": yaw_tracking_error_scale},
     )
-    env_cfg.rewards.base_roll_exp = RewTerm(
-        func=mdp_module.base_roll_exp_penalty,
-        weight=0.30,
-        params={"error_scale": 0.25},
+    env_cfg.rewards.base_roll_exp = None
+    env_cfg.rewards.base_roll_pitch_exp = RewTerm(
+        func=mdp_module.base_roll_pitch_exp,
+        weight=0.15,
+        params={"scale": 10.0},
     )
-    env_cfg.rewards.foot_periodicity = RewTerm(
-        func=mdp_module.foot_periodicity_penalty,
-        weight=0.30,
+    env_cfg.rewards.foot_periodicity = None
+    env_cfg.rewards.foot_periodicity_force = RewTerm(
+        func=mdp_module.foot_periodicity_force_exp_penalty,
+        weight=0.10,
         params={
             "command_name": "base_velocity",
-            "feet_cfg": feet_cfg,
             "foot_sensor_names": tuple(foot_sensor_names),
             "foot_sensor_body_names": tuple(foot_sensor_body_names),
-            "force_scale": 0.025,
+            "scale": 0.05,
         },
     )
-    env_cfg.rewards.base_height = RewTerm(
-        func=mdp_module.base_height_range_penalty,
-        weight=0.30,
-        params={"height_range": base_height_range, "target_height": base_height_target},
+    env_cfg.rewards.foot_periodicity_velocity = RewTerm(
+        func=mdp_module.foot_periodicity_velocity_exp_penalty,
+        weight=0.10,
+        params={"command_name": "base_velocity", "feet_cfg": feet_cfg, "scale": 2.0},
     )
-    if foot_clearance_mode == "phase_penalty":
+    env_cfg.rewards.base_height = RewTerm(
+        func=mdp_module.base_height_exp,
+        weight=0.15,
+        params={"target_height": base_height_target, "scale": 100.0},
+    )
+    if foot_clearance_mode == "swing_trajectory_penalty":
+        foot_clearance_func = mdp_module.foot_clearance_penalty
+        foot_clearance_params = {
+            "command_name": "base_velocity",
+            "feet_cfg": feet_cfg,
+            "min_height": foot_clearance_height + foot_height_offset,
+            "height_scale": foot_clearance_height_scale,
+            "use_command_gate": False,
+        }
+    elif foot_clearance_mode == "speed_tracking_reward":
+        foot_clearance_func = mdp_module.foot_clearance_speed_exp
+        foot_clearance_params = {
+            "feet_cfg": feet_cfg,
+            "target_height": foot_clearance_height,
+            "foot_height_offset": foot_height_offset,
+            "sigma": 0.01,
+        }
+    elif foot_clearance_mode == "phase_penalty":
         foot_clearance_func = mdp_module.foot_clearance_penalty
         foot_clearance_params = {
             "command_name": "base_velocity",
@@ -365,22 +421,26 @@ def configure_rewards(
         weight=foot_clearance_weight,
         params=foot_clearance_params,
     )
-    env_cfg.rewards.hip_action_penalty = RewTerm(func=mdp_module.hip_action_penalty, weight=0.15)
+    env_cfg.rewards.hip_action_penalty = RewTerm(
+        func=mdp_module.hip_joint_position_exp_penalty,
+        weight=0.10,
+        params={"asset_cfg": hip_cfg, "scale": 1.0},
+    )
     env_cfg.rewards.joint_target_limits = RewTerm(
-        func=mdp_module.joint_position_target_limit_penalty,
-        weight=0.05,
-        params={"action_term_name": "joint_pos", "margin_fraction": 0.05},
+        func=mdp_module.joint_position_limits_exp_penalty,
+        weight=2.0,
+        params={"asset_cfg": joint_cfg, "limit_fraction": 0.9, "scale": 10.0},
     )
     env_cfg.rewards.sagittal_plane = None
     env_cfg.rewards.straight_line_motion = None
     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
         func=mdp_module.leg_permutation_symmetry_penalty,
-        weight=0.20,
+        weight=0.0,
         params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
     )
     if logical_joint_signs is not None:
         env_cfg.rewards.leg_permutation_symmetry.params["logical_joint_signs"] = logical_joint_signs
-    env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
+    env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.0)
 
 
 def configure_terminations(
