@@ -1,22 +1,29 @@
 Fixed
 ^^^^^
 
-* Fixed direction-test playback to calculate gait period and stance duty factor
-  from the specified velocity using the training timing curve and noise setting.
+* Fixed direction-test playback to apply the configured gait period and stance
+  duty factor at command changes, matching the training timing implementation.
   Applied timing immediately at startup and after resets, and used smooth
   transitions for later command changes without restarting the gait clock.
 
 Changed
 ^^^^^^^
 
+* Changed training and playback to default to fixed cycle durations of 0.52 s
+  for Go2 and 0.60 s for X1, with stance duty factor 0.56 for both robots.
+  Retained the ``calculate_from_sampling_curve`` selector: false used fixed
+  values and true used the velocity-based curve. To restore the previous
+  velocity-based timing, enable ``calculate_from_sampling_curve`` and,
+  optionally, ``add_noise_period`` in the command configuration.
+
 * Enabled the leg-permutation symmetry penalty with weight 0.1 for symmetric
   Go2 and X1. Set ``rewards.leg_permutation_symmetry.weight=0.0`` to restore
   the previous disabled setting.
 
-* Changed the base-height reward targets to 0.35 m for symmetric Go2 and
-  0.40 m for X1. To restore previous targets, set
-  ``rewards.base_height.params["target_height"]`` to ``0.30`` for Go2 or
-  ``0.35`` for X1.
+* Changed the base-height reward targets to 0.30 m for symmetric Go2 and
+  0.35 m for X1. To restore the previous higher targets, set
+  ``rewards.base_height.params["target_height"]`` to ``0.35`` for Go2 or
+  ``0.40`` for X1.
 
 * Changed all symmetric Go2 joint PD gains to stiffness 25 N m/rad and
   damping 0.6 N m s/rad. To restore the previous thigh and calf gains, set

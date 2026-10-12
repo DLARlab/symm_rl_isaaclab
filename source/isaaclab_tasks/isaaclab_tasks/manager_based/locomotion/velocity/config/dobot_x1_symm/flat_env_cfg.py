@@ -179,6 +179,10 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             curriculum_tracking_lin_vel_threshold=0.85,
             curriculum_tracking_ang_vel_threshold=0.7,
         )
+        self.commands.base_velocity.gait_period = 0.60
+        self.commands.base_velocity.duty_factor = 0.56
+        self.commands.base_velocity.calculate_from_sampling_curve = False
+        self.commands.base_velocity.add_noise_period = False
 
         self._configure_dobot_x1_symm_observations()
         self._configure_dobot_x1_symm_rewards()
@@ -218,7 +222,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
             logical_joint_signs=dobot_mdp.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
-            base_height_target=0.40,
+            base_height_target=0.35,
         )
 
     def _configure_dobot_x1_symm_terminations(self) -> None:

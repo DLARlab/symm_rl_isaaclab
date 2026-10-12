@@ -1404,6 +1404,13 @@ def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1
     x1_cfg = x1_cfg_cls()
     go2_cfg = go2_cfg_cls()
 
+    for cfg, period in ((go2_cfg, 0.52), (x1_cfg, 0.60)):
+        command = cfg.commands.base_velocity
+        assert command.gait_period == period
+        assert command.duty_factor == 0.56
+        assert command.calculate_from_sampling_curve is False
+        assert command.add_noise_period is False
+
     assert x1_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
     assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.1
     assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
@@ -1415,8 +1422,8 @@ def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1
     assert x1_cfg.rewards.foot_clearance.params["use_absolute_error"] is True
     assert x1_cfg.rewards.foot_clearance.params["foot_height_offset"] == pytest.approx(0.0275)
     assert x1_cfg.rewards.foot_clearance.weight == 0.10
-    assert go2_cfg.rewards.base_height.params["target_height"] == 0.35
-    assert x1_cfg.rewards.base_height.params["target_height"] == 0.40
+    assert go2_cfg.rewards.base_height.params["target_height"] == 0.30
+    assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
     assert go2_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.082)
     assert go2_cfg.rewards.foot_clearance.params["foot_height_offset"] == pytest.approx(0.022)
 
@@ -1484,7 +1491,7 @@ def test_robot_configs_use_requested_height_ranges_and_orientation_terminations(
     assert x1_cfg.terminations.base_orientation.params["max_pitch"] == 0.70
 
     assert x1_cfg.commands.base_velocity.base_height_range == (0.45, 0.60)
-    assert x1_cfg.rewards.base_height.params["target_height"] == 0.40
+    assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
     assert x1_cfg.scene.robot.init_state.pos == (0.0, 0.0, 0.5)
     default_joint_pos = x1_cfg.scene.robot.init_state.joint_pos
     assert default_joint_pos["joint_front_left_abad"] == 0.0
@@ -2097,7 +2104,7 @@ def test_robot_negative_reward_weights_scales_and_hip_selection(cfg_cls):
         term = getattr(cfg.rewards, name)
         assert term.weight == weight, name
         assert term.params["scale"] == scale, name
-    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 16
+    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 17
 
     # Simulate an articulation whose storage order differs from the policy joint order.
     logical_names = cfg.actions.joint_pos.joint_names

@@ -143,6 +143,10 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             curriculum_tracking_lin_vel_threshold=0.85,
             curriculum_tracking_ang_vel_threshold=0.7,
         )
+        self.commands.base_velocity.gait_period = 0.52
+        self.commands.base_velocity.duty_factor = 0.56
+        self.commands.base_velocity.calculate_from_sampling_curve = False
+        self.commands.base_velocity.add_noise_period = False
 
         self._configure_go2_symm_observations()
         self._configure_go2_symm_rewards()
@@ -181,7 +185,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_body_names=_GO2_FOOT_BODY_NAMES,
             foot_sensor_names=_GO2_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_GO2_FOOT_BODY_NAMES,
-            base_height_target=0.35,
+            base_height_target=0.30,
             foot_clearance_height=0.06,
             foot_height_offset=0.022,
         )

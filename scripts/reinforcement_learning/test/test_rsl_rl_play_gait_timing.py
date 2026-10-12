@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Regression tests for velocity-dependent timing in direction-test playback."""
+"""Regression tests for selectable fixed and velocity-based playback timing."""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def _make_command(cfg_cls=UnitreeGo2SymmFlatEnvCfg_PLAY, num_envs=1):
     return SimpleNamespace(unwrapped=env), command
 
 
-def _expected_timing(command, forward_speed):
+def _expected_velocity_timing(command, forward_speed):
     length = sum(command.cfg.base_height_range) / 2.0
     velocity_star = abs(forward_speed) / math.sqrt(9.81 * length)
     period = 2.55 * math.exp(-0.975 * velocity_star) * math.sqrt(length / 9.81)
@@ -78,6 +78,7 @@ def _expected_timing(command, forward_speed):
     return max(period, 0.1), min(max(duty, 0.1), 0.9)
 
 
+@pytest.mark.parametrize("calculate_from_sampling_curve", [False, True])
 @pytest.mark.parametrize("cfg_cls", [UnitreeGo2SymmFlatEnvCfg_PLAY, DobotX1SymmFlatEnvCfg_PLAY])
 @pytest.mark.parametrize(
     "segment, direction, velocity",
@@ -90,14 +91,21 @@ def _expected_timing(command, forward_speed):
         (5, "yaw_right", (0.0, 0.0, -0.6)),
     ],
 )
-def test_initial_playback_timing_matches_specified_velocity(playback_override, cfg_cls, segment, direction, velocity):
+def test_initial_playback_respects_timing_selector_for_each_velocity(
+    playback_override, cfg_cls, segment, direction, velocity, calculate_from_sampling_curve
+):
     env, command = _make_command(cfg_cls)
+    command.cfg.calculate_from_sampling_curve = calculate_from_sampling_curve
     command.gait_phase[:] = 0.37
     templates = command.foot_thetas.clone()
 
     assert playback_override(env, segment * 10, 60) == direction
 
-    period, duty = _expected_timing(command, velocity[0])
+    period, duty = (
+        _expected_velocity_timing(command, velocity[0])
+        if calculate_from_sampling_curve
+        else ((0.52 if cfg_cls is UnitreeGo2SymmFlatEnvCfg_PLAY else 0.60), 0.56)
+    )
     assert command.gait_periods.tolist() == pytest.approx([period])
     assert command.duty_factors.tolist() == pytest.approx([duty])
     torch.testing.assert_close(command.vel_command_b, torch.tensor([velocity]))
@@ -106,11 +114,16 @@ def test_initial_playback_timing_matches_specified_velocity(playback_override, c
     assert torch.isinf(command.time_left).all()
 
 
-def test_held_velocity_keeps_sampled_timing_without_restarting_transition(playback_override):
+@pytest.mark.parametrize("calculate_from_sampling_curve", [False, True])
+def test_held_velocity_keeps_timing_without_restarting_transition(playback_override, calculate_from_sampling_curve):
     env, command = _make_command()
+    command.cfg.calculate_from_sampling_curve = calculate_from_sampling_curve
     command.cfg.add_noise_period = True
     playback_override(env, 0, 60)
     periods, duties = command.gait_periods.clone(), command.duty_factors.clone()
+    if not calculate_from_sampling_curve:
+        assert periods.tolist() == pytest.approx([0.52])
+        assert duties.tolist() == pytest.approx([0.56])
     for step in range(10):
         playback_override(env, step, 60)
         torch.testing.assert_close(command.gait_periods, periods)
@@ -127,8 +140,10 @@ def test_held_velocity_keeps_sampled_timing_without_restarting_transition(playba
     torch.testing.assert_close(command._gait_transition_progress, progress)
 
 
-def test_velocity_change_updates_timing_and_preserves_phase_during_transition(playback_override):
+@pytest.mark.parametrize("calculate_from_sampling_curve", [False, True])
+def test_velocity_change_applies_selected_timing_and_preserves_phase(playback_override, calculate_from_sampling_curve):
     env, command = _make_command()
+    command.cfg.calculate_from_sampling_curve = calculate_from_sampling_curve
     playback_override(env, 0, 60)
     command.gait_phase[:] = 0.37
     phases = command.foot_phases().clone()
@@ -136,7 +151,7 @@ def test_velocity_change_updates_timing_and_preserves_phase_during_transition(pl
 
     playback_override(env, 20, 60)
 
-    period, duty = _expected_timing(command, 0.0)
+    period, duty = _expected_velocity_timing(command, 0.0) if calculate_from_sampling_curve else (0.52, 0.56)
     assert command.gait_periods.tolist() == pytest.approx([period])
     assert command._duty_factor_transition_target.tolist() == pytest.approx([duty])
     torch.testing.assert_close(command.foot_phases(), phases)
@@ -145,14 +160,18 @@ def test_velocity_change_updates_timing_and_preserves_phase_during_transition(pl
     assert command.duty_factors.tolist() == pytest.approx([duty])
 
 
-def test_episode_reset_restores_specified_timing_only_for_reset_environments(playback_override):
+@pytest.mark.parametrize("calculate_from_sampling_curve", [False, True])
+def test_episode_reset_restores_selected_timing_only_for_reset_environments(
+    playback_override, calculate_from_sampling_curve
+):
     env, command = _make_command(num_envs=2)
+    command.cfg.calculate_from_sampling_curve = calculate_from_sampling_curve
     playback_override(env, 0, 60)
     command.gait_phase[:] = 0.37
     command.reset(torch.tensor([0]))
     playback_override(env, 1, 60)
 
-    period, duty = _expected_timing(command, 1.0)
+    period, duty = _expected_velocity_timing(command, 1.0) if calculate_from_sampling_curve else (0.52, 0.56)
     assert command.gait_periods.tolist() == pytest.approx([period, period])
     assert command.duty_factors.tolist() == pytest.approx([duty, duty])
     torch.testing.assert_close(command.gait_phase, torch.tensor([0.0, 0.37]))

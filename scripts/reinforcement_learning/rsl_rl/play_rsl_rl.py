@@ -301,7 +301,7 @@ def _tracking_error_direction_command(step: int, total_steps: int) -> tuple[str,
 
 
 def _apply_tracking_error_direction_command(env, step: int, total_steps: int) -> str | None:
-    """Override direction-test velocities and update their speed-dependent gait timing."""
+    """Override direction-test velocities and apply their configured gait timing."""
     if not args_cli.tracking_error_direction_test:
         return None
     try:
@@ -345,7 +345,7 @@ def _apply_tracking_error_direction_command(env, step: int, total_steps: int) ->
         if len(initial_ids) > 0:
             resample_timing(initial_ids, transition=False)
         if len(changed_ids) > 0:
-            # Reuse training's timing curve, noise and transition while preserving the existing phase clock.
+            # Reuse training's selected timing and transition while preserving the existing phase clock.
             resample_timing(changed_ids, transition=True)
     return direction_name
 

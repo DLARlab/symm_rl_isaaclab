@@ -176,10 +176,10 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     """Minimum mean yaw velocity tracking reward for curriculum success."""
 
     gait_period: float = 0.45
-    """Fallback gait period [s]."""
+    """Fixed gait period [s] used when :attr:`calculate_from_sampling_curve` is false."""
 
     duty_factor: float = 0.45
-    """Fallback stance phase ratio."""
+    """Fixed stance phase ratio used when :attr:`calculate_from_sampling_curve` is false."""
 
     resampling_time_gait: float = 20.0
     """Time between gait parameter resampling [s]."""
@@ -191,10 +191,10 @@ class GaitVelocityCommandCfg(CommandTermCfg):
     """Number of gait cycles over which changed foot offsets and duty factors are blended."""
 
     calculate_from_sampling_curve: bool = True
-    """Whether to derive period and duty factor from commanded forward speed."""
+    """Whether to derive period and duty factor from commanded forward speed instead of using fixed values."""
 
     add_noise_period: bool = True
-    """Whether to add command-speed-dependent noise to sampled gait period and duty factor."""
+    """Whether to add command-speed-dependent noise to velocity-based period and duty factor; unused in fixed mode."""
 
     add_noise_theta: bool = True
     """Whether to add small integer-cycle noise to sampled foot phase offsets."""
@@ -645,7 +645,7 @@ class GaitVelocityCommand(CommandTerm):
         self.metrics["duty_factor"][env_ids_tensor] = self.duty_factors[env_ids_tensor]
 
     def _resample_gait_timing(self, env_ids: Sequence[int], *, transition: bool) -> None:
-        """Update speed-dependent gait timing while retaining the continuous phase clock."""
+        """Apply fixed or velocity-based gait timing while retaining the continuous phase clock."""
         env_ids_tensor = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
         if len(env_ids_tensor) == 0:
             return

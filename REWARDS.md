@@ -62,16 +62,16 @@ joint, body-velocity, and action penalties have no stability gate. The old actio
 and target-limit helpers remain available for explicit legacy configurations.
 Both robots use the same weights, with these height settings:
 
-| Robot | Base-height target $h^*$ [m] | Clearance target $H$ [m] | Foot offset $o$ [m] | Command nominal height range [m] |
+| Robot | Base-height target $h^*$ [m] | Clearance target $H$ [m] | Foot offset $o$ [m] | Timing nominal height range [m] |
 | --- | ---: | ---: | ---: | --- |
-| X1 | 0.40 | 0.08 | 0.0275 | 0.45–0.60 |
-| Go2 | 0.35 | 0.06 | 0.022 | 0.35–0.45 |
+| X1 | 0.35 | 0.08 | 0.0275 | 0.45–0.60 |
+| Go2 | 0.30 | 0.06 | 0.022 | 0.35–0.45 |
 
 The foot offsets match the spherical foot collision radii in the robot URDFs.
 The peak commanded foot-link height is $H+o$: 0.1075 m for X1 and
 0.082 m for Go2. Each foot follows a sinusoidal swing-height target with that
 peak, starting and ending at the resting foot offset $o$. The command nominal
-height range remains a separate gait-timing setting.
+height range is used when selecting velocity-based gait timing.
 
 ## Final reward composition
 
@@ -209,8 +209,10 @@ gates satisfy $S_\ell+T_\ell=1$. Each foot's combined weighted penalty is bounde
 by $[-0.3,0]$, giving $[-1.2,0]$ over all four feet. The lower bound is
 approached as force and speed errors increase.
 
-The duty factor varies with the gait command. Foot phases follow the signed
-clock and signed offsets implemented by `GaitVelocityCommand`.
+With the default fixed timing mode, stance duty factor is 0.56 for both robots. Cycle duration is
+0.52 s for Go2 and 0.60 s for X1, for every commanded velocity and gait in
+training and playback. Foot phases follow the signed clock and signed offsets
+implemented by `GaitVelocityCommand`.
 
 Running `bash test.sh` saves `figure11_foot_periodicity.png` and
 `foot_periodicity.csv` in each checkpoint/gait output directory. The plot shows
@@ -221,18 +223,27 @@ phase, and command direction. These penalties include the exponential transforma
 and phase gates but exclude the external 0.3 weights and timestep scaling.
 Missing phases have zero samples and `nan` means.
 
-Direction-test playback calculates cycle duration and stance duty factor from
-the specified velocity using the same timing curve and `add_noise_period`
-setting as training. Timing is recalculated at startup, after episode resets,
-and when the velocity command changes. It remains fixed while a command is
-held, so timing noise is not sampled again on every control step. Startup and
-reset timing are applied immediately; later changes use the configured smooth
-gait transition without restarting the phase clock. The curve depends on the
-absolute forward velocity component and the midpoint of
-`commands.base_velocity.base_height_range`; lateral and yaw-only commands
-therefore use the zero-forward-speed timing. Set
-`env.commands.base_velocity.add_noise_period=False` to use the nominal curve
-without timing noise during evaluation.
+Direction-test playback applies the same selected timing mode as training
+at startup, after episode resets, and when the velocity command changes.
+`calculate_from_sampling_curve` selects the implementation in
+`GaitVelocityCommand._resample_gait_timing`: `False` uses the configured fixed
+period and duty factor, while `True` calculates them from the absolute forward
+velocity and midpoint of `base_height_range`. Both active tasks default to
+`calculate_from_sampling_curve=False` and `add_noise_period=False`. Fixed mode
+ignores timing noise, velocity magnitude, and nominal height range. Direction
+changes still use the configured gait transition without restarting the phase
+clock.
+
+| Robot | Cycle duration $T$ [s] | Stance duty factor $d$ | Stance duration $dT$ [s] | Swing duration $(1-d)T$ [s] |
+| --- | ---: | ---: | ---: | ---: |
+| Go2 | 0.52 | 0.56 | 0.2912 | 0.2288 |
+| X1 | 0.60 | 0.56 | 0.3360 | 0.2640 |
+
+To select velocity-based timing for training or playback, pass
+`env.commands.base_velocity.calculate_from_sampling_curve=True`.
+Set `env.commands.base_velocity.add_noise_period=True` to enable timing noise
+in that mode. Playback samples timing only at startup, resets, and command
+changes, so holding a velocity does not repeatedly sample noise.
 
 Reward-time signals are captured before resets or gait resampling and saved as
 `foot_periodicity_*` arrays in `sim_data.npz`. Previous positive-reward recordings

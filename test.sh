@@ -10,8 +10,8 @@ export OMNI_KIT_ACCEPT_EULA=YES
 # --plots also saves figure11_foot_periodicity.png and foot_periodicity.csv
 # in each gait's output directory (force and speed in both stance and swing).
 checkpoints=(
-  "x1|logs/rsl_rl/dobot_x1_symm_flat/2026-10-12_04-38-34_x1_no_trs/model_9999.pt"
-  "go2|logs/rsl_rl/unitree_go2_symm_flat/2026-10-12_08-09-31_go2_no_trs/model_9999.pt"
+  "x1|logs/rsl_rl/dobot_x1_symm_flat/2026-10-12_16-07-22_x1_no_trs/model_4999.pt"
+  # "go2|logs/rsl_rl/unitree_go2_symm_flat/2026-10-12_08-09-31_go2_no_trs/model_9999.pt"
 )
 x_command="1"
 y_command="0.5"
