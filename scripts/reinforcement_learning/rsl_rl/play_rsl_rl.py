@@ -301,7 +301,7 @@ def _tracking_error_direction_command(step: int, total_steps: int) -> tuple[str,
 
 
 def _apply_tracking_error_direction_command(env, step: int, total_steps: int) -> str | None:
-    """Override base velocity commands for deterministic tracking-error direction testing."""
+    """Override direction-test velocities and update their speed-dependent gait timing."""
     if not args_cli.tracking_error_direction_test:
         return None
     try:
@@ -324,6 +324,13 @@ def _apply_tracking_error_direction_command(env, step: int, total_steps: int) ->
         lateral_speed = args_cli.tracking_error_direction_speed
     command[1] *= float(lateral_speed)
     command[2] *= float(args_cli.tracking_error_direction_yaw_rate)
+    changed = torch.any(command_term.vel_command_b != command, dim=-1)
+    # A finite resampling timer identifies initial/reset commands whose timing needs immediate replacement.
+    initial = (
+        torch.isfinite(command_term.time_left)
+        if hasattr(command_term, "time_left")
+        else torch.full_like(changed, step == 0)
+    )
     command_term.vel_command_b[:] = command
     if hasattr(command_term, "time_left"):
         command_term.time_left[:] = torch.inf
@@ -331,6 +338,15 @@ def _apply_tracking_error_direction_command(env, step: int, total_steps: int) ->
         command_term.is_standing_env[:] = False
     if hasattr(command_term, "is_heading_env"):
         command_term.is_heading_env[:] = False
+    resample_timing = getattr(command_term, "_resample_gait_timing", None)
+    if resample_timing is not None:
+        initial_ids = initial.nonzero(as_tuple=False).flatten()
+        changed_ids = (changed & ~initial).nonzero(as_tuple=False).flatten()
+        if len(initial_ids) > 0:
+            resample_timing(initial_ids, transition=False)
+        if len(changed_ids) > 0:
+            # Reuse training's timing curve, noise and transition while preserving the existing phase clock.
+            resample_timing(changed_ids, transition=True)
     return direction_name
 
 
@@ -1975,13 +1991,6 @@ def main(  # noqa: C901
                 max_samples=args_cli.symm_rollout_plot_max_steps,
             )
 
-        # reset environment
-        if tracking_error_grid is None and command_batch is None:
-            obs = env.get_observations()
-        else:
-            obs, _ = env.reset()
-        if command_batch is not None:
-            command_batch.reset_reference()
         timestep = 0
         gait_info_interval = max(args_cli.print_gait_info_interval, 1)
         tracking_error_direction_total_steps = (
@@ -1990,6 +1999,14 @@ def main(  # noqa: C901
         if tracking_error_direction_total_steps is None:
             tracking_error_direction_total_steps = len(_TRACKING_ERROR_DIRECTION_SEQUENCE) * gait_info_interval
         last_tracking_error_direction = None
+        # Set the initial direction-test command and timing before retrieving policy observations.
+        _apply_tracking_error_direction_command(env, timestep, tracking_error_direction_total_steps)
+        if tracking_error_grid is None and command_batch is None:
+            obs = env.get_observations()
+        else:
+            obs, _ = env.reset()
+        if command_batch is not None:
+            command_batch.reset_reference()
         # simulate environment
         try:
             while True:

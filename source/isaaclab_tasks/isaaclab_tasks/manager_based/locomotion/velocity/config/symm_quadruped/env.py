@@ -329,7 +329,15 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
                 diagnostics[f"Diagnostics/straight_line_{name}"] = value.mean()
 
         foot_clearance_diagnostics = getattr(self, "_foot_clearance_diagnostics", {})
-        for name in ("mean_height", "mean_swing_height", "mean_target_height", "mean_shortfall", "penalty", "reward"):
+        for name in (
+            "mean_height",
+            "mean_swing_height",
+            "mean_target_height",
+            "mean_shortfall",
+            "mean_height_error",
+            "penalty",
+            "reward",
+        ):
             value = foot_clearance_diagnostics.get(name)
             if value is not None:
                 diagnostics[f"Diagnostics/foot_clearance_{name}"] = value.mean()

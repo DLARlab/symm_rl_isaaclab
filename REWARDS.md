@@ -7,22 +7,22 @@ SPDX-License-Identifier: BSD-3-Clause
 
 # Reward functions used by `train.sh`
 
-Snapshot of the shared X1 and Go2 configuration on **2026-10-11**.
+Snapshot of the shared X1 and Go2 configuration on **2026-10-12**.
 
-Both robots use **four positive reward terms and twelve nonzero penalty terms**.
+Both robots use **four positive reward terms and thirteen nonzero penalty terms**.
 The positive weights sum to **1.0**. Nine penalties use
 $f_i=\exp(-k_i E_i)-1$, with nonnegative errors summed without averaging;
 their combined weighted penalty is bounded by $[-2.5,0]$. The two foot-periodicity
 terms apply a gated exponential-minus-one to each foot before summing, with
-weight 0.1 per foot for each component and a combined bound of $[-0.4,0]$.
-Foot clearance adds a per-foot swing-trajectory shortfall penalty with weight 0.1
-and no command gate. Leg-permutation
-symmetry and torque-difference smoothness remain disabled by zero weights. `--no-trs`
+weight 0.3 per foot for each component and a combined bound of $[-1.2,0]$.
+Foot clearance adds a per-foot absolute swing-trajectory error penalty with weight 0.1
+and no command gate. Leg-permutation symmetry adds a penalty with weight 0.1,
+bounded by $[-0.1,0]$. Torque-difference smoothness remains disabled by a zero weight. `--no-trs`
 controls learning-time symmetry separately from the environment rewards.
 
 The positive terms use exponential tracking scores for velocity, squared base-height
-error, and squared roll plus pitch. Swing force, stance speed, and swing-height
-shortfall contribute separate penalties. Both velocity-tracking terms use
+error, and squared roll plus pitch. Swing force, stance speed, and absolute swing-height
+error contribute separate penalties. Both velocity-tracking terms use
 the edited standard implementations with a direct denominator of 0.25.
 Previously trained checkpoints may have used different settings.
 
@@ -38,9 +38,9 @@ penalty functions themselves return nonpositive values.
 | `track_ang_vel_z_exp` | $f_{\mathrm{yaw}}=\exp[-(\omega_z-\omega_z^*)^2/0.25]$ | 0.30 |
 | `base_height` | $f_{\mathrm{height}}=\exp[-100(h-h^*)^2]$ | 0.15 |
 | `base_roll_pitch_exp` | $f_{\mathrm{orientation}}=\exp[-10(\rho^2+\eta^2)]$ | 0.15 |
-| `foot_clearance` | $f_{\mathrm{clear}}=\sum_\ell s_\ell[\exp(-40[z_\ell^*-z_\ell]_+)-1]$ | 0.10 |
-| `foot_periodicity_force` | $f_F=\sum_\ell S_\ell[\exp(-0.05F_\ell)-1]$ | 0.10 |
-| `foot_periodicity_velocity` | $f_u=\sum_\ell T_\ell[\exp(-2u_\ell)-1]$ | 0.10 |
+| `foot_clearance` | $f_{\mathrm{clear}}=\sum_\ell s_\ell[\exp(-40\lvert z_\ell^*-z_\ell\rvert)-1]$ | 0.10 |
+| `foot_periodicity_force` | $f_F=\sum_\ell S_\ell[\exp(-0.05F_\ell)-1]$ | 0.30 |
+| `foot_periodicity_velocity` | $f_u=\sum_\ell T_\ell[\exp(-2u_\ell)-1]$ | 0.30 |
 | `hip_action_penalty` | $f_{\mathrm{hip}}=\exp[-\sum_{j\in\mathrm{hips}}(q_j-q_j^{\mathrm{default}})^2]-1$ | 0.10 |
 | `joint_target_limits` | $f_{\mathrm{limit}}=\exp[-10E_{\mathrm{limit}}]-1$ | 2.00 |
 | `action_rate_l2` | $f_{\mathrm{rate}}=\exp[-0.05\sum_j(a_{t,j}-a_{t-1,j})^2]-1$ | 0.05 |
@@ -50,7 +50,7 @@ penalty functions themselves return nonpositive values.
 | `action_smoothness` | $f_{\Delta^2a}=\exp[-0.05\sum_j(a_{t,j}-2a_{t-1,j}+a_{t-2,j})^2]-1$ | 0.05 |
 | `ang_vel_xy_l2` | $f_{\omega_{xy}}=\exp[-((\omega_x^b)^2+(\omega_y^b)^2)]-1$ | 0.05 |
 | `dof_acc_l2` | $f_{\ddot q}=\exp[-4\times10^{-6}\sum_j((\dot q_{t,j}-\dot q_{t-1,j})/\Delta t)^2]-1$ | 0.05 |
-| `leg_permutation_symmetry` (zero weight) | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0 |
+| `leg_permutation_symmetry` | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0.10 |
 | `smoothness` (zero weight) | $f_{\mathrm{smooth}}=-G_{\mathrm{stable}}\left(1-e^{-0.10D_\tau}\right)$ | 0 |
 | `alive_bonus` (zero weight) | $f_{\mathrm{alive}}=1$ | 0 |
 | `termination_penalty` (zero weight) | $f_{\mathrm{term}}=\mathbf 1[\text{non-timeout termination}]$ | 0 |
@@ -64,13 +64,14 @@ Both robots use the same weights, with these height settings:
 
 | Robot | Base-height target $h^*$ [m] | Clearance target $H$ [m] | Foot offset $o$ [m] | Command nominal height range [m] |
 | --- | ---: | ---: | ---: | --- |
-| X1 | 0.35 | 0.08 | 0.0275 | 0.45–0.60 |
-| Go2 | 0.30 | 0.06 | 0.022 | 0.35–0.45 |
+| X1 | 0.40 | 0.08 | 0.0275 | 0.45–0.60 |
+| Go2 | 0.35 | 0.06 | 0.022 | 0.35–0.45 |
 
 The foot offsets match the spherical foot collision radii in the robot URDFs.
 The peak commanded foot-link height is $H+o$: 0.1075 m for X1 and
 0.082 m for Go2. Each foot follows a sinusoidal swing-height target with that
-peak. The command nominal height range remains a separate gait-timing setting.
+peak, starting and ending at the resting foot offset $o$. The command nominal
+height range remains a separate gait-timing setting.
 
 ## Final reward composition
 
@@ -100,7 +101,7 @@ A={}&0.40f_{xy}+0.30f_{\mathrm{yaw}}+0.15f_{\mathrm{height}}
 +0.15f_{\mathrm{orientation}},\\
 B={}&0.10f_{\mathrm{hip}}+2.00f_{\mathrm{limit}}+0.05f_{\mathrm{rate}}+0.10f_{v_z}\\
 &+0.05f_{\dot q}+0.05f_\tau+0.05f_{\Delta^2a}+0.05f_{\omega_{xy}}+0.05f_{\ddot q}
-+0.10f_F+0.10f_u+0.10f_{\mathrm{clear}}.
++0.30f_F+0.30f_u+0.10f_{\mathrm{clear}}+0.10f_{\mathrm{sym}}.
 \end{aligned}
 $$
 
@@ -111,13 +112,34 @@ $$
 $$
 
 Each positive raw term is at most 1, so $A\le1$. The total reward is bounded
-by **$[0,1]$ before timestep scaling**, or **$[0,0.02]$ per step**. The twelve
+by **$[0,1]$ before timestep scaling**, or **$[0,0.02]$ per step**. The thirteen
 penalty terms are added to the positive sum before clipping at zero.
 
 `Episode_Reward/<term>` logs report individual weighted terms before this
 clipping, averaged over reset environments and normalized by episode length.
 Their sum does not reconstruct the delivered reward when clipping occurs. The
-four zero-weight terms are skipped; termination conditions remain active.
+three zero-weight terms are skipped; termination conditions remain active.
+
+## Command-velocity curriculum
+
+Go2 and X1 use the same enabled command-velocity curriculum:
+
+| Command | Configured initial range | Maximum range |
+| --- | --- | --- |
+| Forward/backward velocity [m/s] | -0.5 to 0.5 | -3.0 to 3.0 |
+| Lateral velocity [m/s] | -0.6 to 0.6 | -0.6 to 0.6 |
+| Yaw rate [rad/s] | -0.5 to 0.5 | -2.0 to 2.0 |
+
+Sampling uses 21 forward-velocity bins, one lateral-velocity bin, and 21 yaw-rate
+bins. Initial bins are selected by their centers, and commands are sampled
+throughout each active bin, so initial samples can extend slightly beyond the
+configured initial ranges. A successful command window adds 0.2 to the sampling
+weights of its bin and its immediate neighbors, capped at 1.0.
+
+Success requires both the mean planar tracking score to exceed **0.85** and
+the mean yaw tracking score to exceed **0.70**. Scores use
+$\exp(-\mathrm{squared\ error}/0.25)$ independently of the outer reward weights.
+Gait correctness and foot-clearance error do not participate in this success check.
 
 ## Notation
 
@@ -159,13 +181,13 @@ motion during stance. Their internal coefficients are $w_S=0.05\,\mathrm{N}^{-1}
 and $w_T=2\,\mathrm{s/m}$. Each foot contributes
 
 $$
-r_{F,\ell}=0.1S_\ell[\exp(-0.05F_\ell)-1],\qquad
-r_{u,\ell}=0.1T_\ell[\exp(-2u_\ell)-1].
+r_{F,\ell}=0.3S_\ell[\exp(-0.05F_\ell)-1],\qquad
+r_{u,\ell}=0.3T_\ell[\exp(-2u_\ell)-1].
 $$
 
 The swing and stance gates multiply the per-foot exponential-minus-one outputs.
 The four foot contributions are summed afterwards, without averaging. Configuring
-weight 0.1 on each summed component gives every foot that same weight. Stance
+weight 0.3 on each summed component gives every foot that same weight. Stance
 contact itself is not required by these functions; stance motion incurs a penalty.
 
 Let $C_{16}$ be the zero-location CDF used by `scipy.stats.vonmises_line`, with
@@ -184,7 +206,7 @@ $$
 The command helpers return negative weights, so the penalty functions negate
 them to obtain the nonnegative gates $S_\ell$ and $T_\ell$. These complementary
 gates satisfy $S_\ell+T_\ell=1$. Each foot's combined weighted penalty is bounded
-by $[-0.1,0]$, giving $[-0.4,0]$ over all four feet. The lower bound is
+by $[-0.3,0]$, giving $[-1.2,0]$ over all four feet. The lower bound is
 approached as force and speed errors increase.
 
 The duty factor varies with the gait command. Foot phases follow the signed
@@ -196,8 +218,21 @@ history-max net contact force [N], world-frame foot speed [m/s], and each foot's
 force and velocity penalties, with commanded stance and swing shaded. The CSV
 reports mean force, speed, `mean_force_penalty`, and `mean_speed_penalty` per leg,
 phase, and command direction. These penalties include the exponential transformation
-and phase gates but exclude the external 0.1 weights and timestep scaling.
+and phase gates but exclude the external 0.3 weights and timestep scaling.
 Missing phases have zero samples and `nan` means.
+
+Direction-test playback calculates cycle duration and stance duty factor from
+the specified velocity using the same timing curve and `add_noise_period`
+setting as training. Timing is recalculated at startup, after episode resets,
+and when the velocity command changes. It remains fixed while a command is
+held, so timing noise is not sampled again on every control step. Startup and
+reset timing are applied immediately; later changes use the configured smooth
+gait transition without restarting the phase clock. The curve depends on the
+absolute forward velocity component and the midpoint of
+`commands.base_velocity.base_height_range`; lateral and yaw-only commands
+therefore use the zero-forward-speed timing. Set
+`env.commands.base_velocity.add_noise_period=False` to use the nominal curve
+without timing noise during evaluation.
 
 Reward-time signals are captured before resets or gait resampling and saved as
 `foot_periodicity_*` arrays in `sim_data.npz`. Previous positive-reward recordings
@@ -207,39 +242,49 @@ including available friction, rather than the history-max net force used here.
 
 ### Foot clearance
 
-The active `swing_trajectory_penalty` mode restores the previous sinusoidal
-swing-height shortfall penalty, with the command gate removed and current
-foot-link peak heights retained:
+The active `swing_trajectory_penalty` mode penalizes absolute height error
+relative to a sinusoidal swing trajectory. The trajectory includes the resting
+foot offset, with no command gate and the same foot-link peak heights:
 
 $$
 p_\ell=\operatorname{clip}\!\left(\frac{\phi_\ell}{1-d},0,1\right),\qquad
-z_\ell^*=(H+o)\sin(\pi p_\ell),\qquad
+z_\ell^*=o+H\sin(\pi p_\ell),\qquad
 s_\ell=\sigma\!\left(\kappa[(1-d)-\phi_\ell]\right),
 $$
 
 $$
-e_\ell=[z_\ell^*-z_\ell]_+,\qquad
+e_\ell=\lvert z_\ell^*-z_\ell\rvert,\qquad
 f_{\mathrm{clear}}=\sum_\ell s_\ell\left[\exp\!\left(-\frac{e_\ell}{0.025}\right)-1\right].
 $$
 
-The denominator is the previous `height_scale=0.025` m, giving coefficient
-$40\,\mathrm{m}^{-1}$ on linear shortfall. The outer weight is 0.1. Each foot's
+The denominator is `height_scale=0.025` m, giving coefficient
+$40\,\mathrm{m}^{-1}$ on absolute height error. The outer weight is 0.1. Each foot's
 exponential is evaluated before summing; there is no averaging. The sigmoid
 swing gate $s_\ell$ uses $\kappa=16$ and differs from the von Mises periodicity
 gate $S_\ell$.
 
 Foot height is measured above the environment origin. The trajectory rises
-from zero to the peak at mid-swing and returns to zero at swing end. Heights
-at or above the trajectory receive zero penalty. The active configuration
-sets `use_command_gate=False`, so stationary feet and zero velocity commands
-still incur a penalty when a foot is below its commanded swing trajectory.
+from the resting offset $o$ to $H+o$ at mid-swing and returns to $o$ at swing
+end, remaining at $o$ during stance. Heights below and above the trajectory
+are penalized equally for equal deviations; matching the trajectory gives
+zero penalty. The sigmoid swing gate still scales the penalty. The active
+configuration sets `use_absolute_error=True`, the robot-specific
+`foot_height_offset`, and `use_command_gate=False`, so stationary feet and
+zero velocity commands still incur a penalty when a foot deviates from its
+commanded swing trajectory.
 The weighted clearance term is bounded by $[-0.1\sum_\ell s_\ell,0]$, contained
 within $[-0.4,0]$ for four feet.
 
 Playback records the negative clearance penalty, foot heights, trajectory
-targets, and swing weights. `figure7_foot_clearance.png` shows the trajectory
+targets, swing weights, and `foot_clearance_height_errors` (absolute error in
+the active mode). The existing `foot_clearance_shortfalls` records only
+underlifting. Training also logs `Diagnostics/foot_clearance_mean_height_error`,
+the swing-weighted mean error. `figure7_foot_clearance.png` shows the trajectory
 and shades the active swing weight. Explicit legacy modes remain available:
-`phase_penalty` retains the command gate, and `speed_tracking_reward` selects
+`phase_penalty` retains the command gate, zero baseline, and shortfall-only
+error. Set `use_absolute_error=False` and `foot_height_offset=0.0` on the
+clearance term to reproduce the previous ungated shortfall trajectory with
+the configured peak. `speed_tracking_reward` selects
 the previous positive speed-weighted clearance reward with `sigma=0.01`.
 
 ### Action rate and action smoothness
@@ -326,11 +371,11 @@ squaring or averaging. The coefficient is $10\,\mathrm{rad}^{-1}$ and weight
 is 2.0. The bounds are computed from full limits so existing soft limits are
 not shrunk twice. Target clamping remains a separate simulator safety step.
 
-### Leg-permutation symmetry (disabled by zero weight)
+### Leg-permutation symmetry
 
-The function is retained for reference and optional explicit re-enabling. With
-the current weight of 0.0, the reward manager skips its evaluation and it does
-not enter the penalty sum $B$.
+The current weight is 0.1 for both robots. The weighted penalty
+$0.1[\exp(-5\overline E)-1]$ enters the penalty sum $B$ and is bounded by
+$[-0.1,0]$ before timestep scaling.
 
 Map the measured joint angles into logical coordinates:
 
@@ -371,19 +416,19 @@ $$
 {\max\!\left(1,\sum_{(a,b)\in\mathcal P}I_{ab}\right)}.
 $$
 
-If evaluated directly, the raw penalty is zero when no pair is synchronous.
+The raw penalty is zero when no pair is synchronous.
 It uses measured joint angles without subtracting the default pose. Changing
 `--no-trs` does not change the environment reward's weight.
 
 ## Disabled terms
 
-`smoothness`, `leg_permutation_symmetry`, `alive_bonus`, and `termination_penalty`
+`smoothness`, `alive_bonus`, and `termination_penalty`
 are retained in the configuration with weight 0.0 and skipped during reward
-computation. To restore either previous penalty explicitly, pass its override
-when launching training:
+computation. To restore the previous torque-smoothness penalty explicitly,
+pass `env.rewards.smoothness.weight=0.1` when launching training.
 
-- Torque smoothness: `env.rewards.smoothness.weight=0.1`.
-- Leg-permutation symmetry: `env.rewards.leg_permutation_symmetry.weight=0.2`.
+To disable the active leg-permutation symmetry penalty, pass
+`env.rewards.leg_permutation_symmetry.weight=0.0`.
 
 The following terms are set to `None`: `feet_air_time`, `flat_orientation_l2`,
 `dof_pos_limits`, `undesired_contacts`, `cmd`, `track_lin_vel_x_exp`,

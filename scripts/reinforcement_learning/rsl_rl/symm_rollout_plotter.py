@@ -205,6 +205,7 @@ class SymmetricRolloutPlotter:
             "foot_heights": [],
             "foot_clearance_targets": [],
             "foot_clearance_shortfalls": [],
+            "foot_clearance_height_errors": [],
             "foot_clearance_swing_weights": [],
             "foot_clearance_penalty": [],
             "foot_clearance_reward": [],
@@ -487,6 +488,7 @@ class SymmetricRolloutPlotter:
         self._data["foot_heights"].append(foot_clearance_component("foot_height"))
         self._data["foot_clearance_targets"].append(foot_clearance_component("target_height"))
         self._data["foot_clearance_shortfalls"].append(foot_clearance_component("shortfall"))
+        self._data["foot_clearance_height_errors"].append(foot_clearance_component("height_error"))
         self._data["foot_clearance_swing_weights"].append(foot_clearance_component("swing_weight"))
         self._data["foot_clearance_penalty"].append(foot_clearance_component("penalty", per_foot=False))
         self._data["foot_clearance_reward"].append(foot_clearance_component("reward", per_foot=False))

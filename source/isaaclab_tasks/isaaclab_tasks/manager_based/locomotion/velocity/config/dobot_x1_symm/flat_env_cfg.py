@@ -218,6 +218,7 @@ class DobotX1SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_sensor_names=_DOBOT_X1_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_DOBOT_X1_FOOT_LINK_ORDER,
             logical_joint_signs=dobot_mdp.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS,
+            base_height_target=0.40,
         )
 
     def _configure_dobot_x1_symm_terminations(self) -> None:

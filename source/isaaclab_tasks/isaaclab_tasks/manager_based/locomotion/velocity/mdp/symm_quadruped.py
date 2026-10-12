@@ -1601,30 +1601,38 @@ def foot_clearance_penalty(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     min_command_yaw_rate: float = 0.1,
     use_command_gate: bool = True,
+    foot_height_offset: float = 0.0,
+    use_absolute_error: bool = False,
 ) -> torch.Tensor:
-    """Penalize feet below a ground-relative swing-height trajectory.
+    """Penalize height errors relative to a ground-relative swing trajectory.
 
     The optional command gate uses the maximum of independently normalized planar speed and absolute yaw rate,
     clipped to ``[0, 1]``. When disabled, only the swing-phase gate scales the penalty,
-    including for zero velocity commands and stationary feet.
+    including for zero velocity commands and stationary feet. The trajectory starts and ends at the
+    resting foot offset and peaks at ``min_height``. By default, only shortfall is penalized;
+    ``use_absolute_error=True`` also penalizes heights above the trajectory.
 
     Args:
         env: The environment instance.
         command_name: Name of the gait velocity command term.
         feet_cfg: Foot body configuration in FL, FR, RL, and RR order.
         min_height: Peak commanded foot-link height above flat ground [m].
-        height_scale: Clearance-shortfall shaping scale [m].
+        height_scale: Height-error shaping scale [m].
         min_command_speed: Planar command magnitude that fully enables the penalty [m/s].
         asset_cfg: Robot articulation configuration.
         min_command_yaw_rate: Absolute yaw command that fully enables the penalty [rad/s].
         use_command_gate: Whether commanded velocity scales the swing penalty.
             The command thresholds are unused when this is false.
+        foot_height_offset: Resting foot-link origin height above flat ground [m].
+        use_absolute_error: Whether to penalize both shortfall and excess height.
 
     Returns:
         The negative bounded swing-clearance penalty.
     """
     if min_height < 0.0:
         raise ValueError(f"Foot-clearance peak height must be non-negative, received {min_height}.")
+    if not 0.0 <= foot_height_offset <= min_height:
+        raise ValueError(f"Foot-height offset must be between zero and the peak height, received {foot_height_offset}.")
     if height_scale <= 0.0:
         raise ValueError(f"Foot-clearance height scale must be positive, received {height_scale}.")
     if use_command_gate and min_command_speed <= 0.0:
@@ -1638,10 +1646,12 @@ def foot_clearance_penalty(
     foot_height = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2] - env.scene.env_origins[:, 2:3]
     swing_ratio = (1.0 - gait_command.duty_factors).unsqueeze(-1).clamp_min(1.0e-6)
     swing_subphase = (gait_command.foot_phases() / swing_ratio).clamp(0.0, 1.0)
-    target_height = min_height * torch.sin(torch.pi * swing_subphase)
+    target_height = foot_height_offset + (min_height - foot_height_offset) * torch.sin(torch.pi * swing_subphase)
     swing_weight = _smooth_swing_indicator(gait_command.foot_phases(), gait_command.duty_factors, gait_command.kappa)
-    shortfall = torch.relu(target_height - foot_height)
-    clearance_penalty = -torch.expm1(-shortfall / height_scale)
+    height_difference = target_height - foot_height
+    shortfall = torch.relu(height_difference)
+    height_error = height_difference.abs() if use_absolute_error else shortfall
+    clearance_penalty = -torch.expm1(-height_error / height_scale)
 
     active_weight = swing_weight
     if use_command_gate:
@@ -1658,10 +1668,12 @@ def foot_clearance_penalty(
         "foot_height": foot_height.detach(),
         "target_height": target_height.detach(),
         "shortfall": shortfall.detach(),
+        "height_error": height_error.detach(),
         "swing_weight": active_weight.detach(),
         "mean_swing_height": ((foot_height * active_weight).sum(dim=-1) / active_weight_sum).detach(),
         "mean_target_height": ((target_height * active_weight).sum(dim=-1) / active_weight_sum).detach(),
         "mean_shortfall": ((shortfall * active_weight).sum(dim=-1) / active_weight_sum).detach(),
+        "mean_height_error": ((height_error * active_weight).sum(dim=-1) / active_weight_sum).detach(),
         "penalty": penalty.detach(),
     }
     return penalty

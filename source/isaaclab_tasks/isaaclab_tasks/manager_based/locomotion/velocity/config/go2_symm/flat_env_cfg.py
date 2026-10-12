@@ -118,16 +118,16 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
                 joint_names_expr=[".*_thigh_joint"],
                 effort_limit=23.7,
                 velocity_limit=30.1,
-                stiffness=30.0,
-                damping=0.65,
+                stiffness=25.0,
+                damping=0.6,
                 friction=0.0,
             ),
             "calf_legs": IdealPDActuatorCfg(
                 joint_names_expr=[".*_calf_joint"],
                 effort_limit=35.55,
                 velocity_limit=20.07,
-                stiffness=30.0,
-                damping=0.65,
+                stiffness=25.0,
+                damping=0.6,
                 friction=0.0,
             ),
         }
@@ -138,6 +138,9 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
         self.commands.base_velocity = make_gait_velocity_command(
             go2_symm_mdp,
             base_height_range=(0.35, 0.45),
+            lin_vel_x_range=(-3.0, 3.0),
+            ang_vel_z_range=(-2.0, 2.0),
+            curriculum_tracking_lin_vel_threshold=0.85,
             curriculum_tracking_ang_vel_threshold=0.7,
         )
 
@@ -178,7 +181,7 @@ class UnitreeGo2SymmFlatEnvCfg(UnitreeGo2FlatEnvCfg):
             foot_body_names=_GO2_FOOT_BODY_NAMES,
             foot_sensor_names=_GO2_FOOT_SENSOR_NAMES,
             foot_sensor_body_names=_GO2_FOOT_BODY_NAMES,
-            base_height_target=0.30,
+            base_height_target=0.35,
             foot_clearance_height=0.06,
             foot_height_offset=0.022,
         )

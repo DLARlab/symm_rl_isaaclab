@@ -286,7 +286,7 @@ def configure_rewards(
         base_height_target: Target base height [m].
         foot_clearance_height: Clearance above the resting foot offset [m] for swing-trajectory and
             speed-tracking modes; peak foot-link height [m] in legacy phase-penalty mode.
-        foot_clearance_height_scale: Clearance shortfall scale [m] for trajectory and legacy modes.
+        foot_clearance_height_scale: Height-error scale [m] for trajectory and legacy modes.
         foot_clearance_mode: Foot-clearance reward formulation.
         foot_clearance_weight: Foot-clearance reward coefficient.
         foot_height_offset: Resting foot-link origin height above ground [m].
@@ -349,7 +349,7 @@ def configure_rewards(
     env_cfg.rewards.foot_periodicity = None
     env_cfg.rewards.foot_periodicity_force = RewTerm(
         func=mdp_module.foot_periodicity_force_exp_penalty,
-        weight=0.10,
+        weight=0.30,
         params={
             "command_name": "base_velocity",
             "foot_sensor_names": tuple(foot_sensor_names),
@@ -359,7 +359,7 @@ def configure_rewards(
     )
     env_cfg.rewards.foot_periodicity_velocity = RewTerm(
         func=mdp_module.foot_periodicity_velocity_exp_penalty,
-        weight=0.10,
+        weight=0.30,
         params={"command_name": "base_velocity", "feet_cfg": feet_cfg, "scale": 2.0},
     )
     env_cfg.rewards.base_height = RewTerm(
@@ -375,6 +375,8 @@ def configure_rewards(
             "min_height": foot_clearance_height + foot_height_offset,
             "height_scale": foot_clearance_height_scale,
             "use_command_gate": False,
+            "foot_height_offset": foot_height_offset,
+            "use_absolute_error": True,
         }
     elif foot_clearance_mode == "speed_tracking_reward":
         foot_clearance_func = mdp_module.foot_clearance_speed_exp
@@ -435,7 +437,7 @@ def configure_rewards(
     env_cfg.rewards.straight_line_motion = None
     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
         func=mdp_module.leg_permutation_symmetry_penalty,
-        weight=0.0,
+        weight=0.1,
         params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
     )
     if logical_joint_signs is not None:

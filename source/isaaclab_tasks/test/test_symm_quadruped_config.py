@@ -221,9 +221,9 @@ def test_configured_periodicity_penalties_are_zero_at_zero_error_and_bounded_tog
     speed_reward = speed.weight * speed.func(
         env, "base_velocity", SimpleNamespace(body_ids=[0, 1, 2, 3]), scale=speed.params["scale"]
     )
-    assert force_reward.tolist() == pytest.approx([0.0, -0.2])
-    assert speed_reward.tolist() == pytest.approx([0.0, -0.2])
-    assert (force_reward + speed_reward).tolist() == pytest.approx([0.0, -0.4])
+    assert force_reward.tolist() == pytest.approx([0.0, -0.6])
+    assert speed_reward.tolist() == pytest.approx([0.0, -0.6])
+    assert (force_reward + speed_reward).tolist() == pytest.approx([0.0, -1.2])
 
 
 def test_positive_base_height_reward_uses_squared_ground_relative_error():
@@ -280,7 +280,9 @@ def test_speed_weighted_clearance_tracks_both_sides_without_a_phase_or_command_g
     "cfg_cls, peak_height, foot_offset",
     [(UnitreeGo2SymmFlatEnvCfg, 0.082, 0.022), (DobotX1SymmFlatEnvCfg, 0.1075, 0.0275)],
 )
-def test_configured_clearance_uses_swing_trajectory_without_command_or_speed_gate(cfg_cls, peak_height, foot_offset):
+def test_configured_clearance_tracks_both_sides_of_offset_trajectory_without_command_or_speed_gate(
+    cfg_cls, peak_height, foot_offset
+):
     term = cfg_cls().rewards.foot_clearance
     term.params["feet_cfg"].body_ids = [0, 1, 2, 3]
     scene = _Scene()
@@ -293,7 +295,7 @@ def test_configured_clearance_uses_swing_trajectory_without_command_or_speed_gat
                 peak_height - 0.025,
                 peak_height - 0.025,
                 peak_height,
-                peak_height + 0.02,
+                peak_height + 0.025,
                 foot_offset,
                 foot_offset,
                 foot_offset,
@@ -319,16 +321,22 @@ def test_configured_clearance_uses_swing_trajectory_without_command_or_speed_gat
     reward = term.weight * term.func(env, **term.params)
     expected_mid_swing = 0.1 * 4.0 * math.expm1(-1.0) / (1.0 + math.exp(-4.0))
     assert reward[:2].tolist() == pytest.approx([expected_mid_swing] * 2, rel=1e-5)
-    torch.testing.assert_close(reward[2:6], torch.zeros(4))
+    assert reward[3].item() == pytest.approx(expected_mid_swing, rel=1e-5)
+    torch.testing.assert_close(reward[[2, 4, 5]], torch.zeros(3))
     diagnostics = env._foot_clearance_diagnostics
     torch.testing.assert_close(diagnostics["target_height"][0], torch.full((4,), peak_height))
     torch.testing.assert_close(
         diagnostics["target_height"][6],
-        torch.tensor([0.0, peak_height / math.sqrt(2.0), peak_height, 0.0]),
+        torch.tensor(
+            [foot_offset, foot_offset + (peak_height - foot_offset) / math.sqrt(2.0), peak_height, foot_offset]
+        ),
         atol=1e-7,
         rtol=1e-5,
     )
     assert diagnostics["shortfall"][6, 2].item() == pytest.approx(peak_height - foot_offset)
+    torch.testing.assert_close(diagnostics["height_error"][[0, 3]], torch.full((2, 4), 0.025))
+    torch.testing.assert_close(diagnostics["shortfall"][3], torch.zeros(4))
+    assert diagnostics["mean_height_error"][3].item() == pytest.approx(0.025)
     torch.testing.assert_close(diagnostics["penalty"] * term.weight, reward)
 
 
@@ -816,6 +824,7 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
         "mean_swing_height": torch.tensor([0.04, 0.05, 0.06]),
         "mean_target_height": torch.tensor([0.08, 0.08, 0.08]),
         "mean_shortfall": torch.tensor([0.04, 0.03, 0.02]),
+        "mean_height_error": torch.tensor([0.05, 0.04, 0.03]),
         "penalty": torch.tensor([-1.0, -0.5, 0.0]),
     }
     actions = torch.tensor([[1.0, -1.0], [0.5, -0.5], [0.0, 0.0]])
@@ -835,6 +844,7 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
     assert diagnostics["Diagnostics/foot_clearance_mean_swing_height"].item() == pytest.approx(0.05)
     assert diagnostics["Diagnostics/foot_clearance_mean_height"].item() == pytest.approx(0.05)
     assert diagnostics["Diagnostics/foot_clearance_mean_shortfall"].item() == pytest.approx(0.03)
+    assert diagnostics["Diagnostics/foot_clearance_mean_height_error"].item() == pytest.approx(0.04)
     assert torch.equal(env._last_policy_actions, actions)
     assert torch.equal(env._last_joint_position_targets, joint_target)
     assert torch.equal(env._last_joint_velocities, torch.zeros_like(joint_pos))
@@ -1259,10 +1269,10 @@ def test_rewards_disable_straight_line_motion_and_configure_exponential_penaltie
 
     assert env_cfg.rewards.foot_periodicity is None
     assert env_cfg.rewards.foot_periodicity_force.func is symm_quadruped.foot_periodicity_force_exp_penalty
-    assert env_cfg.rewards.foot_periodicity_force.weight == 0.10
+    assert env_cfg.rewards.foot_periodicity_force.weight == 0.30
     assert env_cfg.rewards.foot_periodicity_force.params["scale"] == 0.05
     assert env_cfg.rewards.foot_periodicity_velocity.func is symm_quadruped.foot_periodicity_velocity_exp_penalty
-    assert env_cfg.rewards.foot_periodicity_velocity.weight == 0.10
+    assert env_cfg.rewards.foot_periodicity_velocity.weight == 0.30
     assert env_cfg.rewards.foot_periodicity_velocity.params["scale"] == 2.0
     assert env_cfg.rewards.base_height.func is symm_quadruped.base_height_exp
     assert env_cfg.rewards.base_height.weight == 0.15
@@ -1285,7 +1295,7 @@ def test_rewards_disable_straight_line_motion_and_configure_exponential_penaltie
     assert env_cfg.rewards.joint_target_limits.params["limit_fraction"] == 0.9
     assert env_cfg.rewards.joint_target_limits.params["scale"] == 10.0
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.0
+    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.1
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert env_cfg.rewards.smoothness.weight == 0.0
     assert env_cfg.rewards.action_rate_l2.func is symm_quadruped.action_rate_l2_exp_penalty
@@ -1296,6 +1306,8 @@ def test_rewards_disable_straight_line_motion_and_configure_exponential_penaltie
     assert env_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.1075)
     assert env_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
     assert env_cfg.rewards.foot_clearance.params["use_command_gate"] is False
+    assert env_cfg.rewards.foot_clearance.params["use_absolute_error"] is True
+    assert env_cfg.rewards.foot_clearance.params["foot_height_offset"] == pytest.approx(0.0275)
 
 
 def test_rewards_use_combined_xy_tracking_and_standard_yaw_and_roll_pitch_terms():
@@ -1393,21 +1405,24 @@ def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1
     go2_cfg = go2_cfg_cls()
 
     assert x1_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.0
+    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.1
     assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert x1_cfg.rewards.track_ang_vel_z_exp.params["std"] == 0.25
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
     assert x1_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.1075)
     assert x1_cfg.rewards.foot_clearance.params["height_scale"] == 0.025
     assert x1_cfg.rewards.foot_clearance.params["use_command_gate"] is False
+    assert x1_cfg.rewards.foot_clearance.params["use_absolute_error"] is True
+    assert x1_cfg.rewards.foot_clearance.params["foot_height_offset"] == pytest.approx(0.0275)
     assert x1_cfg.rewards.foot_clearance.weight == 0.10
-    assert go2_cfg.rewards.base_height.params["target_height"] == 0.30
-    assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
+    assert go2_cfg.rewards.base_height.params["target_height"] == 0.35
+    assert x1_cfg.rewards.base_height.params["target_height"] == 0.40
     assert go2_cfg.rewards.foot_clearance.params["min_height"] == pytest.approx(0.082)
+    assert go2_cfg.rewards.foot_clearance.params["foot_height_offset"] == pytest.approx(0.022)
 
     # Only robot bindings and the explicitly configured height targets may differ.
     robot_binding_params = {"feet_cfg", "joint_cfg", "asset_cfg", "foot_sensor_body_names", "logical_joint_signs"}
-    robot_target_params = {"base_height": {"target_height"}, "foot_clearance": {"min_height"}}
+    robot_target_params = {"base_height": {"target_height"}, "foot_clearance": {"min_height", "foot_height_offset"}}
     assert vars(go2_cfg.rewards).keys() == vars(x1_cfg.rewards).keys()
     for name, x1_term in vars(x1_cfg.rewards).items():
         go2_term = getattr(go2_cfg.rewards, name)
@@ -1469,7 +1484,7 @@ def test_robot_configs_use_requested_height_ranges_and_orientation_terminations(
     assert x1_cfg.terminations.base_orientation.params["max_pitch"] == 0.70
 
     assert x1_cfg.commands.base_velocity.base_height_range == (0.45, 0.60)
-    assert x1_cfg.rewards.base_height.params["target_height"] == 0.35
+    assert x1_cfg.rewards.base_height.params["target_height"] == 0.40
     assert x1_cfg.scene.robot.init_state.pos == (0.0, 0.0, 0.5)
     default_joint_pos = x1_cfg.scene.robot.init_state.joint_pos
     assert default_joint_pos["joint_front_left_abad"] == 0.0
@@ -1523,10 +1538,12 @@ def test_robot_configs_use_uniform_21_by_1_by_21_command_bins():
     assert x1_command_cfg.ranges.ang_vel_z == (-2.0, 2.0)
     assert x1_command_cfg.curriculum_tracking_lin_vel_threshold == 0.85
     assert x1_command_cfg.curriculum_tracking_ang_vel_threshold == 0.7
-    assert go2_command_cfg.ranges.lin_vel_x == (-4.0, 4.0)
-    assert go2_command_cfg.ranges.ang_vel_z == (-4.0, 4.0)
-    assert go2_command_cfg.curriculum_tracking_lin_vel_threshold == 0.9
+    assert go2_command_cfg.ranges.lin_vel_x == (-3.0, 3.0)
+    assert go2_command_cfg.ranges.ang_vel_z == (-2.0, 2.0)
+    assert go2_command_cfg.curriculum_tracking_lin_vel_threshold == 0.85
     assert go2_command_cfg.curriculum_tracking_ang_vel_threshold == 0.7
+    assert go2_command_cfg.curriculum.to_dict() == x1_command_cfg.curriculum.to_dict()
+    assert go2_command_cfg.ranges.to_dict() == x1_command_cfg.ranges.to_dict()
 
 
 def test_x1_play_config_uses_exact_nominal_joint_posture():

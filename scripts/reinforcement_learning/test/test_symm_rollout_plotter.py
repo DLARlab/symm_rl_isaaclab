@@ -114,6 +114,7 @@ def _make_env():
             "foot_height": torch.tensor([[0.03, 0.05, 0.07, 0.09]]),
             "target_height": torch.tensor([[0.08, 0.08, 0.08, 0.08]]),
             "shortfall": torch.tensor([[0.05, 0.03, 0.01, 0.0]]),
+            "height_error": torch.tensor([[0.05, 0.03, 0.01, 0.01]]),
             "swing_weight": torch.tensor([[1.0, 1.0, 0.5, 0.0]]),
             "penalty": torch.tensor([-1.2]),
         },
@@ -153,6 +154,7 @@ def test_plotter_records_symmetric_rollout_signals(tmp_path):
     assert plotter._data["forward_score"][0] == pytest.approx(0.8)
     assert plotter._data["foot_heights"][0].tolist() == pytest.approx([0.03, 0.05, 0.07, 0.09])
     assert plotter._data["foot_clearance_targets"][0].tolist() == pytest.approx([0.08] * 4)
+    assert plotter._data["foot_clearance_height_errors"][0].tolist() == pytest.approx([0.05, 0.03, 0.01, 0.01])
 
 
 @pytest.mark.parametrize("split_rewards", [False, True])
@@ -320,6 +322,7 @@ def test_plotter_saves_isaacgym_compatible_outputs(tmp_path, capsys):
         assert data["forward_score"].shape == (2,)
         assert data["foot_heights"].shape == (2, 4)
         assert data["foot_clearance_targets"].shape == (2, 4)
+        assert data["foot_clearance_height_errors"][0].tolist() == pytest.approx([0.05, 0.03, 0.01, 0.01])
         assert data["foot_clearance_penalty"].shape == (2,)
 
 
