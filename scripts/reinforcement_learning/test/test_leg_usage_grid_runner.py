@@ -33,6 +33,7 @@ def _load_grid_helpers() -> SimpleNamespace:
         "_utc_timestamp",
         "_canonical_leg_usage_method_version",
         "_validate_leg_usage_gait_library",
+        "_validate_trained_leg_usage_gaits",
         "_validate_immutable_leg_usage_protocol",
         "_load_leg_usage_plan",
         "_validate_leg_usage_task",
@@ -103,10 +104,12 @@ def _load_grid_helpers() -> SimpleNamespace:
         "_LEG_USAGE_PROTOCOL_VERSION": "leg_usage_grid_v1",
         "_LEG_USAGE_FULL_PROTOCOL_VERSION": "leg_usage_grid_full_v3",
         "_LEG_USAGE_LIGHT_PROTOCOL_VERSION": "leg_usage_grid_light_v2",
+        "_LEG_USAGE_TRAINED_PROTOCOL_VERSION": "leg_usage_grid_trained_v1",
         "_LEG_USAGE_PROTOCOL_VERSIONS": {
             "leg_usage_grid_v1",
             "leg_usage_grid_full_v3",
             "leg_usage_grid_light_v2",
+            "leg_usage_grid_trained_v1",
         },
     }
     exec(compile(ast.Module(body=helper_nodes, type_ignores=[]), str(module_path), "exec"), namespace)
@@ -283,6 +286,31 @@ def test_current_full_protocol_rejects_sparse_cell_inventory(tmp_path):
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
 
     with pytest.raises(ValueError, match="all ten canonical gait rows"):
+        helpers._load_leg_usage_plan(str(plan_path))
+
+
+def test_trained_protocol_validates_rows_against_saved_configuration(tmp_path):
+    helpers = _load_grid_helpers()
+
+    checkpoint = tmp_path / "model_1499.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    params = tmp_path / "params"
+    params.mkdir()
+    (params / "env.yaml").write_text(
+        "commands:\n  base_velocity:\n    init_foot_thetas: [[-0.13,0.13,0.63,0.37]]\n", encoding="utf-8"
+    )
+    plan_path = _write_sparse_plan(tmp_path / "trained")
+    plan = json.loads(plan_path.read_text())
+    plan.update(method_version="leg_usage_grid_trained_v1", protocol="trained", checkpoint={"path": str(checkpoint)})
+    plan["gaits"] = plan["gaits"][:1]
+    plan["cells"] = [cell for cell in plan["cells"] if cell["gait_index"] == 6]
+    plan_path.write_text(json.dumps(plan))
+    loaded, _, _ = helpers._load_leg_usage_plan(str(plan_path))
+    assert [gait["index"] for gait in loaded["gaits"]] == [6]
+    (params / "env.yaml").write_text(
+        "commands:\n  base_velocity:\n    init_foot_thetas: [[0.0,0.0,0.5,0.5]]\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="not present.*training"):
         helpers._load_leg_usage_plan(str(plan_path))
 
 

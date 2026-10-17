@@ -407,10 +407,13 @@ _LEG_USAGE_FULL_PROTOCOL_VERSION = "leg_usage_grid_full_v3"
 
 _LEG_USAGE_LIGHT_PROTOCOL_VERSION = "leg_usage_grid_light_v2"
 
+_LEG_USAGE_TRAINED_PROTOCOL_VERSION = "leg_usage_grid_trained_v1"
+
 _LEG_USAGE_PROTOCOL_VERSIONS = {
     _LEG_USAGE_PROTOCOL_VERSION,
     _LEG_USAGE_FULL_PROTOCOL_VERSION,
     _LEG_USAGE_LIGHT_PROTOCOL_VERSION,
+    _LEG_USAGE_TRAINED_PROTOCOL_VERSION,
 }
 
 
@@ -497,6 +500,25 @@ def _validate_leg_usage_gait_library(plan: dict[str, Any]) -> None:
             )
 
 
+def _validate_trained_leg_usage_gaits(plan: dict[str, Any]) -> None:
+    """Reject trained-profile gait rows absent from the checkpoint's saved configuration."""
+    if _canonical_leg_usage_method_version(plan) != _LEG_USAGE_TRAINED_PROTOCOL_VERSION:
+        return
+    from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped._training_gaits import (
+        _read_training_config,
+        _trained_foot_thetas,
+    )
+
+    checkpoint = Path(plan["checkpoint"]["path"])
+    trained_rows = _trained_foot_thetas(_read_training_config(checkpoint))
+    for gait in plan["gaits"]:
+        if not any(
+            np.allclose((np.asarray(row) - gait["phases"] + 0.5) % 1.0 - 0.5, 0.0, rtol=0.0, atol=1.0e-6)
+            for row in trained_rows
+        ):
+            raise ValueError(f"Evaluation gait {gait['name']!r} was not present in the checkpoint's training.")
+
+
 def _validate_immutable_leg_usage_protocol(
     plan: dict[str, Any],
     *,
@@ -558,7 +580,10 @@ def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
     if method_version not in _LEG_USAGE_PROTOCOL_VERSIONS:
         raise ValueError(f"Unsupported leg-usage method_version: {method_version!r}.")
     protocol = str(plan.get("protocol", "full"))
-    expected_protocol = "light" if method_version == _LEG_USAGE_LIGHT_PROTOCOL_VERSION else "full"
+    expected_protocol = {
+        _LEG_USAGE_LIGHT_PROTOCOL_VERSION: "light",
+        _LEG_USAGE_TRAINED_PROTOCOL_VERSION: "trained",
+    }.get(method_version, "full")
     if protocol != expected_protocol:
         raise ValueError(
             f"Leg-usage protocol/method identity mismatch: protocol={protocol!r}, method={method_version!r}."
@@ -631,6 +656,7 @@ def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
             raise ValueError(f"Leg-usage cells must use unique output directories: {cell['relative_output_dir']!r}.")
         cell_output_dirs.add(cell_output_dir)
     _validate_leg_usage_gait_library(plan)
+    _validate_trained_leg_usage_gaits(plan)
     _validate_immutable_leg_usage_protocol(
         plan,
         method_version=method_version,
@@ -1372,6 +1398,7 @@ def _run_leg_usage_grid(
     capture_critic_values = protocol_version in {
         _LEG_USAGE_FULL_PROTOCOL_VERSION,
         _LEG_USAGE_LIGHT_PROTOCOL_VERSION,
+        _LEG_USAGE_TRAINED_PROTOCOL_VERSION,
     }
     render_cell_plots = bool(plan.get("render_cell_plots", False))
     resume_enabled = bool(plan.get("resume", True))

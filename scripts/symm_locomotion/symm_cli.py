@@ -23,7 +23,7 @@ CONDA_ENV = "symm_rl_isaaclab"
 DEFAULT_NUM_ENVS = 256
 DEFAULT_MIRROR_LOSS_COEFF = 0.1
 DEFAULT_TR_VALUE_COEFF = 0.05
-DEFAULT_TR_WARMUP_ITERATIONS = 500
+DEFAULT_TR_WARMUP_ITERATIONS = 0
 DEFAULT_TR_MIN_ABS_CMD_VEL = 0.0
 DEFAULT_VIDEO_DURATION_S = 30.0
 DEFAULT_WINDOWS_KIT_ARGS = "--/app/vulkan=false --/rtx/hydra/mdlMaterialWarmup=false"
@@ -35,6 +35,13 @@ DIFF_CMDS_GAITS = {
     "half-bound-right": (-0.13, 0.13, 0.5, 0.5),
     "rotary-gallop": (-0.13, 0.13, 0.63, 0.37),
     "transverse-gallop": (0.13, -0.13, 0.63, 0.37),
+}
+TRAIN_GAIT_GROUPS = {
+    "trot": (DIFF_CMDS_GAITS["trot"],),
+    "bound": (DIFF_CMDS_GAITS["bound"],),
+    "halfbound": (DIFF_CMDS_GAITS["half-bound-left"], DIFF_CMDS_GAITS["half-bound-right"]),
+    "rotarygallop": (DIFF_CMDS_GAITS["rotary-gallop"], (0.13, -0.13, 0.37, 0.63)),
+    "traversegallop": (DIFF_CMDS_GAITS["transverse-gallop"], (-0.13, 0.13, 0.37, 0.63)),
 }
 
 
@@ -65,6 +72,14 @@ ROBOT_SPECS = {
         train_task="Isaac-Velocity-Flat-Dobot-X1-Symm-v0",
         play_task="Isaac-Velocity-Flat-Dobot-X1-Symm-Play-v0",
         experiment_name="dobot_x1_symm_flat",
+        step_dt=0.02,
+    ),
+    "x1_go2bend": RobotSpec(
+        key="x1_go2bend",
+        label="Dobot X1 (Go2 bend)",
+        train_task="Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-v0",
+        play_task="Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-Play-v0",
+        experiment_name="dobot_x1_go2bend_symm_flat",
         step_dt=0.02,
     ),
 }
@@ -303,6 +318,12 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
 def add_train_args(parser: argparse.ArgumentParser) -> None:
     """Add train command options."""
     add_common_args(parser)
+    parser.add_argument(
+        "--gait",
+        choices=("all", *TRAIN_GAIT_GROUPS),
+        default="all",
+        help="Gait templates to sample: all eight, one trot/bound, or both variants of a selected family.",
+    )
     parser.add_argument("--num-envs", "--num_envs", type=int, default=DEFAULT_NUM_ENVS)
     parser.add_argument("--iterations", "--max-iterations", "--max_iterations", type=int, default=30000)
     parser.add_argument("--run-name", "--run_name", default=None)
@@ -356,6 +377,8 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
             + ("trs_smoke_" if args.smoke else "with_trs_")
             + f"mirror{coeff_label(args.mirror_loss_coeff)}"
         )
+    if not args.disable_symmetry:
+        run_name += f"_valuecoef{args.tr_value_coeff:g}_actorcoef{args.mirror_loss_coeff:g}"
 
     command = [
         "train",
@@ -372,6 +395,10 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
     ]
     if args.seed is not None:
         command += ["--seed", str(args.seed)]
+    gait = getattr(args, "gait", "all")
+    if gait != "all":
+        templates = json.dumps(TRAIN_GAIT_GROUPS[gait], separators=(",", ":"))
+        command.append(f"env.commands.base_velocity.init_foot_thetas={templates}")
     if args.disable_symmetry:
         command += [
             "agent.algorithm.symmetry_cfg.use_data_augmentation=False",
@@ -874,12 +901,12 @@ def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(_protocol_explicit=False)
     parser.add_argument(
         "--protocol",
-        choices=("full", "light", "legacy"),
+        choices=("full", "light", "trained", "legacy"),
         default="full",
         action=_StoreExplicitAction,
         help=(
             "Evaluation profile (default: immutable full 60-cell grid; light: immutable 8-cell screen; "
-            "legacy: deprecated custom v1 grid)."
+            "trained: saved training gaits with current metrics; legacy: deprecated custom v1 grid)."
         ),
     )
     parser.add_argument(
@@ -942,6 +969,124 @@ def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="Optional JSON file containing nested contact, gait, tracking, load, or success overrides.",
     )
+
+
+def add_trained_evaluation_args(parser: argparse.ArgumentParser) -> None:
+    """Add combined video recording and statistics options restricted to trained gaits."""
+    add_evaluation_args(parser)
+    parser.set_defaults(protocol="trained", velocities=[-1.0, 1.0])
+    parser.add_argument("--gait", choices=("all", *TRAIN_GAIT_GROUPS), default="all")
+    parser.add_argument("--mode", choices=("both", "video", "metrics"), default="both")
+    parser.add_argument("--tracking_speed", "--tracking-speed", type=float, default=1.0, help="Video x speed [m/s].")
+    parser.add_argument(
+        "--tracking_lateral_speed", "--tracking-lateral-speed", type=float, default=0.5, help="Video y speed [m/s]."
+    )
+    parser.add_argument(
+        "--tracking_yaw_rate", "--tracking-yaw-rate", type=float, default=0.6, help="Video yaw rate [rad/s]."
+    )
+    parser.add_argument(
+        "--video_length", "--video-length", type=int, default=1500, help="Video length in control steps."
+    )
+    parser.add_argument("--gif", action=argparse.BooleanOptionalAction, default=True)
+
+
+def run_trained_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
+    """Record trained-gait videos/data and run their fixed-command statistical evaluation."""
+    if extra:
+        raise ValueError(
+            "Trained evaluation accepts named launcher options only; raw runtime overrides are not allowed."
+        )
+    if args.protocol != "trained":
+        raise ValueError("The merged launcher uses --protocol trained to exclude untrained gaits.")
+    if args.gait_indices != list(range(10)):
+        raise ValueError("Use --gait to select trained gait families in the merged launcher.")
+    if args.video_length < 1 or any(
+        not math.isfinite(value) or value <= 0.0
+        for value in (args.tracking_speed, args.tracking_lateral_speed, args.tracking_yaw_rate)
+    ):
+        raise ValueError("Video length and tracking command magnitudes must be positive.")
+    checkpoint = resolve_checkpoint(args).resolve()
+    analysis = _load_evaluation_module()
+    gaits = list(analysis.load_trained_gaits(checkpoint))
+    if args.gait != "all":
+        requested = TRAIN_GAIT_GROUPS[args.gait]
+        selected = [gait for gait in gaits if tuple(gait["phases"]) in requested]
+        if len(selected) != len(requested):
+            raise ValueError(
+                f"Gait selection {args.gait!r} includes templates not present in training for {checkpoint}."
+            )
+        gaits = selected
+    runtime_overrides = analysis.training_runtime_overrides(checkpoint)
+    args.checkpoint = str(checkpoint)
+    args.gait_indices = [int(gait["index"]) for gait in gaits]
+    print(f"{log_prefix(args)}trained gaits: {', '.join(str(gait['name']) for gait in gaits)}", flush=True)
+
+    # Validate the metrics plan before starting any expensive video rollouts.
+    if args.mode in ("both", "metrics") and not args.analyze_only:
+        analysis.build_study(
+            repo_root=repo_root(),
+            checkpoint=checkpoint,
+            robot=args.robot_spec.key,
+            task=args.robot_spec.play_task,
+            step_dt=args.robot_spec.step_dt,
+            protocol="trained",
+            gait_indices=args.gait_indices,
+            velocities_mps=args.velocities,
+            settle_s=args.settle_s,
+            measure_s=args.measure_s,
+            runtime_overrides=runtime_overrides,
+        )
+    if args.mode in ("both", "video") and not args.analyze_only:
+        for gait in gaits:
+            directory = (
+                checkpoint.parent
+                / "eval"
+                / (
+                    f"{checkpoint.stem}_{gait['name']}_x{args.tracking_speed:g}"
+                    f"_y{args.tracking_lateral_speed:g}_yaw{args.tracking_yaw_rate:g}"
+                )
+            )
+            record_args = [
+                "record",
+                "--robot",
+                args.robot_spec.key,
+                "--checkpoint",
+                str(checkpoint),
+                "--output_dir",
+                str(directory),
+                "--plots",
+                "--video_length",
+                str(args.video_length),
+                "--plot_duration",
+                str(args.video_length * args.robot_spec.step_dt),
+                "--tracking_speed",
+                str(args.tracking_speed),
+                "--tracking_lateral_speed",
+                str(args.tracking_lateral_speed),
+                "--tracking_yaw_rate",
+                str(args.tracking_yaw_rate),
+                "--conda-env",
+                args.conda_env,
+            ]
+            for enabled, flag in (
+                (args.dry_run, "--dry-run"),
+                (args.no_conda_run, "--no-conda-run"),
+                (args.use_conda_run, "--use-conda-run"),
+                (args.gif, "--gif"),
+            ):
+                if enabled:
+                    record_args.append(flag)
+            templates = json.dumps([gait["phases"]], separators=(",", ":"))
+            code = main(record_args + [f"env.commands.base_velocity.init_foot_thetas={templates}", *runtime_overrides])
+            if code != 0:
+                return code
+            if not args.dry_run and not (directory / "sim_data.npz").is_file():
+                raise FileNotFoundError(f"Recording produced no rollout data: {directory / 'sim_data.npz'}")
+    if args.mode in ("both", "metrics"):
+        return run_evaluation(args, runtime_overrides)
+    if args.analyze_only:
+        raise ValueError("--analyze_only requires --mode metrics or --mode both.")
+    return 0
 
 
 def evaluation_lab_args(
@@ -1112,6 +1257,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     evaluation_parser = subparsers.add_parser("evaluation", help="Evaluate a local policy.")
     add_evaluation_args(evaluation_parser)
+    trained_parser = subparsers.add_parser(
+        "evaluate-trained", help="Record and evaluate only checkpoint training gaits."
+    )
+    add_trained_evaluation_args(trained_parser)
     legacy_parser = subparsers.add_parser("analyze_leg_usage", help="Deprecated evaluation alias.")
     add_evaluation_args(legacy_parser)
     legacy_parser.set_defaults(protocol="legacy")
@@ -1158,6 +1307,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_evaluation(args, extra)
         if args.command == "evaluation":
             return run_evaluation(args, extra)
+        if args.command == "evaluate-trained":
+            return run_trained_evaluation(args, extra)
         if args.command == "train":
             return run_isaaclab(args, train_lab_args(args, extra))
         if args.command == "play":

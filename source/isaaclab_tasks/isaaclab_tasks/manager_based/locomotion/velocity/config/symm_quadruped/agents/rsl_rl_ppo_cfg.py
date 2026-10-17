@@ -19,7 +19,7 @@ def configure_symm_quadruped_ppo(
     value_loss_coeff: float,
     mirror_loss_coeff: float = 0.1,
     min_abs_command_velocity: float = 0.0,
-    warmup_iterations: int = 500,
+    warmup_iterations: int = 0,
 ) -> None:
     """Apply the shared symmetric quadruped PPO/TRS defaults to a runner config.
 

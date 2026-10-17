@@ -208,7 +208,9 @@ def test_time_reversal_pairs_require_rollout_longer_than_history():
         algorithm._time_reversal_pairs()
 
 
-def test_update_uses_temporally_aligned_time_reversal_pairs():
+@pytest.mark.parametrize("initial_padded_history", [False, True])
+@pytest.mark.parametrize("tr_value_coeff", [0.0, 0.05])
+def test_update_uses_temporally_aligned_time_reversal_pairs(initial_padded_history, tr_value_coeff):
     num_envs = 2
     num_steps = 24
     action_dim = 12
@@ -246,7 +248,7 @@ def test_update_uses_temporally_aligned_time_reversal_pairs():
             "mirror_loss_coeff": 0.1,
             "data_augmentation_func": go2_symm.compute_time_reversal_states,
             "use_time_reversal_regularization": True,
-            "value_loss_coeff": 0.05,
+            "value_loss_coeff": tr_value_coeff,
             "warmup_iterations": 0,
             "observation_frame_dim": FRAME_DIM,
             "command_observation_index": 3,
@@ -256,14 +258,39 @@ def test_update_uses_temporally_aligned_time_reversal_pairs():
     )
 
     dones = torch.zeros(num_envs, dtype=torch.bool)
-    for _ in range(num_steps):
+    for step in range(num_steps):
+        if initial_padded_history:
+            frames = observations["policy"].reshape(num_envs, 20, FRAME_DIM)
+            frames.fill_(1.0)
+            frames[:, : max(19 - step, 0)] = 0.0
         algorithm.act(observations)
         algorithm.process_env_step(observations, torch.ones(num_envs), dones, {})
     algorithm.compute_returns(observations)
 
-    losses = algorithm.update()
+    critic_parameters_before = [parameter.detach().clone() for parameter in critic.parameters()]
+    critic_forward_grad_modes = []
+    hook = critic.register_forward_hook(
+        lambda _module, _inputs, _output: critic_forward_grad_modes.append(torch.is_grad_enabled())
+    )
+    try:
+        losses = algorithm.update()
+    finally:
+        hook.remove()
+
+    expected_grad_modes = [True, True, False] if tr_value_coeff > 0.0 else [True]
+    assert critic_forward_grad_modes == expected_grad_modes * algorithm.num_mini_batches
+    assert any(not torch.equal(before, after) for before, after in zip(critic_parameters_before, critic.parameters()))
 
     assert torch.isfinite(torch.tensor(losses["symmetry"]))
     assert torch.isfinite(torch.tensor(losses["tr_value"]))
-    assert losses["trs/valid_pair_fraction"] == pytest.approx(1.0)
+    if tr_value_coeff == 0.0:
+        assert losses["tr_value"] == 0.0
+    if initial_padded_history:
+        assert losses["trs/valid_pair_fraction"] == 0.0
+        assert losses["symmetry"] == 0.0
+        assert losses["tr_value"] == 0.0
+    else:
+        assert losses["trs/valid_pair_fraction"] == pytest.approx(1.0)
+    assert torch.isfinite(torch.tensor(losses["surrogate"]))
+    assert torch.isfinite(torch.tensor(losses["value"]))
     assert storage.step == 0

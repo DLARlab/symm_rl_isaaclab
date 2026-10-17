@@ -60,8 +60,9 @@ METRIC_UNITS = {
 _FRONT_HIND_LEG_PERMUTATION = np.asarray((2, 3, 0, 1), dtype=np.int64)
 _ROBOT_JOINT_REFLECTION_SIGNS = {
     "go2": np.asarray((1.0, 1.0, 1.0), dtype=np.float64),
-    # X1 uses opposite sagittal joint coordinates for front and rear legs.
+    # Original X1 uses opposite front/rear bends; the Go2-bend variant uses matching bends.
     "x1": np.asarray((1.0, -1.0, -1.0), dtype=np.float64),
+    "x1_go2bend": np.asarray((1.0, 1.0, 1.0), dtype=np.float64),
 }
 _ROBOT_JOINT_NAMES = {
     "go2": tuple(f"{leg}_{role}_joint" for leg in ("FL", "FR", "RL", "RR") for role in ("hip", "thigh", "calf")),
@@ -80,6 +81,8 @@ _ROBOT_FOOT_BODY_NAMES = {
         "link_rear_right_foot",
     ),
 }
+_ROBOT_JOINT_NAMES["x1_go2bend"] = _ROBOT_JOINT_NAMES["x1"]
+_ROBOT_FOOT_BODY_NAMES["x1_go2bend"] = _ROBOT_FOOT_BODY_NAMES["x1"]
 _LEG_NAMES = ("Front Left", "Front Right", "Rear Left", "Rear Right")
 _MOTOR_ROLE_NAMES = ("Hip/Abad", "Thigh", "Calf")
 _VALUE_FIELDS = ("critic_values", "value_predictions", "critic_value_predictions")
@@ -89,7 +92,7 @@ _NORMALIZED_TARGET_FIELDS = (
 )
 _REQUESTED_TARGET_FIELDS = ("requested_joint_position_targets", "joint_position_targets_requested")
 _PAIR_WINDOW_FIELDS = ("step_dt", "settle_steps", "measure_steps")
-_PUBLICATION_METHODS = {"leg_usage_grid_full_v3", "leg_usage_grid_light_v2"}
+_PUBLICATION_METHODS = {"leg_usage_grid_full_v3", "leg_usage_grid_light_v2", "leg_usage_grid_trained_v1"}
 
 
 @dataclass(frozen=True)

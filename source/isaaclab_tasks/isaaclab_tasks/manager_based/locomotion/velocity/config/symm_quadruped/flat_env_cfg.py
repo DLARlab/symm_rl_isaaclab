@@ -442,7 +442,7 @@ def configure_rewards(
     )
     if logical_joint_signs is not None:
         env_cfg.rewards.leg_permutation_symmetry.params["logical_joint_signs"] = logical_joint_signs
-    env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.0)
+    env_cfg.rewards.smoothness = RewTerm(func=mdp_module.SmoothnessPenalty, weight=0.10)
 
 
 def configure_terminations(

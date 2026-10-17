@@ -201,6 +201,28 @@ running it. Extra Isaac Lab/Hydra overrides can be passed after `--`.
 
 ## Training
 
+Choose training gait templates with `--gait`: `all` (default, eight templates),
+`trot` (one), `bound` (one), `halfbound` (two), `rotarygallop` (two), or
+`traversegallop` (two transverse-gallop variants). Each selection samples
+uniformly within its templates and retains the configured phase noise and gait
+timing. This option works for Go2, X1, and `x1_go2bend`.
+For example, change `--gait all` to `--gait bound` in the root `train.sh`, or run:
+
+```bash
+bash scripts/symm_locomotion/train.sh --robot x1 --gait bound --iterations 10000 --num-envs 2048 --no-trs
+```
+
+Select `--robot x1_go2bend` for the X1 variant with all four legs using
+hip/abad 0, thigh 0.6983, and calf -1.2842 rad. It inherits the original X1
+configuration with negative rear-calf limits and matching front/rear logical
+joint signs. The original `--robot x1` retains its X-shaped default pose.
+The variant has its own log directory, `logs/rsl_rl/dobot_x1_go2bend_symm_flat/`,
+and supports recording and evaluation through the same `--robot` selector.
+
+```bash
+bash scripts/symm_locomotion/train.sh --robot x1_go2bend --iterations 10000 --num-envs 2048 --tr-policy-coef 0.1 --tr-value-coef 0
+```
+
 Good no-TRS baselines:
 
 ```powershell
@@ -214,6 +236,19 @@ TRS/mirror-loss runs:
 .\scripts\symm_locomotion\train.ps1 --robot go2 --iterations 30000 --mirror 0.1
 .\scripts\symm_locomotion\train.ps1 --robot x1 --iterations 30000 --mirror 0.1
 ```
+
+TRS run names append the value and actor coefficients as
+`_valuecoef<V>_actorcoef<A>`, including when `--run-name` is provided.
+For example, `--robot x1 --tr-policy-coef 0.1 --tr-value-coef 0` produces
+`<timestamp>_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1`.
+The same naming applies when launched through the root `train.sh`.
+Runs using `--no-trs` keep their existing naming.
+
+TRS loss warmup defaults to zero. Histories with initial zero padding and
+pairs crossing episode resets are masked out. With 24 rollout steps and
+20 history frames, the first update of a fresh run has no valid TRS pairs;
+the regular PPO update still runs. Use `--tr-warmup-iterations 500` to restore
+the previous iteration-based delay.
 
 One-iteration smoke runs:
 
@@ -246,6 +281,46 @@ Direct IsaacLab commands still work:
 ```
 
 ## Playing and Recording
+
+The root `evaluation.sh` combines trained-gait video/data recording and
+statistical evaluation. It reads `params/env.yaml` beside the selected checkpoint;
+a bound-only training run produces only bound recordings and evaluation cells.
+Supported robots include `go2`, `x1`, and `x1_go2bend`.
+
+```bash
+conda activate symm_rl_isaaclab
+bash evaluation.sh --robot x1_go2bend --run RUN --model 1499
+```
+
+For multiple evaluations configured directly in a file, edit the
+`robot|run_name|model` entries in `evaluation_batch.sh`, then run:
+
+```bash
+bash evaluation_batch.sh
+```
+
+It lists the three X1 Go2-bend runs at model `1499` initially. Tasks run in
+listed order, using each checkpoint's trained gaits, and stop if a task fails.
+Edit the shared `mode` and `gait` settings in that file as needed.
+
+Alternatively, pass `--checkpoint /path/to/model_1499.pt`. Without a checkpoint
+or run, it selects the latest checkpoint for `--robot`. `--gait all` means all
+gaits in that checkpoint's saved configuration. A family selector such as
+`--gait bound` must contain only trained templates.
+
+The default `--mode both` records one 30-second six-direction video per trained
+gait, with plots, `sim_data.npz`, and foot-periodicity CSVs under `<run>/eval/`.
+It then measures each selected gait at `vx = -1, +1 m/s`, using separate trials
+with 5 seconds settling and 10 seconds measurement. Current metric reports go
+under `<run>/evaluations/leg_usage_grid_trained/`. These are separate rollouts;
+the statistical report does not summarize the six-direction video sweep.
+Saved timing and history are restored, and evaluation phase/timing noise is disabled.
+
+Use `--mode video` or `--mode metrics` to run one part, `--velocities -0.5 0.5`
+to change the statistical speed grid, and `--no-gif` to skip GIF conversion.
+The old root `test.sh` is a deprecated wrapper for `evaluation.sh --mode video`.
+The shared launchers below remain available for explicit playback and fixed
+`light`/`full` benchmark protocols.
 
 Latest checkpoints:
 

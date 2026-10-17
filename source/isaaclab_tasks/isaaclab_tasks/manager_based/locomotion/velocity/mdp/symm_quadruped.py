@@ -217,7 +217,9 @@ class GaitVelocityCommandCfg(CommandTermCfg):
         (0.13, -0.13, 0.5, 0.5),
         (-0.13, 0.13, 0.5, 0.5),
         (-0.13, 0.13, 0.63, 0.37),
+        (0.13, -0.13, 0.37, 0.63),
         (0.13, -0.13, 0.63, 0.37),
+        (-0.13, 0.13, 0.37, 0.63),
     )
     """Foot phase offsets for FL, FR, RL, and RR."""
 
@@ -1606,10 +1608,13 @@ def foot_clearance_penalty(
 ) -> torch.Tensor:
     """Penalize height errors relative to a ground-relative swing trajectory.
 
+    The squared-sine trajectory starts and ends at the resting foot offset with zero slope and peaks at
+    ``min_height``. The swing gate reuses the periodic force term's nonnegative swing probability,
+    smoothly overlapping the adjacent stance intervals across both swing boundaries.
+
     The optional command gate uses the maximum of independently normalized planar speed and absolute yaw rate,
     clipped to ``[0, 1]``. When disabled, only the swing-phase gate scales the penalty,
-    including for zero velocity commands and stationary feet. The trajectory starts and ends at the
-    resting foot offset and peaks at ``min_height``. By default, only shortfall is penalized;
+    including for zero velocity commands and stationary feet. By default, only shortfall is penalized;
     ``use_absolute_error=True`` also penalizes heights above the trajectory.
 
     Args:
@@ -1646,8 +1651,10 @@ def foot_clearance_penalty(
     foot_height = asset.data.body_pos_w.torch[:, feet_cfg.body_ids, 2] - env.scene.env_origins[:, 2:3]
     swing_ratio = (1.0 - gait_command.duty_factors).unsqueeze(-1).clamp_min(1.0e-6)
     swing_subphase = (gait_command.foot_phases() / swing_ratio).clamp(0.0, 1.0)
-    target_height = foot_height_offset + (min_height - foot_height_offset) * torch.sin(torch.pi * swing_subphase)
-    swing_weight = _smooth_swing_indicator(gait_command.foot_phases(), gait_command.duty_factors, gait_command.kappa)
+    target_height = (
+        foot_height_offset + (min_height - foot_height_offset) * torch.sin(torch.pi * swing_subphase).square()
+    )
+    swing_weight = (-gait_command.periodic_force_weights()).clamp(0.0, 1.0)
     height_difference = target_height - foot_height
     shortfall = torch.relu(height_difference)
     height_error = height_difference.abs() if use_absolute_error else shortfall

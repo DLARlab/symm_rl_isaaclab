@@ -94,13 +94,17 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
     def load_managers(self) -> None:
         """Load managers and add frame-major policy history when more than one frame is requested."""
         super().load_managers()
-        # Ji22 setup retained for restoring the optional composition below.
-        # termination_reward_index = self.reward_manager.active_terms.index(_JI22_TERMINATION_REWARD_TERM)
-        # self._ji22_nontermination_reward_indices = torch.tensor(
-        #     [index for index in range(len(self.reward_manager.active_terms)) if index != termination_reward_index],
-        #     dtype=torch.long,
-        #     device=self.device,
-        # )
+        try:
+            termination_reward_index = self.reward_manager.active_terms.index(_JI22_TERMINATION_REWARD_TERM)
+        except ValueError as exc:
+            raise ValueError(
+                f"Ji22 reward composition requires the {_JI22_TERMINATION_REWARD_TERM!r} reward term."
+            ) from exc
+        self._ji22_nontermination_reward_indices = torch.tensor(
+            [index for index in range(len(self.reward_manager.active_terms)) if index != termination_reward_index],
+            dtype=torch.long,
+            device=self.device,
+        )
         history_cfg = self.cfg.policy_observation_history
         if history_cfg.history_length == 1:
             return
@@ -155,23 +159,19 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         self.reset_time_outs = self.termination_manager.time_outs
 
         total_reward = self.reward_manager.compute(dt=self.step_dt)
-        # Clip the full sum, including any termination reward, so the returned reward is nonnegative.
-        self.reward_buf = torch.clamp_min(total_reward, 0.0)
-        step_diagnostics = self._compute_step_diagnostics(action, total_reward)
-
-        # Ji22 composition disabled. Restore its setup in load_managers() to re-enable this block.
-        # termination_cfg = self.reward_manager.get_term_cfg("termination_penalty")
-        # termination_reward = self.reset_terminated.to(total_reward.dtype) * termination_cfg.weight * self.step_dt
+        termination_cfg = self.reward_manager.get_term_cfg(_JI22_TERMINATION_REWARD_TERM)
+        termination_reward = self.reset_terminated.to(total_reward.dtype) * termination_cfg.weight * self.step_dt
         # Reuse RewardManager's weighted pre-dt values so stateful reward terms are not evaluated twice.
-        # running_reward_terms = (
-        #     self.reward_manager._step_reward.index_select(1, self._ji22_nontermination_reward_indices) * self.step_dt
-        # )
-        # positive_reward = torch.clamp_min(running_reward_terms, 0.0).sum(dim=-1)
-        # negative_reward = torch.clamp_max(running_reward_terms, 0.0).sum(dim=-1)
-        # self.reward_buf = _combine_ji22_reward(positive_reward, negative_reward, termination_reward)
-        # step_diagnostics["Diagnostics/ji22_positive_reward_mean"] = positive_reward.mean()
-        # step_diagnostics["Diagnostics/ji22_negative_reward_mean"] = negative_reward.mean()
-        # step_diagnostics["Diagnostics/ji22_multiplier_mean"] = torch.exp(negative_reward / JI22_REWARD_SIGMA).mean()
+        running_reward_terms = (
+            self.reward_manager._step_reward.index_select(1, self._ji22_nontermination_reward_indices) * self.step_dt
+        )
+        positive_reward = torch.clamp_min(running_reward_terms, 0.0).sum(dim=-1)
+        negative_reward = torch.clamp_max(running_reward_terms, 0.0).sum(dim=-1)
+        self.reward_buf = _combine_ji22_reward(positive_reward, negative_reward, termination_reward)
+        step_diagnostics = self._compute_step_diagnostics(action, total_reward - termination_reward)
+        step_diagnostics["Diagnostics/ji22_positive_reward_mean"] = positive_reward.mean()
+        step_diagnostics["Diagnostics/ji22_negative_reward_mean"] = negative_reward.mean()
+        step_diagnostics["Diagnostics/ji22_multiplier_mean"] = torch.exp(negative_reward / JI22_REWARD_SIGMA).mean()
 
         if len(self.recorder_manager.active_terms) > 0:
             self.obs_buf = self.observation_manager.compute()
@@ -225,9 +225,10 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         action_abs = action.detach().abs()
         diagnostics["Diagnostics/action_abs_mean"] = action_abs.mean()
         diagnostics["Diagnostics/action_abs_max"] = action_abs.max()
-        reward_clipped = total_reward < 0.0
+        reward_negative = total_reward < 0.0
+        reward_clipped = torch.zeros_like(reward_negative)
         diagnostics["Diagnostics/reward_clipped_fraction"] = reward_clipped.to(total_reward.dtype).mean()
-        diagnostics["Diagnostics/reward_negative_fraction"] = reward_clipped.to(total_reward.dtype).mean()
+        diagnostics["Diagnostics/reward_negative_fraction"] = reward_negative.to(total_reward.dtype).mean()
 
         robot = self.scene["robot"]
         joint_term = self.action_manager.get_term("joint_pos")
@@ -258,7 +259,8 @@ class SymmQuadrupedManagerBasedRLEnv(ManagerBasedRLEnv):
         # Playback reads these pre-reset tensors to retain the exact action-to-joint mapping.
         # Keep the extra copies disabled during training to avoid unnecessary GPU work.
         if getattr(self, "_capture_rollout_diagnostics", False):
-            self._running_reward_negative = reward_clipped.detach().clone()
+            self._running_reward_negative = reward_negative.detach().clone()
+            self._running_reward_clipped = reward_clipped.detach().clone()
             self._last_policy_actions = action.detach().clone()
             self._last_joint_position_targets = joint_pos_target.detach().clone()
             self._last_joint_positions = joint_pos.detach().clone()

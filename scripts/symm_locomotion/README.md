@@ -9,6 +9,7 @@ Supported robot keys:
 ```text
 go2    Unitree Go2
 x1     Dobot X1
+x1_go2bend  Dobot X1 with all four legs using the Go2 bend
 ```
 
 Aliases are also accepted: `unitree-go2`, `unitree_go2`, `dobot`,
@@ -147,6 +148,7 @@ Training options:
 ```text
 --iterations / --max-iterations
 --num-envs
+--gait all|trot|bound|halfbound|rotarygallop|traversegallop
 --run-name
 --seed
 --mirror
@@ -156,6 +158,12 @@ Training options:
 --no-trs
 --smoke
 ```
+
+`--gait` defaults to `all`, which samples all eight training templates.
+`trot` and `bound` each select one template; `halfbound`, `rotarygallop`,
+and `traversegallop` each select both variants of that family. Sampling remains
+uniform over the selected templates, with the configured phase noise and timing.
+For example, use `--robot x1 --gait halfbound` to train only the two half-bounds.
 
 `--tr-min-abs-cmd-vel` defaults to `0.0`, so TRS losses also train on
 zero-velocity commands used for in-place behavior.
@@ -326,6 +334,39 @@ behavior, and PPO defaults in the `symm_quadruped` modules unless the behavior
 is genuinely robot-specific.
 
 ## Policy evaluation
+
+For combined trained-gait videos/data and statistics, use the repository-root launcher:
+
+```bash
+conda activate symm_rl_isaaclab
+bash evaluation.sh --robot x1_go2bend --run RUN --model 1499
+```
+
+To configure several evaluations in a bash file, edit the repository-root
+`evaluation_batch.sh`. Its `tasks` array contains explicit
+`robot|run_name|model` entries; `mode` and `gait` are shared settings. Run
+`bash evaluation_batch.sh` without arguments to process them in listed order.
+Each task uses its checkpoint's own training gaits, and a failure stops the batch.
+
+This selects only templates present in `<run>/params/env.yaml`. The default
+`--gait all` means all trained templates, including all trained gallop partners.
+`--gait trot|bound|halfbound|rotarygallop|traversegallop` can narrow that set;
+untrained selections are rejected. `--mode both` runs a six-direction video/data
+sweep for each gait and separate fixed-command statistical trials at
+`vx = -1, +1 m/s`. Use `--mode video` or `--mode metrics` to run one part.
+The root `test.sh` is a deprecated forwarding wrapper for video mode.
+
+Videos, GIFs, plots, `foot_periodicity.csv`, and `sim_data.npz` are saved under
+`<run>/eval/`. Statistical trial data, current metric tables, and reports are
+saved under `<run>/evaluations/leg_usage_grid_trained/`. The `trained` profile
+uses current metric definitions and averages only represented gait families.
+It does not change the immutable `light` or `full` grids described below.
+Saved period, duty-factor settings, nominal timing height range, and observation
+history are restored. Evaluation disables phase and timing noise.
+
+The same combined command is available through
+`scripts/symm_locomotion/evaluate_trained.py`. For metrics without videos, the
+shared evaluator also accepts `--protocol trained`, reading the saved gait list.
 
 `evaluation.py`, `evaluation.ps1`, and `evaluation.sh` evaluate a checkpoint at
 fixed commands. They report velocity and heading tracking, gait/contact

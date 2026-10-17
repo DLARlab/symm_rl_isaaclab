@@ -6,8 +6,25 @@ Fixed
   Applied timing immediately at startup and after resets, and used smooth
   transitions for later command changes without restarting the gait clock.
 
+* Fixed time-reversal PPO to skip critic consistency computation when its
+  coefficient was zero, while retaining ordinary PPO critic training and
+  reporting a zero ``tr_value`` loss.
+
 Changed
 ^^^^^^^
+
+* Changed symmetric locomotion TRS run names to append the value and actor
+  consistency coefficients, including custom ``--run-name`` labels. Update
+  explicit selectors for new runs to include the
+  ``_valuecoef<V>_actorcoef<A>`` suffix. Runs using ``--no-trs`` retained
+  their previous naming.
+
+* Changed the default TRS loss warmup to zero for symmetric Go2 and X1 training.
+  Invalid or incomplete history pairs remained masked, so the first fresh
+  rollout with 24 steps and 20 history frames contributed zero TRS loss.
+  Use ``--tr-warmup-iterations 500`` or set
+  ``agent.algorithm.symmetry_cfg.warmup_iterations=500`` to restore the previous
+  warmup delay.
 
 * Changed training and playback to default to fixed cycle durations of 0.52 s
   for Go2 and 0.60 s for X1, with stance duty factor 0.56 for both robots.
@@ -38,11 +55,14 @@ Changed
   ``commands.base_velocity.ranges.lin_vel_x`` and ``ang_vel_z`` to
   ``(-4.0, 4.0)`` and ``curriculum_tracking_lin_vel_threshold`` to ``0.9``.
 
-* Changed symmetric Go2 and X1 reward aggregation to clip the full weighted,
-  timestep-scaled sum at zero, including any termination reward. Commented out
-  Ji22 composition and its diagnostics. Retrain policies for the new reward;
-  restore the commented Ji22 setup and composition in ``env.py`` to reproduce
-  the previous aggregation.
+* Restored Ji22 reward composition for symmetric Go2 and X1, including the
+  Go2-bend X1 variant, with negative-reward scale 0.02 and termination rewards
+  added separately. Restored the backup's stability-gated torque-difference
+  penalty with weight 0.1 and exponential coefficient 0.1, alongside the existing
+  torque-magnitude penalty. Retrain policies to evaluate the restored reward;
+  set ``rewards.smoothness.weight=0.0`` to disable torque-difference smoothness.
+  Restored Ji22 diagnostics and distinguished negative signed reward sums from
+  clipping in the training diagnostics.
 
 * Changed the symmetric Go2 and X1 tasks to use nine bounded exponential
   penalties. Hip and joint-limit penalties now used measured positions;
@@ -66,15 +86,20 @@ Changed
   previously active ``base_roll_exp`` and ``foot_periodicity`` terms. The
   previous reward helpers remained available for explicit configurations.
 
-* Changed foot clearance to penalize each foot's absolute height error from
-  a sinusoidal swing trajectory without command gating, using a 0.025 m
-  error scale and outer weight 0.1. The trajectory started and ended at the
-  resting foot offset. Retained peak foot-link heights of 0.082 m for Go2 and
-  0.1075 m for X1. Set ``env.rewards.foot_clearance.params.min_height`` to
+* Changed foot clearance to reuse the force-periodicity swing gate and penalize
+  each foot's absolute height error from a squared-sine swing trajectory
+  without command gating, using a 0.025 m error scale and outer weight 0.1.
+  The trajectory started and ended at the
+  resting foot offset with zero slope at both swing boundaries. The periodic
+  gate remained continuous across phase wrap. Retained peak foot-link heights
+  of 0.082 m for Go2 and 0.1075 m for X1. Set
+  ``env.rewards.foot_clearance.params.min_height`` to
   customize the peak and ``foot_height_offset`` to customize the baseline.
   Set ``use_absolute_error=False`` and ``foot_height_offset=0.0`` to restore
-  the previous shortfall-only trajectory. The helper retained those legacy
-  defaults and command gating, while the active task configuration selected
+  the previous shortfall-only error and zero baseline with the new trajectory
+  and gate. Retrain policies to evaluate the new swing trajectory and gate.
+  The helper retained those legacy defaults and command gating, while the
+  active task configuration selected
   absolute error with robot-specific offsets and ``use_command_gate=False``.
   Select ``foot_clearance_mode="speed_tracking_reward"``
   in ``configure_rewards`` to reproduce the previous positive clearance reward.

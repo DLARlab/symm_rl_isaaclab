@@ -11,6 +11,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_module(module_name: str, path: Path):
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -57,8 +59,77 @@ def test_train_defaults_apply_trs_to_in_place_commands():
     command = symm_cli.train_lab_args(args, [])
 
     assert args.tr_min_abs_cmd_vel == 0.0
-    assert command[command.index("--run_name") + 1] == "go2_with_trs_mirror0p1"
+    assert command[command.index("--run_name") + 1] == "go2_with_trs_mirror0p1_valuecoef0.05_actorcoef0.1"
     assert "agent.algorithm.symmetry_cfg.min_abs_command_velocity=0.0" in command
+
+
+@pytest.mark.parametrize("robot", ["go2", "x1", "x1_go2bend"])
+@pytest.mark.parametrize(
+    "gait, indices",
+    [
+        (None, tuple(range(8))),
+        ("all", tuple(range(8))),
+        ("trot", (0,)),
+        ("bound", (1,)),
+        ("halfbound", (2, 3)),
+        ("rotarygallop", (4, 5)),
+        ("traversegallop", (6, 7)),
+    ],
+)
+def test_train_gait_selection_replaces_only_the_command_template_library(robot, gait, indices):
+    from hydra.core.override_parser.overrides_parser import OverridesParser
+
+    from isaaclab_tasks.utils import load_cfg_from_registry
+
+    symm_cli = _load_symm_cli()
+    argv = ["train", "--robot", robot, "--no-conda-run"]
+    if gait is not None:
+        argv += ["--gait", gait]
+    args = symm_cli.build_parser().parse_args(argv)
+    args.robot_spec = symm_cli.get_robot(args.robot)
+    command = symm_cli.train_lab_args(args, [])
+    cfg = load_cfg_from_registry(args.robot_spec.train_task, "env_cfg_entry_point").commands.base_velocity
+    original = cfg.to_dict()
+    templates = tuple(tuple(row) for row in cfg.init_foot_thetas)
+    assert len(templates) == 8
+    overrides = [arg for arg in command if arg.startswith("env.commands.base_velocity.")]
+    parsed = OverridesParser.create().parse_overrides(overrides)
+    cfg.from_dict(
+        {override.key_or_group.removeprefix("env.commands.base_velocity."): override.value() for override in parsed}
+    )
+
+    assert tuple(tuple(row) for row in cfg.init_foot_thetas) == tuple(templates[i] for i in indices)
+    actual = cfg.to_dict()
+    actual["init_foot_thetas"] = original["init_foot_thetas"]
+    assert actual == original
+    assert "--gait" not in command
+
+
+def test_train_rejects_unknown_gait():
+    symm_cli = _load_symm_cli()
+    with pytest.raises(SystemExit) as exc:
+        symm_cli.build_parser().parse_args(["train", "--gait", "pace"])
+    assert exc.value.code == 2
+
+
+def test_train_gait_selection_is_consumed_by_dry_run(capsys):
+    symm_cli = _load_symm_cli()
+    assert symm_cli.main(["train", "--gait", "bound", "--dry-run", "--no-conda-run"]) == 0
+    output = capsys.readouterr().out
+    assert "env.commands.base_velocity.init_foot_thetas=[[0.0,0.0,0.5,0.5]]" in output
+    assert "--gait" not in output
+
+
+def test_x1_go2bend_launches_a_separate_task_and_run(capsys):
+    symm_cli = _load_symm_cli()
+    result = symm_cli.main(["train", "--robot", "x1_go2bend", "--tr-value-coef", "0", "--dry-run", "--no-conda-run"])
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-v0" in output
+    assert "x1_go2bend_with_trs_mirror0p1_valuecoef0_actorcoef0.1" in output
+    spec = symm_cli.get_robot("x1_go2bend")
+    assert spec.play_task == "Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-Play-v0"
+    assert spec.experiment_name == "dobot_x1_go2bend_symm_flat"
 
 
 def test_train_default_run_name_includes_selected_robot():

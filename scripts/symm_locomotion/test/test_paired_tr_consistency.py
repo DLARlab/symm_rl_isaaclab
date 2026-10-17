@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 def _load_module():
@@ -328,9 +329,10 @@ def test_policy_metrics_use_pre_decision_phase_not_post_step_phase(tmp_path):
     assert misaligned["paired_joint_velocity_error"] < 0.02
 
 
-def test_x1_front_hind_reflected_temporal_operator_is_reported_separately(tmp_path):
+@pytest.mark.parametrize("robot", ["x1", "x1_go2bend"])
+def test_x1_front_hind_reflected_temporal_operator_is_reported_separately(tmp_path, robot):
     module = _load_module()
-    study = _write_pair(tmp_path, robot="x1", reflected=True)
+    study = _write_pair(tmp_path, robot=robot, reflected=True)
     payload = module.analyze_paired_study(study, tmp_path, phase_samples=64)
     by_operator = {row["operator"]: row for row in payload["rows"]}
     pure = by_operator["temporal_reversal"]

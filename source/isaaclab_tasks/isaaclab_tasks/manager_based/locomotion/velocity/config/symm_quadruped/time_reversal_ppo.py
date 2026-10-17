@@ -151,19 +151,18 @@ class TimeReversalPPO(PPO):
                     transformed_reference_action_mean[reference_batch_size:].detach(),
                     pair_mask,
                 )
-                reversed_values = self.critic(reversed_batch)
-                with torch.no_grad():
-                    reference_values = self.critic(reference_batch)
-                tr_value_loss = self._masked_mse(
-                    reversed_values,
-                    reference_values.detach(),
-                    pair_mask,
-                )
-
                 if self.symmetry["use_mirror_loss"]:
                     loss += self.symmetry["mirror_loss_coeff"] * symmetry_loss
                 value_loss_coeff = float(self.symmetry.get("value_loss_coeff", 0.0))
                 if value_loss_coeff > 0.0:
+                    reversed_values = self.critic(reversed_batch)
+                    with torch.no_grad():
+                        reference_values = self.critic(reference_batch)
+                    tr_value_loss = self._masked_mse(
+                        reversed_values,
+                        reference_values.detach(),
+                        pair_mask,
+                    )
                     loss += value_loss_coeff * tr_value_loss
 
             elif self.symmetry:

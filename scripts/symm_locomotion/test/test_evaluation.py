@@ -37,6 +37,31 @@ def _cli_module():
     return _load_module("symm_cli_leg_usage_under_test", path)
 
 
+def test_x1_go2bend_evaluation_tracks_variant_and_inherited_sources(tmp_path):
+    module = _analysis_module()
+    checkpoint = tmp_path / "model_9999.pt"
+    checkpoint.write_bytes(b"test-checkpoint")
+    study = module.build_study(
+        repo_root=tmp_path,
+        checkpoint=checkpoint,
+        robot="x1_go2bend",
+        task="Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-Play-v0",
+        step_dt=0.02,
+        protocol="light",
+    )
+    assert study["robot"] == "x1_go2bend"
+    assert len(study["cells"]) == 8
+    sources = study["source_provenance"]["missing_files"]
+    effort_sources = study["effort_limit_provenance"]["source"]["missing_files"]
+    # The synthetic repository has no source files; both inherited and variant configs must be fingerprinted.
+    for suffix in ("config/dobot_x1_symm/flat_env_cfg.py", "config/dobot_x1_go2bend_symm/flat_env_cfg.py"):
+        assert any(path.endswith(suffix) for path in sources)
+        assert any(path.endswith(suffix) for path in effort_sources)
+    real_root = Path(__file__).resolve().parents[3]
+    provenance = module._source_provenance(real_root, "x1_go2bend")
+    assert not provenance["missing_files"]
+
+
 def test_deprecated_python_entry_point_reexports_evaluation():
     path = Path(__file__).resolve().parents[1] / "analyze_leg_usage.py"
 
@@ -773,13 +798,23 @@ def test_publication_reanalysis_refreshes_paired_diagnostics(tmp_path, monkeypat
     )
 
 
-def test_analyze_study_writes_tables_report_and_family_figures(tmp_path):
+@pytest.mark.parametrize("protocol", ["full", "trained"])
+def test_analyze_study_writes_tables_report_and_family_figures(tmp_path, protocol):
     analysis = _analysis_module()
+    options = {"protocol": protocol}
+    if protocol == "trained":
+        params = tmp_path / "run" / "params"
+        params.mkdir(parents=True)
+        (params / "env.yaml").write_text(
+            "commands:\n  base_velocity:\n    init_foot_thetas: [[0.0, 0.0, 0.5, 0.5]]\n", encoding="utf-8"
+        )
+        options["velocities_mps"] = [-1.0, 1.0]
     study, _ = _build_study(
         analysis,
         tmp_path,
         settle_s=0.04,
         measure_s=2.4,
+        **options,
     )
     study_path = analysis.prepare_study(study, resume=False, analyze_only=False, dry_run=False)
     plan_sha256 = hashlib.sha256(study_path.read_bytes()).hexdigest()
@@ -827,9 +862,9 @@ def test_analyze_study_writes_tables_report_and_family_figures(tmp_path):
     overall = analysis.analyze_study(study_path)
 
     assert overall["coverage"]["complete"] is True
-    assert overall["coverage"]["velocity_only_success_domain_cells"] == 60
-    assert overall["coverage"]["gait_only_success_domain_cells"] == 60
-    assert overall["coverage"]["joint_velocity_and_gait_success_domain_cells"] == 60
+    assert overall["coverage"]["velocity_only_success_domain_cells"] == len(study["cells"])
+    assert overall["coverage"]["gait_only_success_domain_cells"] == len(study["cells"])
+    assert overall["coverage"]["joint_velocity_and_gait_success_domain_cells"] == len(study["cells"])
     assert overall["coverage"]["velocity_only_success_coverage_fraction"] == pytest.approx(1.0)
     assert overall["coverage"]["gait_only_success_coverage_fraction"] == pytest.approx(1.0)
     assert overall["coverage"]["joint_velocity_and_gait_success_coverage_fraction"] == pytest.approx(1.0)
@@ -875,7 +910,7 @@ def test_analyze_study_writes_tables_report_and_family_figures(tmp_path):
 
     with (study_path.parent / "metrics" / "foot_metrics.csv").open(encoding="utf-8", newline="") as stream:
         foot_rows = list(csv.DictReader(stream))
-    assert len(foot_rows) == 240
+    assert len(foot_rows) == 4 * len(study["cells"])
     assert {
         "agreement_boundary_excluded",
         "contact_f1",
@@ -889,8 +924,8 @@ def test_analyze_study_writes_tables_report_and_family_figures(tmp_path):
 
     with (study_path.parent / "metrics" / "gait_confusion_matrix.csv").open(encoding="utf-8", newline="") as stream:
         confusion_rows = list(csv.DictReader(stream))
-    assert sum(int(row["count"]) for row in confusion_rows if row["level"] == "row") == 60
-    assert sum(int(row["count"]) for row in confusion_rows if row["level"] == "family") == 60
+    assert sum(int(row["count"]) for row in confusion_rows if row["level"] == "row") == len(study["cells"])
+    assert sum(int(row["count"]) for row in confusion_rows if row["level"] == "family") == len(study["cells"])
     assert all("cell_id" not in row for row in confusion_rows)
 
     with (study_path.parent / "metrics" / "same_phase_pair_metrics.csv").open(encoding="utf-8", newline="") as stream:
@@ -923,10 +958,10 @@ def test_analyze_study_writes_tables_report_and_family_figures(tmp_path):
     }.issubset(cell_rows[0])
     report = (study_path.parent / "metrics" / "REPORT.md").read_text(encoding="utf-8")
     screening = (study_path.parent / "metrics" / "SCREENING_REPORT.md").read_text(encoding="utf-8")
-    assert "Grid: 60 planned protocol cells" in report
+    assert f"Grid: {len(study['cells'])} planned protocol cells" in report
     assert "| FL |" in screening
     assert overall["paired_tr_consistency"]["method_version"] == "paired_tr_consistency_phase_v1"
-    assert overall["paired_tr_consistency"]["rows"] == 60
+    assert overall["paired_tr_consistency"]["rows"] == len(study["cells"])
     assert overall["paired_tr_consistency"]["analyzed_rows"] == 0
 
     first_cell = study["cells"][0]

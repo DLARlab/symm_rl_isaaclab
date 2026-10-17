@@ -50,6 +50,15 @@ def _tensor_data(value: torch.Tensor) -> SimpleNamespace:
     return SimpleNamespace(torch=value)
 
 
+def _make_clearance_gait_command(phases: torch.Tensor, duty_factor: float = 0.5) -> symm_quadruped.GaitVelocityCommand:
+    command = symm_quadruped.GaitVelocityCommand.__new__(symm_quadruped.GaitVelocityCommand)
+    command.gait_phase = torch.zeros(phases.shape[0], dtype=phases.dtype, device=phases.device)
+    command._foot_phase_offsets = phases
+    command.duty_factors = torch.full_like(command.gait_phase, duty_factor)
+    command.kappa = torch.full_like(command.gait_phase, 16.0)
+    return command
+
+
 @pytest.mark.parametrize("capture", [False, True])
 @pytest.mark.parametrize("use_sensors", [False, True])
 def test_foot_periodicity_diagnostics_match_reward_and_preserve_reward_time_inputs(capture, use_sensors):
@@ -312,14 +321,14 @@ def test_configured_clearance_tracks_both_sides_of_offset_trajectory_without_com
     phases[4] = 0.0
     phases[5] = 0.5
     phases[6] = torch.tensor([0.0, 0.125, 0.25, 0.5])
-    gait = SimpleNamespace(duty_factors=torch.full((7,), 0.5), kappa=torch.full((7,), 16.0), foot_phases=lambda: phases)
+    gait = _make_clearance_gait_command(phases)
     command = torch.zeros(7, 3)
     command[1, 0] = 1.0
     env = SimpleNamespace(
         scene=scene, command_manager=SimpleNamespace(get_term=lambda _: gait, get_command=lambda _: command)
     )
     reward = term.weight * term.func(env, **term.params)
-    expected_mid_swing = 0.1 * 4.0 * math.expm1(-1.0) / (1.0 + math.exp(-4.0))
+    expected_mid_swing = 0.1 * 4.0 * math.expm1(-1.0)
     assert reward[:2].tolist() == pytest.approx([expected_mid_swing] * 2, rel=1e-5)
     assert reward[3].item() == pytest.approx(expected_mid_swing, rel=1e-5)
     torch.testing.assert_close(reward[[2, 4, 5]], torch.zeros(3))
@@ -327,9 +336,7 @@ def test_configured_clearance_tracks_both_sides_of_offset_trajectory_without_com
     torch.testing.assert_close(diagnostics["target_height"][0], torch.full((4,), peak_height))
     torch.testing.assert_close(
         diagnostics["target_height"][6],
-        torch.tensor(
-            [foot_offset, foot_offset + (peak_height - foot_offset) / math.sqrt(2.0), peak_height, foot_offset]
-        ),
+        torch.tensor([foot_offset, foot_offset + (peak_height - foot_offset) / 2.0, peak_height, foot_offset]),
         atol=1e-7,
         rtol=1e-5,
     )
@@ -338,6 +345,74 @@ def test_configured_clearance_tracks_both_sides_of_offset_trajectory_without_com
     torch.testing.assert_close(diagnostics["shortfall"][3], torch.zeros(4))
     assert diagnostics["mean_height_error"][3].item() == pytest.approx(0.025)
     torch.testing.assert_close(diagnostics["penalty"] * term.weight, reward)
+
+
+@pytest.mark.parametrize("peak_height, foot_offset", [(0.082, 0.022), (0.1075, 0.0275)])
+def test_clearance_periodic_gate_and_penalty_are_continuous_across_phase_wrap(peak_height, foot_offset):
+    phases = torch.tensor([1.0 - 1.0e-6, 0.0, 1.0e-6], dtype=torch.float64).unsqueeze(-1).expand(-1, 4)
+    gait = _make_clearance_gait_command(phases, duty_factor=0.56)
+    scene = _Scene()
+    scene.env_origins = torch.zeros(3, 3, dtype=torch.float64)
+    positions = torch.zeros(3, 4, 3, dtype=torch.float64)
+    positions[..., 2] = foot_offset + 0.01
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(positions)))
+    env = SimpleNamespace(scene=scene, command_manager=SimpleNamespace(get_term=lambda _: gait))
+
+    penalty = symm_quadruped.foot_clearance_penalty(
+        env,
+        command_name="base_velocity",
+        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
+        min_height=peak_height,
+        foot_height_offset=foot_offset,
+        height_scale=0.025,
+        use_absolute_error=True,
+        use_command_gate=False,
+    )
+
+    torch.testing.assert_close(
+        env._foot_clearance_diagnostics["swing_weight"],
+        torch.full((3, 4), 0.5, dtype=torch.float64),
+        rtol=0.0,
+        atol=2.0e-5,
+    )
+    assert penalty.tolist() == pytest.approx([2.0 * math.expm1(-0.4)] * 3, abs=5.0e-5)
+
+
+@pytest.mark.parametrize("peak_height, foot_offset", [(0.082, 0.022), (0.1075, 0.0275)])
+def test_clearance_trajectory_preserves_peak_and_has_zero_endpoint_slope(peak_height, foot_offset):
+    swing_ratio = 0.44
+    increment = swing_ratio * 1.0e-4
+    phases = (
+        torch.tensor(
+            [0.0, increment, swing_ratio / 4.0, swing_ratio / 2.0, swing_ratio - increment, swing_ratio, 0.75],
+            dtype=torch.float64,
+        )
+        .unsqueeze(-1)
+        .expand(-1, 4)
+    )
+    gait = _make_clearance_gait_command(phases, duty_factor=0.56)
+    scene = _Scene()
+    scene.env_origins = torch.zeros(7, 3, dtype=torch.float64)
+    positions = torch.zeros(7, 4, 3, dtype=torch.float64)
+    positions[..., 2] = foot_offset
+    scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(positions)))
+    env = SimpleNamespace(scene=scene, command_manager=SimpleNamespace(get_term=lambda _: gait))
+
+    symm_quadruped.foot_clearance_penalty(
+        env,
+        command_name="base_velocity",
+        feet_cfg=SimpleNamespace(body_ids=[0, 1, 2, 3]),
+        min_height=peak_height,
+        foot_height_offset=foot_offset,
+        use_command_gate=False,
+    )
+
+    target = env._foot_clearance_diagnostics["target_height"][:, 0]
+    assert target[[0, 5, 6]].tolist() == pytest.approx([foot_offset] * 3)
+    assert target[2].item() == pytest.approx(foot_offset + (peak_height - foot_offset) / 2.0)
+    assert target[3].item() == pytest.approx(peak_height)
+    assert abs((target[1] - target[0]).item() / increment) < 1.0e-3
+    assert abs((target[5] - target[4]).item() / increment) < 1.0e-3
 
 
 def test_training_physics_uses_proven_2048_env_pair_capacities():
@@ -388,6 +463,7 @@ def test_symm_quadruped_ppo_preserves_unclipped_actions():
     assert cfg.algorithm.entropy_coef == 0.005
     assert cfg.algorithm.symmetry_cfg.command_observation_index == 3
     assert cfg.algorithm.symmetry_cfg.min_abs_command_velocity == 0.0
+    assert cfg.algorithm.symmetry_cfg.warmup_iterations == 0
 
 
 def test_running_reward_is_clipped_before_terminal_penalty_is_added():
@@ -421,14 +497,14 @@ def test_ji22_reward_exponentially_scales_positive_reward_before_termination():
 @pytest.mark.parametrize(
     "reward_terms, terminated, expected_reward",
     [
-        ([2.0, -1.0], False, 0.02),
-        ([0.5, -0.5], False, 0.0),
-        ([0.5, -1.0], False, 0.0),
-        ([0.5, 0.0], True, 0.0),
+        ([2.0, -1.0], False, 0.04 * math.exp(-1.0)),
+        ([0.5, -0.5], False, 0.01 * math.exp(-0.5)),
+        ([0.5, -1.0], False, 0.01 * math.exp(-1.0)),
+        ([0.5, 0.0], True, -0.01),
         ([2.0, 0.0], True, 0.02),
     ],
 )
-def test_symmetric_environment_clips_total_reward_and_applies_pending_commands_after_reward(
+def test_symmetric_environment_uses_ji22_and_applies_pending_commands_after_reward(
     reward_terms, terminated, expected_reward
 ):
     calls = []
@@ -504,7 +580,9 @@ def test_symmetric_environment_clips_total_reward_and_applies_pending_commands_a
 
     assert calls == ["prepare_command", "reward", "apply_pending", "observation"]
     assert torch.allclose(reward, torch.tensor([expected_reward]))
-    assert torch.all(reward >= 0.0)
+    assert env.extras["log"]["Diagnostics/ji22_positive_reward_mean"].item() == pytest.approx(0.02 * reward_terms[0])
+    assert env.extras["log"]["Diagnostics/ji22_negative_reward_mean"].item() == pytest.approx(0.02 * reward_terms[1])
+    assert env.extras["log"]["Diagnostics/ji22_multiplier_mean"].item() == pytest.approx(math.exp(reward_terms[1]))
 
 
 @pytest.mark.parametrize("env_cfg_cls", [UnitreeGo2SymmFlatEnvCfg, DobotX1SymmFlatEnvCfg])
@@ -837,7 +915,10 @@ def test_step_diagnostics_capture_pre_reset_actions_targets_and_reward_component
 
     assert diagnostics["Diagnostics/action_abs_mean"].item() == pytest.approx(0.5)
     assert diagnostics["Diagnostics/action_abs_max"].item() == pytest.approx(1.0)
-    assert diagnostics["Diagnostics/reward_clipped_fraction"].item() == pytest.approx(1.0 / 3.0)
+    assert diagnostics["Diagnostics/reward_clipped_fraction"].item() == 0.0
+    assert diagnostics["Diagnostics/reward_negative_fraction"].item() == pytest.approx(1.0 / 3.0)
+    assert torch.equal(env._running_reward_negative, torch.tensor([True, False, False]))
+    assert torch.equal(env._running_reward_clipped, torch.tensor([False, False, False]))
     assert diagnostics["Diagnostics/joint_near_limit_fraction"].item() == pytest.approx(1.0 / 6.0)
     assert diagnostics["Diagnostics/joint_target_limit_violation_fraction"].item() == pytest.approx(1.0 / 6.0)
     assert diagnostics["Diagnostics/straight_line_forward_score"].item() == pytest.approx(0.5)
@@ -1297,7 +1378,8 @@ def test_rewards_disable_straight_line_motion_and_configure_exponential_penaltie
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
     assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.1
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
-    assert env_cfg.rewards.smoothness.weight == 0.0
+    assert env_cfg.rewards.smoothness.func is symm_quadruped.SmoothnessPenalty
+    assert env_cfg.rewards.smoothness.weight == 0.1
     assert env_cfg.rewards.action_rate_l2.func is symm_quadruped.action_rate_l2_exp_penalty
     assert env_cfg.rewards.action_rate_l2.weight == 0.05
     assert env_cfg.rewards.action_rate_l2.params["scale"] == 0.05
@@ -1720,11 +1802,7 @@ def test_foot_clearance_uses_ground_relative_swing_target_without_current_speed_
     scene.env_origins = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]])
     scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(body_pos_w)))
     foot_phases = torch.full((3, 4), 0.275)
-    gait_command = SimpleNamespace(
-        duty_factors=torch.full((3,), 0.45),
-        kappa=torch.full((3,), 16.0),
-        foot_phases=lambda: foot_phases,
-    )
+    gait_command = _make_clearance_gait_command(foot_phases, duty_factor=0.45)
     command = torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
     env = SimpleNamespace(
         scene=scene,
@@ -1760,11 +1838,7 @@ def test_foot_clearance_gate_uses_planar_speed_in_every_direction(command_speed,
     scene = _Scene()
     scene.env_origins = torch.zeros(num_envs, 3)
     scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(torch.zeros(num_envs, 4, 3))))
-    gait_command = SimpleNamespace(
-        duty_factors=torch.full((num_envs,), 0.5),
-        kappa=torch.full((num_envs,), 16.0),
-        foot_phases=lambda: torch.full((num_envs, 4), 0.25),
-    )
+    gait_command = _make_clearance_gait_command(torch.full((num_envs, 4), 0.25))
     env = SimpleNamespace(
         scene=scene,
         command_manager=SimpleNamespace(
@@ -1808,11 +1882,7 @@ def test_foot_clearance_gate_includes_yaw_with_an_independent_scale(yaw_scale):
     scene = _Scene()
     scene.env_origins = torch.zeros(num_envs, 3)
     scene["robot"] = SimpleNamespace(data=SimpleNamespace(body_pos_w=_tensor_data(torch.zeros(num_envs, 4, 3))))
-    gait_command = SimpleNamespace(
-        duty_factors=torch.full((num_envs,), 0.5),
-        kappa=torch.full((num_envs,), 16.0),
-        foot_phases=lambda: torch.full((num_envs, 4), 0.25),
-    )
+    gait_command = _make_clearance_gait_command(torch.full((num_envs, 4), 0.25))
     env = SimpleNamespace(
         scene=scene,
         command_manager=SimpleNamespace(
@@ -2104,7 +2174,9 @@ def test_robot_negative_reward_weights_scales_and_hip_selection(cfg_cls):
         term = getattr(cfg.rewards, name)
         assert term.weight == weight, name
         assert term.params["scale"] == scale, name
-    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 17
+    assert cfg.rewards.smoothness.func is symm_quadruped.SmoothnessPenalty
+    assert cfg.rewards.smoothness.weight == 0.1
+    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 18
 
     # Simulate an articulation whose storage order differs from the policy joint order.
     logical_names = cfg.actions.joint_pos.joint_names

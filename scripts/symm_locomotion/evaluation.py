@@ -64,20 +64,23 @@ SCHEMA_VERSION = 1
 METHOD_VERSION = "leg_usage_grid_v1"
 FULL_METHOD_VERSION = "leg_usage_grid_full_v3"
 LIGHT_METHOD_VERSION = "leg_usage_grid_light_v2"
+TRAINED_METHOD_VERSION = "leg_usage_grid_trained_v1"
 DEFAULT_PROTOCOL = "full"
 LEGACY_PROTOCOL = "legacy"
 PROTOCOL_METHOD_VERSIONS = {
     "full": FULL_METHOD_VERSION,
     "light": LIGHT_METHOD_VERSION,
+    "trained": TRAINED_METHOD_VERSION,
     LEGACY_PROTOCOL: METHOD_VERSION,
 }
 # ``legacy`` is a CLI compatibility profile, not a new playback protocol.  Its
 # persisted identity deliberately remains the historical v1/full pair accepted
 # by existing runners and archives.
-PROTOCOL_PLAN_NAMES = {"full": "full", "light": "light", LEGACY_PROTOCOL: "full"}
+PROTOCOL_PLAN_NAMES = {"full": "full", "light": "light", "trained": "trained", LEGACY_PROTOCOL: "full"}
 PROTOCOL_OUTPUT_ROOT_NAMES = {
     "full": "leg_usage_grid_full_v3",
     "light": "leg_usage_grid_light",
+    "trained": "leg_usage_grid_trained",
     LEGACY_PROTOCOL: "leg_usage_grid",
 }
 DEFAULT_VELOCITIES_MPS = (-1.5, -1.0, -0.5, 0.5, 1.0, 1.5)
@@ -88,7 +91,12 @@ YAW_TRACKING_SUCCESS_THRESHOLD_RADPS = 0.05
 FAMILY_ORDER = ("trot", "bound", "half_bound", "gallop")
 PRIMARY_METRICS = ("normalized_torque_utilization", "absolute_work", "vertical_grf_impulse")
 ALL_METRICS = ("torque_squared", *PRIMARY_METRICS)
-SUPPORTED_ROBOTS = ("go2", "x1")
+_ROBOT_CONFIG_FOLDERS = {
+    "go2": ("go2_symm",),
+    "x1": ("dobot_x1_symm",),
+    "x1_go2bend": ("dobot_x1_symm", "dobot_x1_go2bend_symm"),
+}
+SUPPORTED_ROBOTS = tuple(_ROBOT_CONFIG_FOLDERS)
 GROUND_COLLISION_PATH = "/World/ground/terrain/mesh"
 METRIC_LABELS = {
     "torque_squared": "Raw torque squared",
@@ -141,6 +149,70 @@ def canonical_training_gaits() -> tuple[str, tuple[dict[str, Any], ...]]:
     return str(symm_quadruped.SYMM_QUADRUPED_GAIT_LIBRARY_TRAIN_VERSION), gaits
 
 
+def load_trained_gaits(checkpoint: Path) -> tuple[dict[str, Any], ...]:
+    """Resolve only gait templates sampled by the checkpoint's saved training configuration."""
+    from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped._training_gaits import (
+        _read_training_config,
+        _trained_foot_thetas,
+    )
+
+    rows = _trained_foot_thetas(_read_training_config(checkpoint))
+    _, canonical = canonical_training_gaits()
+    result: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        matches = [
+            gait
+            for gait in canonical
+            if np.allclose((np.asarray(row) - gait["phases"] + 0.5) % 1.0 - 0.5, 0.0, rtol=0.0, atol=1.0e-6)
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"Saved training gait {row} has no unique supported evaluation template.")
+        gait = matches[0]
+        result[int(gait["index"])] = dict(gait)
+    return tuple(result.values())
+
+
+def training_runtime_overrides(checkpoint: Path) -> list[str]:
+    """Restore saved gait timing [s, cycle fraction] and observation history for inference."""
+    from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped._training_gaits import (
+        _read_training_config,
+    )
+
+    saved = _read_training_config(checkpoint)
+    command = saved["commands"]["base_velocity"]
+    required = {"gait_period", "duty_factor", "calculate_from_sampling_curve"}
+    if not required.issubset(command):
+        raise ValueError(
+            f"Saved training configuration is missing gait timing fields: {sorted(required - command.keys())}"
+        )
+    period = float(command["gait_period"])
+    duty = float(command["duty_factor"])
+    curve = str(command["calculate_from_sampling_curve"]).lower()
+    if not math.isfinite(period) or period <= 0.0 or not math.isfinite(duty) or not 0.0 < duty < 1.0:
+        raise ValueError("Saved gait period must be positive and duty factor must lie between zero and one.")
+    if curve not in ("true", "false"):
+        raise ValueError("Saved calculate_from_sampling_curve must be a boolean.")
+    overrides = [
+        f"env.commands.base_velocity.gait_period={period}",
+        f"env.commands.base_velocity.duty_factor={duty}",
+        f"env.commands.base_velocity.calculate_from_sampling_curve={curve == 'true'}",
+        "env.commands.base_velocity.add_noise_period=False",
+        "env.commands.base_velocity.add_noise_theta=False",
+    ]
+    if "base_height_range" in command:
+        heights = [float(value) for value in command["base_height_range"]]
+        if len(heights) != 2 or not all(math.isfinite(value) and value > 0.0 for value in heights):
+            raise ValueError("Saved nominal base height range must contain two finite positive heights [m].")
+        overrides.append(f"env.commands.base_velocity.base_height_range={json.dumps(heights, separators=(',', ':'))}")
+    history = saved.get("policy_observation_history")
+    if isinstance(history, dict):
+        length = int(history["history_length"])
+        if length < 1:
+            raise ValueError("Saved policy history length must be positive.")
+        overrides.append(f"env.policy_observation_history.history_length={length}")
+    return overrides
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -184,8 +256,21 @@ def _combined_file_provenance(repo_root: Path, paths: Iterable[Path]) -> dict[st
     }
 
 
+def _robot_config_paths(repo_root: Path, robot: str) -> tuple[Path, ...]:
+    config_root = (
+        repo_root
+        / "source"
+        / "isaaclab_tasks"
+        / "isaaclab_tasks"
+        / "manager_based"
+        / "locomotion"
+        / "velocity"
+        / "config"
+    )
+    return tuple(config_root / folder / "flat_env_cfg.py" for folder in _ROBOT_CONFIG_FOLDERS[robot])
+
+
 def _source_provenance(repo_root: Path, robot: str) -> dict[str, Any]:
-    config_folder = "go2_symm" if robot == "go2" else "dobot_x1_symm"
     velocity_root = (
         repo_root / "source" / "isaaclab_tasks" / "isaaclab_tasks" / "manager_based" / "locomotion" / "velocity"
     )
@@ -195,8 +280,9 @@ def _source_provenance(repo_root: Path, robot: str) -> dict[str, Any]:
         repo_root / "scripts" / "symm_locomotion" / "evaluation.py",
         repo_root / "scripts" / "symm_locomotion" / "_leg_usage_metrics.py",
         repo_root / "scripts" / "symm_locomotion" / "symm_cli.py",
+        velocity_root / "config" / "symm_quadruped" / "_training_gaits.py",
         velocity_root / "mdp" / "symm_quadruped.py",
-        velocity_root / "config" / config_folder / "flat_env_cfg.py",
+        *_robot_config_paths(repo_root, robot),
         velocity_root / "config" / "symm_quadruped" / "_checkpoint_compat.py",
         velocity_root / "config" / "symm_quadruped" / "_evaluation_gait.py",
         repo_root / "scripts" / "reinforcement_learning" / "rsl_rl" / "evaluation_rollout_plotter.py",
@@ -368,6 +454,14 @@ def build_study(
     except KeyError as exc:
         raise ValueError(f"Unknown gait index {exc.args[0]}; choose indices 0 through 9.") from exc
 
+    if protocol == "trained":
+        trained_gaits = load_trained_gaits(checkpoint)
+        trained_indices = {int(gait["index"]) for gait in trained_gaits}
+        if tuple(int(value) for value in gait_indices) == tuple(range(10)):
+            selected_gaits = list(trained_gaits)
+        elif any(int(gait["index"]) not in trained_indices for gait in selected_gaits):
+            raise ValueError("Requested gait index was not present in this checkpoint's training configuration.")
+
     light_cell_specs: list[tuple[dict[str, Any], float]] | None = None
     if protocol == "light":
         if tuple(float(value) for value in velocities_mps) != DEFAULT_VELOCITIES_MPS:
@@ -497,23 +591,14 @@ def build_study(
                     "sentinel_rejection_threshold_nm": _metrics.EFFORT_LIMIT_SENTINEL_NM,
                     "source": _combined_file_provenance(
                         repo_root,
-                        (
-                            repo_root
-                            / "source"
-                            / "isaaclab_tasks"
-                            / "isaaclab_tasks"
-                            / "manager_based"
-                            / "locomotion"
-                            / "velocity"
-                            / "config"
-                            / ("go2_symm" if robot == "go2" else "dobot_x1_symm")
-                            / "flat_env_cfg.py",
-                        ),
+                        _robot_config_paths(repo_root, robot),
                     ),
                     "fallback_allowed": False,
                 },
             }
         )
+    if protocol == "trained":
+        study["aggregation"]["overall"] = "equal mean across the trained gait families represented in this study"
     from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped._checkpoint_compat import (
         _legacy_profile,
     )
@@ -1985,7 +2070,7 @@ def analyze_cell(study: dict[str, Any], cell: dict[str, Any], study_root: Path) 
     """Analyze one cell using its immutable recorded method version."""
     if study.get("method_version") == METHOD_VERSION:
         return _analyze_cell_legacy(study, cell, study_root)
-    if study.get("method_version") not in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION}:
+    if study.get("method_version") not in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION, TRAINED_METHOD_VERSION}:
         return _invalid_cell_row(cell, f"unsupported method version {study.get('method_version')!r}")
     return _publication_cell(study, cell, study_root)
 
@@ -2026,7 +2111,16 @@ def aggregate_results(
     expected_by_group: dict[tuple[str, float | None], int] = defaultdict(int)
     valid_by_group: dict[tuple[str, float | None], list[dict[str, Any]]] = defaultdict(list)
     rows_by_group: dict[tuple[str, float | None], list[dict[str, Any]]] = defaultdict(list)
-    publication_method = study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION}
+    publication_method = study.get("method_version") in {
+        FULL_METHOD_VERSION,
+        LIGHT_METHOD_VERSION,
+        TRAINED_METHOD_VERSION,
+    }
+    overall_families = (
+        tuple(family for family in FAMILY_ORDER if any(cell["family"] == family for cell in study["cells"]))
+        if study.get("protocol") == "trained"
+        else FAMILY_ORDER
+    )
     for cell, row in zip(study["cells"], rows, strict=True):
         keys = ((cell["family"], float(cell["velocity_mps"])), (cell["family"], None))
         for key in keys:
@@ -2121,9 +2215,9 @@ def aggregate_results(
             family: family_summary[family].get(f"{metric}_tracking_qualified_observed_mean_abs_imbalance_percent")
             for family in FAMILY_ORDER
         }
-        complete = all(family_summary[family].get(f"{metric}_complete") is True for family in FAMILY_ORDER)
+        complete = all(family_summary[family].get(f"{metric}_complete") is True for family in overall_families)
         tracking_complete = all(
-            family_summary[family].get(f"{metric}_tracking_qualified_complete") is True for family in FAMILY_ORDER
+            family_summary[family].get(f"{metric}_tracking_qualified_complete") is True for family in overall_families
         )
         metric_result = {
             "label": METRIC_LABELS[metric],
@@ -2631,7 +2725,7 @@ def _write_report(
         "Primary balance is the mean of per-cell absolute front/hind imbalance. Signed imbalance is retained in "
         "`cell_metrics.csv` and `family_metrics.csv`, but opposite signs never cancel in the primary score. The "
         "overall "
-        "score gives each of trot, bound, half-bound, and gallop equal weight.",
+        f"score uses: {study['aggregation']['overall']}.",
         "",
         "## Coverage by family",
         "",
@@ -2874,7 +2968,7 @@ def analyze_study(study_path: Path) -> dict[str, Any]:
         "metrics_sha256": analysis_provenance["metrics_sha256"],
         "input_study_sha256": analysis_provenance["input_study_sha256"],
     }
-    if study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION}:
+    if study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION, TRAINED_METHOD_VERSION}:
         paired_payload = _load_paired_consistency_module().analyze_study_file(study_path)
         paired_outputs = paired_payload["outputs"]
         overall["paired_tr_consistency"] = {
@@ -2983,7 +3077,7 @@ def analyze_study(study_path: Path) -> dict[str, Any]:
         _save_family_figure(figures_dir / f"{family}.svg", family, family_rows)
     _save_overall_figure(figures_dir / "overall.svg", overall)
     _save_coverage_figure(figures_dir / "coverage.svg", family_rows)
-    if study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION}:
+    if study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION, TRAINED_METHOD_VERSION}:
         _save_screening_figure(figures_dir / "screening_report.svg", study, rows, overall)
         _write_screening_report(metrics_dir / "SCREENING_REPORT.md", study, rows, overall)
     _write_report(metrics_dir / "REPORT.md", study, family_rows, overall)

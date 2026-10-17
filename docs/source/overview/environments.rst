@@ -537,6 +537,15 @@ Environments based on legged locomotion tasks.
     | |tracking-loco-manip-digit|  | |tracking-loco-manip-digit-link|             | Track a root velocity and hand pose command with the Agility Digit robot     | **physics=** ``physx``       |
     +------------------------------+----------------------------------------------+------------------------------------------------------------------------------+------------------------------+
 
+The Dobot X1 Go2-bend variant is available as
+``Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-v0`` and
+``Isaac-Velocity-Flat-Dobot-X1-Go2Bend-Symm-Play-v0``. Select it with
+``--robot x1_go2bend`` in the symmetric locomotion launchers. All four legs use
+hip/abad, thigh, and calf defaults of 0, 0.6983, and -1.2842 rad, respectively.
+The task inherits X1 dynamics, rewards, gait timing, curriculum, and PPO/TRS
+settings, with matching rear-calf limits and logical joint signs. Its experiment
+directory is ``logs/rsl_rl/dobot_x1_go2bend_symm_flat/``.
+
 .. |velocity-flat-anymal-b-link| replace:: `Isaac-Velocity-Flat-Anymal-B-v0 <../../../source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/anymal_b/flat_env_cfg.py>`__
 .. |velocity-rough-anymal-b-link| replace:: `Isaac-Velocity-Rough-Anymal-B-v0 <../../../source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/anymal_b/rough_env_cfg.py>`__
 
