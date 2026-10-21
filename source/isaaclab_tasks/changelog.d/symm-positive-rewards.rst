@@ -33,9 +33,11 @@ Changed
   velocity-based timing, enable ``calculate_from_sampling_curve`` and,
   optionally, ``add_noise_period`` in the command configuration.
 
-* Enabled the leg-permutation symmetry penalty with weight 0.1 for symmetric
-  Go2 and X1. Set ``rewards.leg_permutation_symmetry.weight=0.0`` to restore
-  the previous disabled setting.
+* Increased the leg-permutation symmetry penalty weight from 0.1 to 0.4 for
+  symmetric Go2 and X1, including the Go2-bend X1 variant. Retained the
+  exponential coefficient of 5 and the existing error normalization. Set
+  ``rewards.leg_permutation_symmetry.weight=0.1`` to restore the previous
+  strength, or ``0.0`` to disable the term.
 
 * Changed the base-height reward targets to 0.30 m for symmetric Go2 and
   0.35 m for X1. To restore the previous higher targets, set
@@ -64,11 +66,11 @@ Changed
   Restored Ji22 diagnostics and distinguished negative signed reward sums from
   clipping in the training diagnostics.
 
-* Changed the symmetric Go2 and X1 tasks to use nine bounded exponential
+* Changed the symmetric Go2 and X1 tasks to use eight bounded exponential
   penalties. Hip and joint-limit penalties now used measured positions;
   joint limits allowed the central 90% of each full runtime range. Added
-  vertical velocity, joint velocity, torque, action smoothness, roll/pitch
-  angular velocity, and control-step joint acceleration penalties. Existing
+  vertical velocity, joint velocity, torque, action smoothness,
+  and control-step joint acceleration penalties. Existing
   reward keys remained supported. To retain previous behavior, explicitly
   select the legacy hip-action, action-rate, and joint-target-limit helpers
   and their previous parameters and weights. Configure the new penalties
@@ -76,14 +78,18 @@ Changed
   their outer weight; use ``dof_vel_l2`` and ``action_smoothness`` for the
   newly introduced keys.
 
-* Changed the symmetric Go2 and X1 tasks to use four positive exponential
-  reward terms with weights totaling 1.0 before timestep scaling: planar
-  tracking 0.4, yaw tracking 0.3, height 0.15, and roll/pitch 0.15. Added
-  roll-and-pitch tracking and restored a swing-trajectory clearance penalty.
+* Changed the symmetric Go2 and X1 tasks to use three positive exponential
+  reward terms with weights totaling 0.85 before timestep scaling: planar
+  tracking 0.4, yaw tracking 0.3, and height 0.15. Restored the roll-only
+  penalty with weight 0.2 and error scale 0.25 rad. Disabled the combined
+  roll/pitch reward and angular-velocity penalty, retaining their definitions
+  as comments in the shared configuration. To restore pitch shaping, re-enable
+  those definitions in ``configure_rewards`` and disable ``base_roll_exp``.
+  Restored a swing-trajectory clearance penalty.
   Split foot periodicity into per-foot force and velocity penalties.
-  Update reward overrides and log consumers to use ``base_roll_pitch_exp``,
-  ``foot_periodicity_force``, and ``foot_periodicity_velocity`` instead of the
-  previously active ``base_roll_exp`` and ``foot_periodicity`` terms. The
+  Update reward overrides and log consumers to use ``base_roll_exp``,
+  ``foot_periodicity_force``, and ``foot_periodicity_velocity`` for the
+  active orientation and periodicity terms. The
   previous reward helpers remained available for explicit configurations.
 
 * Changed foot clearance to reuse the force-periodicity swing gate and penalize

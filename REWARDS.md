@@ -7,17 +7,20 @@ SPDX-License-Identifier: BSD-3-Clause
 
 # Reward functions used by `train.sh`
 
-Snapshot of the shared X1 and Go2 configuration on **2026-10-16**.
+Snapshot of the shared X1 and Go2 configuration on **2026-10-19**.
 
-Both robots use **four positive reward terms and fourteen nonzero penalty terms**.
-The positive weights sum to **1.0**. Nine penalties use
+Both robots use **three positive reward terms and fourteen nonzero penalty terms**.
+The positive weights sum to **0.85**. Eight penalties use
 $f_i=\exp(-k_i E_i)-1$, with nonnegative errors summed without averaging;
-their combined weighted penalty is bounded by $[-2.5,0]$. The two foot-periodicity
+their combined weighted penalty is bounded by $[-2.45,0]$. The restored roll-only
+penalty has weight 0.2 and bound $[-0.2,0]$. The roll-and-pitch reward and the
+roll/pitch angular-velocity penalty are disabled, with their definitions retained
+as comments in the shared configuration. The two foot-periodicity
 terms apply a gated exponential-minus-one to each foot before summing, with
 weight 0.3 per foot for each component and a combined bound of $[-1.2,0]$.
 Foot clearance adds a per-foot absolute swing-trajectory error penalty with weight 0.1
-and no command gate. Leg-permutation symmetry adds a penalty with weight 0.1,
-bounded by $[-0.1,0]$. Torque-difference smoothness uses the backup branch's
+and no command gate. Leg-permutation symmetry adds a penalty with weight 0.4,
+bounded by $[-0.4,0]$. Torque-difference smoothness uses the backup branch's
 stability-gated penalty with weight 0.1, also bounded by $[-0.1,0]$. `--no-trs`
 controls learning-time symmetry separately from the environment rewards.
 
@@ -32,9 +35,9 @@ first update of a fresh run has no valid pairs, so both TRS losses are zero
 while the normal PPO update proceeds. Later updates use valid pairs as they
 become available. These optimizer losses do not enter the reward sum below.
 
-The positive terms use exponential tracking scores for velocity, squared base-height
-error, and squared roll plus pitch. Swing force, stance speed, and absolute swing-height
-error contribute separate penalties. Both velocity-tracking terms use
+The positive terms use exponential tracking scores for velocity and squared base-height
+error. The roll-only penalty uses absolute roll error. Swing force, stance speed,
+and absolute swing-height error contribute separate penalties. Both velocity-tracking terms use
 the edited standard implementations with a direct denominator of 0.25.
 Previously trained checkpoints may have used different settings.
 
@@ -49,7 +52,7 @@ penalty functions themselves return nonpositive values.
 | `track_lin_vel_xy_exp` | $f_{xy}=\exp[-((v_x-v_x^*)^2+(v_y-v_y^*)^2)/0.25]$ | 0.40 |
 | `track_ang_vel_z_exp` | $f_{\mathrm{yaw}}=\exp[-(\omega_z-\omega_z^*)^2/0.25]$ | 0.30 |
 | `base_height` | $f_{\mathrm{height}}=\exp[-100(h-h^*)^2]$ | 0.15 |
-| `base_roll_pitch_exp` | $f_{\mathrm{orientation}}=\exp[-10(\rho^2+\eta^2)]$ | 0.15 |
+| `base_roll_exp` | $f_{\mathrm{roll}}=\exp(-\lvert\rho\rvert/0.25)-1$ | 0.20 |
 | `foot_clearance` | $f_{\mathrm{clear}}=\sum_\ell S_\ell[\exp(-40\lvert z_\ell^*-z_\ell\rvert)-1]$ | 0.10 |
 | `foot_periodicity_force` | $f_F=\sum_\ell S_\ell[\exp(-0.05F_\ell)-1]$ | 0.30 |
 | `foot_periodicity_velocity` | $f_u=\sum_\ell T_\ell[\exp(-2u_\ell)-1]$ | 0.30 |
@@ -60,16 +63,15 @@ penalty functions themselves return nonpositive values.
 | `dof_vel_l2` | $f_{\dot q}=\exp[-0.01\sum_j\dot q_j^2]-1$ | 0.05 |
 | `dof_torques_l2` | $f_\tau=\exp[-0.004\sum_j\tau_j^2]-1$ | 0.05 |
 | `action_smoothness` | $f_{\Delta^2a}=\exp[-0.05\sum_j(a_{t,j}-2a_{t-1,j}+a_{t-2,j})^2]-1$ | 0.05 |
-| `ang_vel_xy_l2` | $f_{\omega_{xy}}=\exp[-((\omega_x^b)^2+(\omega_y^b)^2)]-1$ | 0.05 |
 | `dof_acc_l2` | $f_{\ddot q}=\exp[-4\times10^{-6}\sum_j((\dot q_{t,j}-\dot q_{t-1,j})/\Delta t)^2]-1$ | 0.05 |
-| `leg_permutation_symmetry` | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0.10 |
+| `leg_permutation_symmetry` | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0.40 |
 | `smoothness` | $f_{\mathrm{smooth}}=-G_{\mathrm{stable}}\left(1-e^{-0.10D_\tau}\right)$ | 0.10 |
 | `alive_bonus` (zero weight) | $f_{\mathrm{alive}}=1$ | 0 |
 | `termination_penalty` (zero weight) | $f_{\mathrm{term}}=\mathbf 1[\text{non-timeout termination}]$ | 0 |
 
 The retained `hip_action_penalty` and `joint_target_limits` configuration keys
 now select measured-position penalties. `action_rate_l2` selects
-`action_rate_l2_exp_penalty`, using squared action differences. The nine
+`action_rate_l2_exp_penalty`, using squared action differences. The eight
 joint, body-velocity, and action penalties have no stability gate. The old action-based hip, L1 action-rate,
 and target-limit helpers remain available for explicit legacy configurations.
 Both robots use the same weights, with these height settings:
@@ -112,11 +114,11 @@ The current termination weight is zero. Before timestep scaling, define
 
 $$
 \begin{aligned}
-A={}&0.40f_{xy}+0.30f_{\mathrm{yaw}}+0.15f_{\mathrm{height}}
-+0.15f_{\mathrm{orientation}},\\
+A={}&0.40f_{xy}+0.30f_{\mathrm{yaw}}+0.15f_{\mathrm{height}},\\
 B={}&0.10f_{\mathrm{hip}}+2.00f_{\mathrm{limit}}+0.05f_{\mathrm{rate}}+0.10f_{v_z}\\
-&+0.05f_{\dot q}+0.05f_\tau+0.05f_{\Delta^2a}+0.05f_{\omega_{xy}}+0.05f_{\ddot q}
-+0.30f_F+0.30f_u+0.10f_{\mathrm{clear}}+0.10f_{\mathrm{sym}}+0.10f_{\mathrm{smooth}}.
+&+0.05f_{\dot q}+0.05f_\tau+0.05f_{\Delta^2a}+0.05f_{\ddot q}
++0.30f_F+0.30f_u+0.10f_{\mathrm{clear}}+0.40f_{\mathrm{sym}}+0.10f_{\mathrm{smooth}}
++0.20f_{\mathrm{roll}}.
 \end{aligned}
 $$
 
@@ -126,8 +128,8 @@ $$
 \boxed{R=0.02A\exp(B).}
 $$
 
-Each positive raw term is at most 1, so $A\le1$. The total reward is bounded
-by **$[0,1]$ before timestep scaling**, or **$[0,0.02]$ per step**, with the current
+Each positive raw term is at most 1, so $A\le0.85$. The total reward is bounded
+by **$[0,0.85]$ before timestep scaling**, or **$[0,0.017]$ per step**, with the current
 zero termination weight. The fourteen penalty terms reduce the positive sum
 multiplicatively through $\exp(B)$.
 
@@ -341,8 +343,8 @@ environment. The first action therefore contributes to both penalties.
 
 ### Velocity, torque, and acceleration
 
-Base linear and angular velocities use the body frame. `ang_vel_xy_l2`
-penalizes both roll and pitch angular velocity, while excluding yaw. Joint
+Base linear and angular velocities use the body frame. `ang_vel_xy_l2` is
+disabled, so there is no direct roll/pitch angular-velocity penalty. Joint
 velocity and torque errors sum squares over the 12 configured robot joints.
 Torques are the applied torques at reward evaluation.
 
@@ -351,6 +353,18 @@ consecutive control steps and divides by $\Delta t=0.02$ s. It keeps its own
 history instead of using a backend's physics-substep acceleration. Reset
 environments initialize that history from their reset joint velocities; other
 environments retain their history.
+
+### Base roll
+
+The restored `base_roll_exp` term uses `base_roll_exp_penalty`, with weight 0.2:
+
+$$
+f_{\mathrm{roll}}=\exp(-\lvert\rho\rvert/0.25)-1.
+$$
+
+It penalizes absolute roll angle and ignores pitch and yaw. The former
+`base_roll_pitch_exp` reward is disabled. Pitch still affects orientation
+termination conditions and the legacy stability gate used by torque smoothness.
 
 ### Torque smoothness
 
@@ -470,7 +484,8 @@ To disable the active leg-permutation symmetry penalty, pass
 
 The following terms are set to `None`: `feet_air_time`, `flat_orientation_l2`,
 `dof_pos_limits`, `undesired_contacts`, `cmd`, `track_lin_vel_x_exp`,
-`track_lin_vel_y_exp`, `base_roll_exp`, `foot_periodicity`, `sagittal_plane`, and `straight_line_motion`.
+`track_lin_vel_y_exp`, `base_roll_pitch_exp`, `ang_vel_xy_l2`, `foot_periodicity`,
+`sagittal_plane`, and `straight_line_motion`.
 
 ## Sources and other formats
 

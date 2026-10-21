@@ -50,6 +50,38 @@ def test_train_dry_run_uses_selected_robot_task(capsys):
     assert " 1" in captured.out
 
 
+def test_train_resume_logging_forwards_resume_without_argument_abbreviation(capsys):
+    cli = _load_symm_cli()
+    result = cli.main(
+        [
+            "train",
+            "--robot",
+            "go2",
+            "--resume",
+            "--resume_logging",
+            "--wandb_run_id",
+            "original_id",
+            "--load_run",
+            "original_run",
+            "--checkpoint",
+            "model_999.pt",
+            "--dry-run",
+            "--no-conda-run",
+        ]
+    )
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "--resume_logging" in output
+    assert "--resume --load_run original_run" in output
+    assert "--wandb_run_id original_id" in output
+
+
+def test_train_resume_logging_requires_a_checkpoint_resume(capsys):
+    cli = _load_symm_cli()
+    assert cli.main(["train", "--resume_logging", "--dry-run"]) == 2
+    assert "requires --resume" in capsys.readouterr().err
+
+
 def test_train_defaults_apply_trs_to_in_place_commands():
     symm_cli = _load_symm_cli()
     parser = symm_cli.build_parser()

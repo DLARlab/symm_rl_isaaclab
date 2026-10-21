@@ -308,7 +308,12 @@ def configure_rewards(
     )
     env_cfg.rewards.track_ang_vel_z_exp = None
     env_cfg.rewards.lin_vel_z_l2 = RewTerm(func=mdp_module.lin_vel_z_exp_penalty, weight=0.10, params={"scale": 5.0})
-    env_cfg.rewards.ang_vel_xy_l2 = RewTerm(func=mdp_module.ang_vel_xy_exp_penalty, weight=0.05, params={"scale": 1.0})
+    # env_cfg.rewards.ang_vel_xy_l2 = RewTerm(
+    #     func=mdp_module.ang_vel_xy_exp_penalty,
+    #     weight=0.05,
+    #     params={"scale": 1.0},
+    # )
+    env_cfg.rewards.ang_vel_xy_l2 = None
     env_cfg.rewards.dof_vel_l2 = RewTerm(
         func=mdp_module.joint_vel_exp_penalty, weight=0.05, params={"scale": 0.01, "asset_cfg": joint_cfg}
     )
@@ -340,11 +345,16 @@ def configure_rewards(
         weight=0.3,
         params={"command_name": "base_velocity", "std": yaw_tracking_error_scale},
     )
-    env_cfg.rewards.base_roll_exp = None
-    env_cfg.rewards.base_roll_pitch_exp = RewTerm(
-        func=mdp_module.base_roll_pitch_exp,
-        weight=0.15,
-        params={"scale": 10.0},
+    # env_cfg.rewards.base_roll_pitch_exp = RewTerm(
+    #     func=mdp_module.base_roll_pitch_exp,
+    #     weight=0.15,
+    #     params={"scale": 10.0},
+    # )
+    env_cfg.rewards.base_roll_pitch_exp = None
+    env_cfg.rewards.base_roll_exp = RewTerm(
+        func=mdp_module.base_roll_exp_penalty,
+        weight=0.20,
+        params={"error_scale": 0.25},
     )
     env_cfg.rewards.foot_periodicity = None
     env_cfg.rewards.foot_periodicity_force = RewTerm(
@@ -437,7 +447,7 @@ def configure_rewards(
     env_cfg.rewards.straight_line_motion = None
     env_cfg.rewards.leg_permutation_symmetry = RewTerm(
         func=mdp_module.leg_permutation_symmetry_penalty,
-        weight=0.1,
+        weight=0.4,
         params={"command_name": "base_velocity", "joint_cfg": joint_cfg, "phase_sync_tolerance": 0.02},
     )
     if logical_joint_signs is not None:

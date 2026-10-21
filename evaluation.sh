@@ -14,6 +14,8 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
 fi
 
 # Defaults: latest Go2 checkpoint, all saved training gaits, videos/data and metrics.
+# Statistics: 100 parallel trials per gait/command, 250 settling + 1000 measured steps.
+# Videos: one environment, retaining the existing video duration.
 # Example: bash evaluation.sh --robot x1_go2bend --run RUN --model 1499
 # --mode video|metrics|both; --gait all|trot|bound|halfbound|rotarygallop|traversegallop
 exec bash "$REPO_ROOT/scripts/symm_locomotion/_run.sh" evaluate_trained.py "$@"

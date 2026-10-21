@@ -1192,6 +1192,7 @@ def test_child_error_still_runs_partial_analysis(monkeypatch, tmp_path):
     analyzed = []
 
     class FakeAnalysis:
+        study_output_name = staticmethod(lambda profile, **kwargs: "leg_usage_grid_full_v3")
         PROTOCOL_OUTPUT_ROOT_NAMES = {
             "full": "leg_usage_grid_full_v3",
             "light": "leg_usage_grid_light",

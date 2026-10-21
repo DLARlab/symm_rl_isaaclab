@@ -36,6 +36,7 @@ def _load_grid_helpers() -> SimpleNamespace:
         "_validate_trained_leg_usage_gaits",
         "_validate_immutable_leg_usage_protocol",
         "_load_leg_usage_plan",
+        "_validate_parallel_leg_usage_plan",
         "_validate_leg_usage_task",
         "_sha256_file",
         "_validate_leg_usage_checkpoint",
@@ -341,7 +342,8 @@ def test_sparse_gait_ids_map_to_sorted_installed_rows():
     assert helpers._configured_gait_index_by_id(plan) == {0: 0, 6: 1, 9: 2}
 
 
-def test_fixed_grid_configuration_disables_training_gait_sampling_profile():
+@pytest.mark.parametrize("num_envs", [1, 100])
+def test_fixed_grid_configuration_disables_training_gait_sampling_profile(num_envs):
     helpers = _load_grid_helpers()
     command_cfg = SimpleNamespace(
         init_foot_thetas=(),
@@ -366,6 +368,7 @@ def test_fixed_grid_configuration_disables_training_gait_sampling_profile():
         episode_length_s=0.0,
     )
     plan = {
+        "num_envs": num_envs,
         "gait_library_version": "time_reversal_closed_v2",
         "settle_s": 5.0,
         "measure_s": 10.0,
@@ -378,7 +381,7 @@ def test_fixed_grid_configuration_disables_training_gait_sampling_profile():
 
     helpers._configure_leg_usage_env(env_cfg, plan)
 
-    assert env_cfg.scene.num_envs == 1
+    assert env_cfg.scene.num_envs == num_envs
     assert command_cfg.init_foot_thetas == (
         (-0.13, 0.13, 0.63, 0.37),
         (-0.13, 0.13, 0.37, 0.63),

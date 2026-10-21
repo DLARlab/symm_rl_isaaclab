@@ -719,9 +719,17 @@ def analyze_paired_study(
         raise ValueError(f"Paired time-reversal analysis supports {sorted(_ROBOT_JOINT_REFLECTION_SIGNS)}.")
     gaits = {int(gait["index"]): gait for gait in study.get("gaits", [])}
     cells = list(study.get("cells", []))
-    by_key = {(int(cell["gait_index"]), float(cell["velocity_mps"]), int(cell.get("seed", 0))): cell for cell in cells}
+    by_key = {
+        (
+            int(cell["gait_index"]),
+            float(cell["velocity_mps"]),
+            int(cell.get("seed", 0)),
+            int(cell.get("trial_index", 0)),
+        ): cell
+        for cell in cells
+    }
     if len(by_key) != len(cells):
-        raise ValueError("Paired study cells must be unique by gait, velocity, and seed.")
+        raise ValueError("Paired study cells must be unique by gait, velocity, seed, and trial index.")
     rows: list[dict[str, Any]] = []
     archive_identity_reasons = archive_identity_reasons or {}
     for positive in cells:
@@ -733,7 +741,7 @@ def analyze_paired_study(
         if gait is None:
             continue
         partner_index = int(gait.get("time_reversal_partner", gait_index))
-        partner = by_key.get((partner_index, -speed, int(positive.get("seed", 0))))
+        partner = by_key.get((partner_index, -speed, int(positive.get("seed", 0)), int(positive.get("trial_index", 0))))
         base = {
             "robot": robot,
             "protocol": study.get("protocol", "legacy-full"),
@@ -747,6 +755,7 @@ def analyze_paired_study(
             "direction": "positive_to_negative",
             "speed_mps": speed,
             "seed": int(positive.get("seed", 0)),
+            "trial_index": int(positive.get("trial_index", 0)),
             "phase_alignment": "duty_aware_reflection_and_cycle_averaged_interpolation",
             "phase_samples": phase_samples,
         }

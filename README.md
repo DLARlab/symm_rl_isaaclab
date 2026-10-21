@@ -223,6 +223,57 @@ and supports recording and evaluation through the same `--robot` selector.
 bash scripts/symm_locomotion/train.sh --robot x1_go2bend --iterations 10000 --num-envs 2048 --tr-policy-coef 0.1 --tr-value-coef 0
 ```
 
+### Resuming training and logs
+
+New RSL-RL checkpoints save command curriculum bin weights, cumulative training
+steps/time, and logging identity alongside the actor, critic, and optimizer.
+`--resume` restores this state and starts at iteration `N + 1` when loading
+`model_N.pt`. `--iterations` specifies additional updates. Simulation episodes
+and observation histories start fresh, with commands sampled from the restored
+curriculum. Older checkpoints still load, with a warning that their curriculum
+and cumulative counters restart from initial values. Such restarts are marked
+with `Resume/curriculum_restarted` in the logs. Changed command grid ranges
+or bin counts are rejected rather than silently applying incompatible weights.
+
+By default a resumed policy writes a new logging run. Add `--resume_logging` to
+append TensorBoard events in the original folder and resume the original W&B
+run, if using W&B:
+
+```bash
+bash scripts/symm_locomotion/train.sh --robot go2 --no-trs \
+  --resume --load_run RUN_FOLDER --checkpoint model_9999.pt \
+  --iterations 5000 --num-envs 2048 --resume_logging \
+  --logger wandb --log_project_name Go2-symm-rl \
+  env.policy_observation_history.history_length=20
+```
+
+Use the original robot, observation profile, and gait library when continuing
+the same logging run. Updated configuration snapshots go under
+`resume_segments/<timestamp>/params/`, preserving the original `params/`.
+New runs save their W&B identity in `training_resume.json` and checkpoints.
+For older W&B runs without this metadata, also supply
+`--wandb_run_id ORIGINAL_ID` and use the original project/entity. W&B must already
+contain that run; this option does not create a replacement. Logging continuation
+rejects histories extending beyond the selected checkpoint; use a new logging
+run to branch from an earlier checkpoint.
+
+To combine existing local TensorBoard histories or W&B run folders offline:
+
+```bash
+./isaaclab.sh -p scripts/symm_locomotion/merge_training_logs.py \
+  ORIGINAL_RUN_DIR RESUMED_RUN_DIR --output_dir analysis/combined_training \
+  --curriculum_restarted 1
+```
+
+The output contains TensorBoard events, `metrics.csv`, and `merge_manifest.json`.
+Later inputs replace overlapping metric/iteration points. If iteration numbers
+restart at zero, specify one offset per input, for example
+`--step_offsets 0 10000`. The optional `--curriculum_restarted` values are
+zero-based input indices; unmarked curriculum boundaries remain unknown.
+Tags ending in `/time` are omitted because their elapsed-second axes cannot use
+iteration offsets. Source files and online W&B runs are unchanged, and the
+output directory must be new.
+
 Good no-TRS baselines:
 
 ```powershell
@@ -311,10 +362,16 @@ gaits in that checkpoint's saved configuration. A family selector such as
 The default `--mode both` records one 30-second six-direction video per trained
 gait, with plots, `sim_data.npz`, and foot-periodicity CSVs under `<run>/eval/`.
 It then measures each selected gait at `vx = -1, +1 m/s`, using separate trials
-with 5 seconds settling and 10 seconds measurement. Current metric reports go
-under `<run>/evaluations/leg_usage_grid_trained/`. These are separate rollouts;
+with 100 parallel environments per gait/command. Each trial has 250 settling
+steps (5 seconds) followed by 1,000 measured steps (20 seconds). Every trial is
+recorded and included in the statistics; a terminated trial stops at its first
+episode end while the other environments continue. Current metric reports go
+under `<run>/evaluations/leg_usage_grid_trained_envs100_steps1000/`. These are separate rollouts;
 the statistical report does not summarize the six-direction video sweep.
 Saved timing and history are restored, and evaluation phase/timing noise is disabled.
+The nominal reset profile is unchanged: these are parallel replicas of the same
+initial configuration, not randomized initial conditions. Older single-trial
+results remain in their original directories.
 
 Use `--mode video` or `--mode metrics` to run one part, `--velocities -0.5 0.5`
 to change the statistical speed grid, and `--no-gif` to skip GIF conversion.

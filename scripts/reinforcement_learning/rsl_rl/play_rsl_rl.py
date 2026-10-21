@@ -564,6 +564,29 @@ def _validate_immutable_leg_usage_protocol(
             raise ValueError("The immutable light protocol must contain its exact eight stable row/direction cells.")
 
 
+def _validate_parallel_leg_usage_plan(plan: dict[str, Any]) -> None:
+    """Require exactly one uniquely indexed trial per environment in every scenario."""
+    num_envs = plan.get("num_envs", 1)
+    if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs < 1:
+        raise ValueError("Leg-usage num_envs must be a positive integer.")
+    if num_envs == 1:
+        return
+    if plan.get("protocol") != "trained":
+        raise ValueError("Parallel trials require the trained-gait profile.")
+    trial_groups: dict[tuple[int, float, int], set[int]] = {}
+    for cell in plan["cells"]:
+        trial_index = cell.get("trial_index")
+        if isinstance(trial_index, bool) or not isinstance(trial_index, int) or not 0 <= trial_index < num_envs:
+            raise ValueError("Each parallel cell must have a trial_index within num_envs.")
+        key = (int(cell["gait_index"]), float(cell["velocity_mps"]), int(cell["seed"]))
+        group = trial_groups.setdefault(key, set())
+        if trial_index in group:
+            raise ValueError("Duplicate trial_index within a gait/command group.")
+        group.add(trial_index)
+    if any(group != set(range(num_envs)) for group in trial_groups.values()):
+        raise ValueError("Each gait/command must contain one trial per parallel environment.")
+
+
 def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
     """Load and validate the immutable portions of a leg-usage study plan."""
     plan_path = Path(plan_value).expanduser().resolve()
@@ -631,6 +654,7 @@ def _load_leg_usage_plan(plan_value: str) -> tuple[dict[str, Any], Path, str]:
         if not isinstance(cell.get("relative_output_dir"), str) or not cell["relative_output_dir"]:
             raise ValueError(f"Cell {cell_id!r} must define relative_output_dir.")
         cell_ids.add(cell_id)
+    _validate_parallel_leg_usage_plan(plan)
 
     output_root = plan_path.parent
     declared_output_root = plan.get("output_root")
@@ -784,7 +808,7 @@ def _configured_gait_index_by_id(plan: dict[str, Any]) -> dict[int, int]:
 
 def _configure_leg_usage_env(env_cfg: ManagerBasedRLEnvCfg, plan: dict[str, Any]) -> None:
     """Apply the fixed-command grid protocol before environment construction."""
-    env_cfg.scene.num_envs = 1
+    env_cfg.scene.num_envs = int(plan.get("num_envs", 1))
     from isaaclab_tasks.manager_based.locomotion.velocity.config.symm_quadruped._evaluation_gait import (
         _EvaluationGaitVelocityCommand,
     )
@@ -909,6 +933,7 @@ def _completed_cell_archive_matches(
         if protocol_version not in {
             "leg_usage_grid_full_v3",
             "leg_usage_grid_light_v2",
+            "leg_usage_grid_trained_v1",
         } or not publication_fields.issubset(archive.files):
             return False
         configured_limits = np.asarray(archive["configured_joint_effort_limits"], dtype=np.float64)
@@ -1375,6 +1400,47 @@ def _leg_usage_recording_lock(output_root: Path, plan_sha256: str):
 
 
 @torch.inference_mode()
+def _record_parallel_leg_usage_trials(env, runner, policy, policy_nn, obs, *, total_steps: int, output_root: Path):
+    """Capture the first episode of every parallel trial in the current scenario."""
+    from evaluation_batch_recorder import EvaluationBatchRecorder
+
+    recorder = EvaluationBatchRecorder(env.unwrapped, output_root, max_samples=total_steps)
+    terms_by_env: dict[int, list[str]] = {}
+    progress_interval = max(1, round(1.0 / env.unwrapped.step_dt))
+    for step_index in range(total_steps):
+        phases = _pre_decision_common_gait_phases(env)
+        actions = policy(obs)
+        values = _evaluate_critic_values(runner, obs)
+        obs, rewards, dones, _ = env.step(actions)
+        previously_ended = recorder.first_done_steps > 0
+        recorder.record(
+            actions,
+            actions,
+            dones,
+            critic_values=values,
+            pre_decision_common_gait_phases=phases,
+            rewards=rewards,
+        )
+        new_ends = np.flatnonzero((recorder.first_done_steps > 0) & ~previously_ended)
+        for env_index in new_ends:
+            terms_by_env[int(env_index)] = _active_termination_terms(env, env_index=int(env_index))
+        if bool(dones.any()):
+            if version.parse(installed_version) >= version.parse("4.0.0"):
+                policy.reset(dones)
+            elif policy_nn is not None:
+                policy_nn.reset(dones)
+        if (step_index + 1) % progress_interval == 0 or step_index + 1 == total_steps:
+            print(
+                f"[leg_usage_grid] {env.num_envs} parallel trials: {step_index + 1}/{total_steps} steps, "
+                f"{np.count_nonzero(recorder.first_done_steps)} terminated.",
+                flush=True,
+            )
+        if np.all(recorder.first_done_steps > 0):
+            break
+    return recorder, terms_by_env
+
+
+@torch.inference_mode()
 def _run_leg_usage_grid(
     env,
     runner,
@@ -1481,6 +1547,8 @@ def _run_leg_usage_grid(
     finished_pending_cells = 0
     progress_interval_steps = max(1, round(1.0 / step_dt))
     current_cell_id = None
+    parallel_batch = None
+    parallel_batch_key = None
     try:
         for cell, cell_output_dir in pending_cells:
             cell_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1530,55 +1598,79 @@ def _run_leg_usage_grid(
             caught_exception: BaseException | None = None
             rollout_plotter = None
             try:
-                random.seed(evaluation_seed)
-                np.random.seed(evaluation_seed % (2**32))
-                torch.manual_seed(evaluation_seed)
-                env.seed(evaluation_seed)
-                set_evaluation_scenario(velocity_mps, configured_gait_index)
-                obs, _ = env.reset()
-                _reset_inference_policy(policy, policy_nn, env.num_envs, env.unwrapped.device)
-                rollout_plotter = SymmetricRolloutPlotter(
-                    env.unwrapped,
-                    output_dir=cell_output_dir,
-                    env_index=0,
-                    max_samples=total_steps,
-                    require_configured_effort_limits=protocol_version != _LEG_USAGE_PROTOCOL_VERSION,
-                    require_ground_filtered_forces=protocol_version != _LEG_USAGE_PROTOCOL_VERSION,
-                )
-                for step_index in range(total_steps):
-                    with torch.inference_mode():
+                batch_key = (gait_index, velocity_mps, evaluation_seed)
+                if env.num_envs == 1 or parallel_batch_key != batch_key:
+                    random.seed(evaluation_seed)
+                    np.random.seed(evaluation_seed % (2**32))
+                    torch.manual_seed(evaluation_seed)
+                    env.seed(evaluation_seed)
+                    set_evaluation_scenario(velocity_mps, configured_gait_index)
+                    obs, _ = env.reset()
+                    _reset_inference_policy(policy, policy_nn, env.num_envs, env.unwrapped.device)
+                if env.num_envs > 1:
+                    if parallel_batch_key != batch_key:
+                        # Release the previous batch before allocating the next one.
+                        parallel_batch = None
+                        batch_recorder = None
+                        parallel_batch = _record_parallel_leg_usage_trials(
+                            env,
+                            runner,
+                            policy,
+                            policy_nn,
+                            obs,
+                            total_steps=total_steps,
+                            output_root=output_root,
+                        )
+                        parallel_batch_key = batch_key
+                    batch_recorder, terms_by_env = parallel_batch
+                    env_index = int(cell["trial_index"])
+                    rollout_plotter = batch_recorder.trial_plotter(env_index, cell_output_dir)
+                    recorded_steps = len(rollout_plotter._data["time_steps"])
+                    if batch_recorder.first_done_steps[env_index] > 0:
+                        outcome = "terminated"
+                        termination_terms = terms_by_env[env_index]
+                else:
+                    rollout_plotter = SymmetricRolloutPlotter(
+                        env.unwrapped,
+                        output_dir=cell_output_dir,
+                        env_index=0,
+                        max_samples=total_steps,
+                        require_configured_effort_limits=protocol_version != _LEG_USAGE_PROTOCOL_VERSION,
+                        require_ground_filtered_forces=protocol_version != _LEG_USAGE_PROTOCOL_VERSION,
+                    )
+                    for step_index in range(total_steps):
                         pre_decision_common_gait_phases = _pre_decision_common_gait_phases(env)
                         actions = policy(obs)
                         critic_values = _evaluate_critic_values(runner, obs) if capture_critic_values else None
                         obs, rewards, dones, _ = env.step(actions)
-                    rollout_plotter.record(
-                        actions=actions,
-                        actor_means=actions,
-                        critic_values=critic_values,
-                        pre_decision_common_gait_phases=pre_decision_common_gait_phases,
-                        dones=dones,
-                        rewards=rewards,
-                    )
-                    recorded_steps = step_index + 1
-
-                    if bool(dones[0].detach().cpu()):
-                        termination_terms = _active_termination_terms(env)
-                        outcome = "terminated"
-                        _reset_inference_policy(policy, policy_nn, env.num_envs, env.unwrapped.device)
-                        break
-
-                    if recorded_steps % progress_interval_steps == 0 or recorded_steps == total_steps:
-                        completed_equivalent = finished_pending_cells + recorded_steps / total_steps
-                        elapsed = time.perf_counter() - grid_wall_start
-                        seconds_per_cell = elapsed / max(completed_equivalent, 1e-9)
-                        remaining_equivalent = len(pending_cells) - completed_equivalent
-                        eta = _format_eta(seconds_per_cell * max(remaining_equivalent, 0.0))
-                        print(
-                            f"[leg_usage_grid] cell {global_index + 1}/{total_cells} {cell_id} "
-                            f"sim={recorded_steps * step_dt:.1f}/{total_steps * step_dt:.1f} s "
-                            f"({recorded_steps}/{total_steps}) ETA={eta}",
-                            flush=True,
+                        rollout_plotter.record(
+                            actions=actions,
+                            actor_means=actions,
+                            critic_values=critic_values,
+                            pre_decision_common_gait_phases=pre_decision_common_gait_phases,
+                            dones=dones,
+                            rewards=rewards,
                         )
+                        recorded_steps = step_index + 1
+
+                        if bool(dones[0].detach().cpu()):
+                            termination_terms = _active_termination_terms(env)
+                            outcome = "terminated"
+                            _reset_inference_policy(policy, policy_nn, env.num_envs, env.unwrapped.device)
+                            break
+
+                        if recorded_steps % progress_interval_steps == 0 or recorded_steps == total_steps:
+                            completed_equivalent = finished_pending_cells + recorded_steps / total_steps
+                            elapsed = time.perf_counter() - grid_wall_start
+                            seconds_per_cell = elapsed / max(completed_equivalent, 1e-9)
+                            remaining_equivalent = len(pending_cells) - completed_equivalent
+                            eta = _format_eta(seconds_per_cell * max(remaining_equivalent, 0.0))
+                            print(
+                                f"[leg_usage_grid] cell {global_index + 1}/{total_cells} {cell_id} "
+                                f"sim={recorded_steps * step_dt:.1f}/{total_steps * step_dt:.1f} s "
+                                f"({recorded_steps}/{total_steps}) ETA={eta}",
+                                flush=True,
+                            )
             except BaseException as exc:
                 caught_exception = exc
                 outcome = "interrupted" if isinstance(exc, KeyboardInterrupt) else "error"
@@ -1619,6 +1711,8 @@ def _run_leg_usage_grid(
             }
             if caught_exception is not None:
                 metadata_value["error"] = f"{type(caught_exception).__name__}: {caught_exception}"
+            if "trial_index" in cell:
+                metadata_value["trial_index"] = int(cell["trial_index"])
             _atomic_write_json(cell_output_dir / "metadata.json", metadata_value)
 
             save_exception: BaseException | None = None
@@ -1650,6 +1744,8 @@ def _run_leg_usage_grid(
                     "evaluation_config_json": json.dumps(plan.get("evaluation_config", {}), sort_keys=True),
                     "effort_limit_provenance_json": json.dumps(plan.get("effort_limit_provenance", {}), sort_keys=True),
                 }
+                if "trial_index" in cell:
+                    extra_data["trial_index"] = int(cell["trial_index"])
                 try:
                     saved_paths = rollout_plotter.save(extra_data=extra_data, render_plots=render_cell_plots)
                     if protocol_version != _LEG_USAGE_PROTOCOL_VERSION:

@@ -299,6 +299,34 @@ class _VelocityCommandBinCurriculum:
                 max=float(self._cfg.max_weight),
             )
 
+    def state_dict(self) -> dict:
+        """Return independent CPU weights and the command grid definition [m/s, m/s, rad/s]."""
+        return {
+            "version": 1,
+            "ranges": self._ranges,
+            "num_bins": self._num_bins,
+            "weights": self._weights.detach().cpu().clone(),
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore weights after validating the grid and sampling distribution."""
+        if state.get("version") != 1:
+            raise ValueError("Unsupported command curriculum checkpoint version.")
+        ranges = tuple(tuple(bounds) for bounds in state["ranges"])
+        if ranges != self._ranges or tuple(state["num_bins"]) != self._num_bins:
+            raise ValueError("Command curriculum checkpoint ranges or bin counts do not match the current grid.")
+        weights = torch.as_tensor(state["weights"], device=self._device, dtype=self._weights.dtype)
+        if tuple(weights.shape) != self._num_bins:
+            raise ValueError("Command curriculum checkpoint weights have an incompatible shape.")
+        if (
+            not bool(torch.isfinite(weights).all())
+            or bool((weights < 0.0).any())
+            or bool((weights > self._cfg.max_weight).any())
+            or not bool(weights.sum() > 0.0)
+        ):
+            raise ValueError("Command curriculum checkpoint weights are not a valid sampling distribution.")
+        self._weights.copy_(weights)
+
     def _initialize_weights(self) -> None:
         """Activate all bins uniformly or initialize the enabled curriculum range."""
         if not self._cfg.enabled:
@@ -413,6 +441,24 @@ class GaitVelocityCommand(CommandTerm):
     def command(self) -> torch.Tensor:
         """Desired base velocity command in the base frame."""
         return self.vel_command_b
+
+    def curriculum_state_dict(self) -> dict | None:
+        """Return curriculum weights and grid bounds [m/s, m/s, rad/s], or None when absent."""
+        return self._command_curriculum.state_dict() if self._command_curriculum is not None else None
+
+    def curriculum_load_state_dict(self, state: dict) -> None:
+        """Restore curriculum weights for subsequent commands, rejecting incompatible grids.
+
+        Args:
+            state: Serialized sampling weights and command grid bounds [m/s, m/s, rad/s].
+
+        Raises:
+            ValueError: If the command has no curriculum or the saved grid or weights are incompatible.
+        """
+        if self._command_curriculum is None:
+            raise ValueError("The checkpoint has a command curriculum, but the current command has none.")
+        self._command_curriculum.load_state_dict(state)
+        self._update_curriculum_metrics(torch.arange(self.num_envs, device=self.device))
 
     def compute(self, dt: float):
         """Update command state while deferring resampling until after reward computation."""

@@ -4,6 +4,13 @@ This folder is the shared launcher surface for the symmetric quadruped tasks.
 Use it for both Unitree Go2 and Dobot X1, and add future robots here instead
 of creating another robot-specific script tree.
 
+Training resumes restore command curriculum weights from new checkpoints and
+start at the next iteration. Add `--resume_logging` alongside `--resume` to
+continue the original TensorBoard/W&B run. Older checkpoints still load but
+cannot restore curriculum state that was never saved. See the root
+[resume and log-merging guide](../../README.md#resuming-training-and-logs) for
+examples, W&B identity handling, and the offline `merge_training_logs.py` utility.
+
 Supported robot keys:
 
 ```text
@@ -353,16 +360,24 @@ This selects only templates present in `<run>/params/env.yaml`. The default
 `--gait trot|bound|halfbound|rotarygallop|traversegallop` can narrow that set;
 untrained selections are rejected. `--mode both` runs a six-direction video/data
 sweep for each gait and separate fixed-command statistical trials at
-`vx = -1, +1 m/s`. Use `--mode video` or `--mode metrics` to run one part.
+`vx = -1, +1 m/s`, with 100 parallel trials per gait/command. Each trial records
+250 settling steps (5 s) and 1,000 measured steps (20 s). All trials contribute
+to the statistics; a terminated trial ends at its first episode boundary while
+the other trials continue. Use `--mode video` or `--mode metrics` to run one part.
 The root `test.sh` is a deprecated forwarding wrapper for video mode.
 
 Videos, GIFs, plots, `foot_periodicity.csv`, and `sim_data.npz` are saved under
 `<run>/eval/`. Statistical trial data, current metric tables, and reports are
-saved under `<run>/evaluations/leg_usage_grid_trained/`. The `trained` profile
+saved under `<run>/evaluations/leg_usage_grid_trained_envs100_steps1000/`. The `trained` profile
 uses current metric definitions and averages only represented gait families.
 It does not change the immutable `light` or `full` grids described below.
 Saved period, duty-factor settings, nominal timing height range, and observation
 history are restored. Evaluation disables phase and timing noise.
+Video mode continues to use one environment. The statistical nominal reset
+profile is unchanged, so the 100 replicas do not use randomized initial poses.
+Each archive carries a trial index; forward/backward comparisons match the same
+index. Earlier single-trial results remain separate. `--num_envs` and
+`--measure_s` can override the parallel trial count and measured duration.
 
 The same combined command is available through
 `scripts/symm_locomotion/evaluate_trained.py`. For metrics without videos, the

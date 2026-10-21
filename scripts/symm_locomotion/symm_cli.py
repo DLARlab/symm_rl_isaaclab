@@ -360,6 +360,10 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
         default=DEFAULT_TR_MIN_ABS_CMD_VEL,
     )
     parser.add_argument("--no-trs", "--disable-symmetry", action="store_true", dest="disable_symmetry")
+    parser.add_argument(
+        "--resume_logging", action="store_true", help="With --resume, append to the original TensorBoard/W&B run."
+    )
+    parser.add_argument("--wandb_run_id", default=None, help="Original W&B run ID for older checkpoints.")
     parser.add_argument("--smoke", action="store_true", help="Run one env for one iteration.")
 
 
@@ -413,6 +417,14 @@ def train_lab_args(args: argparse.Namespace, extra: list[str]) -> list[str]:
             f"agent.algorithm.symmetry_cfg.warmup_iterations={args.tr_warmup_iterations}",
             f"agent.algorithm.symmetry_cfg.min_abs_command_velocity={args.tr_min_abs_cmd_vel}",
         ]
+    if args.resume_logging:
+        if "--resume" not in extra:
+            raise ValueError("--resume_logging requires --resume.")
+        command.append("--resume_logging")
+    if args.wandb_run_id:
+        if not args.resume_logging:
+            raise ValueError("--wandb_run_id requires --resume_logging.")
+        command += ["--wandb_run_id", args.wandb_run_id]
     return command + extra
 
 
@@ -898,6 +910,13 @@ def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
     """Add fixed-grid policy evaluation and analysis options."""
     add_common_args(parser)
     add_checkpoint_args(parser)
+    parser.add_argument(
+        "--num_envs",
+        "--num-envs",
+        type=int,
+        default=1,
+        help="Parallel trials per gait/command for the trained-gait statistics profile.",
+    )
     parser.set_defaults(_protocol_explicit=False)
     parser.add_argument(
         "--protocol",
@@ -974,7 +993,7 @@ def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
 def add_trained_evaluation_args(parser: argparse.ArgumentParser) -> None:
     """Add combined video recording and statistics options restricted to trained gaits."""
     add_evaluation_args(parser)
-    parser.set_defaults(protocol="trained", velocities=[-1.0, 1.0])
+    parser.set_defaults(protocol="trained", velocities=[-1.0, 1.0], num_envs=100, measure_s=20.0)
     parser.add_argument("--gait", choices=("all", *TRAIN_GAIT_GROUPS), default="all")
     parser.add_argument("--mode", choices=("both", "video", "metrics"), default="both")
     parser.add_argument("--tracking_speed", "--tracking-speed", type=float, default=1.0, help="Video x speed [m/s].")
@@ -1034,6 +1053,7 @@ def run_trained_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
             velocities_mps=args.velocities,
             settle_s=args.settle_s,
             measure_s=args.measure_s,
+            num_envs=args.num_envs,
             runtime_overrides=runtime_overrides,
         )
     if args.mode in ("both", "video") and not args.analyze_only:
@@ -1103,7 +1123,7 @@ def evaluation_lab_args(
         "--task",
         args.robot_spec.play_task,
         "--num_envs",
-        "1",
+        str(args.num_envs),
         "--checkpoint",
         str(checkpoint),
         "--seed",
@@ -1154,10 +1174,13 @@ def run_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
             raise ValueError("The evaluation config JSON root must be an object.")
     if args.protocol == "legacy" and evaluation_config is not None:
         raise ValueError("The legacy v1 compatibility profile does not accept --evaluation_config.")
-    output_name = analysis.PROTOCOL_OUTPUT_ROOT_NAMES[args.protocol]
+    measure_steps = round(args.measure_s / args.robot_spec.step_dt)
+    output_name = analysis.study_output_name(args.protocol, num_envs=args.num_envs, measure_steps=measure_steps)
     canonical_study_path = checkpoint.parent / "evaluations" / output_name / "study.json"
     study_path = (
-        analysis.existing_study_manifest_path(checkpoint.parent, args.protocol)
+        analysis.existing_study_manifest_path(
+            checkpoint.parent, args.protocol, num_envs=args.num_envs, measure_steps=measure_steps
+        )
         if args.analyze_only or args.resume
         else canonical_study_path
     )
@@ -1205,6 +1228,7 @@ def run_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
             runtime_overrides=extra,
             protocol=args.protocol,
             evaluation_config=evaluation_config,
+            num_envs=args.num_envs,
         )
         if study_path != canonical_study_path:
             study["output_root"] = str(study_path.parent)
@@ -1265,7 +1289,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_evaluation_args(legacy_parser)
     legacy_parser.set_defaults(protocol="legacy")
 
-    train_parser = subparsers.add_parser("train", help="Start training.")
+    train_parser = subparsers.add_parser("train", help="Start training.", allow_abbrev=False)
     add_train_args(train_parser)
 
     play_parser = subparsers.add_parser("play", help="Play a checkpoint in the viewer.")

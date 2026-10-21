@@ -354,6 +354,8 @@ def _study_identity(study: dict[str, Any]) -> dict[str, Any]:
     )
     if "policy_compatibility" in study:
         legacy_keys += ("policy_compatibility",)
+    if "num_envs" in study:
+        legacy_keys += ("num_envs",)
     if study.get("method_version") == METHOD_VERSION:
         return {key: study[key] for key in legacy_keys}
     keys = (
@@ -384,11 +386,26 @@ def validate_study_profile(study: Mapping[str, Any], profile: str) -> None:
         )
 
 
-def existing_study_manifest_path(run_dir: Path, profile: str) -> Path:
+def study_output_name(profile: str, *, num_envs: int = 1, measure_steps: int | None = None) -> str:
+    """Return a result directory that keeps parallel trials separate from older studies."""
+    name = PROTOCOL_OUTPUT_ROOT_NAMES[profile]
+    if num_envs > 1:
+        name += f"_envs{num_envs}_steps{measure_steps}"
+    return name
+
+
+def existing_study_manifest_path(
+    run_dir: Path, profile: str, *, num_envs: int = 1, measure_steps: int | None = None
+) -> Path:
     """Resolve an existing profile manifest, including the pre-split full-v3 root."""
     if profile not in PROTOCOL_OUTPUT_ROOT_NAMES:
         raise ValueError(f"Unknown leg-usage protocol profile {profile!r}.")
-    canonical = run_dir.resolve() / "evaluations" / PROTOCOL_OUTPUT_ROOT_NAMES[profile] / "study.json"
+    canonical = (
+        run_dir.resolve()
+        / "evaluations"
+        / study_output_name(profile, num_envs=num_envs, measure_steps=measure_steps)
+        / "study.json"
+    )
     if canonical.is_file() or profile != "full":
         return canonical
     historical = run_dir.resolve() / "evaluations" / PROTOCOL_OUTPUT_ROOT_NAMES[LEGACY_PROTOCOL] / "study.json"
@@ -397,6 +414,26 @@ def existing_study_manifest_path(run_dir: Path, profile: str) -> Path:
         if study.get("method_version") == FULL_METHOD_VERSION:
             return historical
     return canonical
+
+
+def _parallel_trial_cells(cells: list[dict[str, Any]], num_envs: int, protocol: str) -> list[dict[str, Any]]:
+    """Expand each scenario into separately identified parallel replicas."""
+    if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs < 1:
+        raise ValueError("num_envs must be a positive integer.")
+    if num_envs == 1:
+        return cells
+    if protocol != "trained":
+        raise ValueError("Parallel trials are supported by the trained-gait profile only.")
+    return [
+        {
+            **cell,
+            "id": f"{cell['id']}__trial_{trial_index:03d}",
+            "relative_output_dir": f"{cell['relative_output_dir']}/trial_{trial_index:03d}",
+            "trial_index": trial_index,
+        }
+        for cell in cells
+        for trial_index in range(num_envs)
+    ]
 
 
 def build_study(
@@ -415,6 +452,7 @@ def build_study(
     runtime_overrides: Sequence[str] = (),
     protocol: str = DEFAULT_PROTOCOL,
     evaluation_config: dict[str, Any] | None = None,
+    num_envs: int = 1,
 ) -> dict[str, Any]:
     """Build the selected evaluation profile and runtime plan for one checkpoint."""
     checkpoint = checkpoint.resolve()
@@ -429,6 +467,7 @@ def build_study(
     if protocol not in PROTOCOL_METHOD_VERSIONS:
         choices = ", ".join(repr(value) for value in PROTOCOL_METHOD_VERSIONS)
         raise ValueError(f"Unknown leg-usage protocol profile {protocol!r}; choose {choices}.")
+    _parallel_trial_cells([], num_envs, protocol)
     if protocol == LEGACY_PROTOCOL and evaluation_config is not None:
         raise ValueError("The legacy v1 compatibility profile does not accept an evaluation config.")
     if protocol == "full":
@@ -501,7 +540,7 @@ def build_study(
                 selected_gaits.append(gait)
 
     run_dir = checkpoint.parent.resolve()
-    output_root = run_dir / "evaluations" / PROTOCOL_OUTPUT_ROOT_NAMES[protocol]
+    output_root = run_dir / "evaluations" / study_output_name(protocol, num_envs=num_envs, measure_steps=measure_steps)
     total_steps = settle_steps + measure_steps
     cells: list[dict[str, Any]] = []
     cell_specs = light_cell_specs or [(gait, velocity) for gait in selected_gaits for velocity in selected_velocities]
@@ -528,12 +567,14 @@ def build_study(
                 "relative_output_dir": relative_output_dir.as_posix(),
             }
         )
+    cells = _parallel_trial_cells(cells, num_envs, protocol)
     checkpoint_record = {
         "path": str(checkpoint),
         "iteration": _model_iteration(checkpoint),
         "sha256": _sha256_file(checkpoint),
     }
     study: dict[str, Any] = {
+        **({"num_envs": num_envs} if num_envs > 1 else {}),
         "schema_version": SCHEMA_VERSION,
         "method_version": PROTOCOL_METHOD_VERSIONS[protocol],
         "protocol": PROTOCOL_PLAN_NAMES[protocol],
@@ -886,6 +927,7 @@ def _invalid_cell_row(cell: dict[str, Any], reason: str, status: str = "invalid"
         "velocity_mps": cell["velocity_mps"],
         "velocity_sign": "forward" if cell["velocity_mps"] > 0.0 else "backward",
         "seed": cell["seed"],
+        "trial_index": cell.get("trial_index", 0),
         "status": status,
         "reason": reason,
         "velocity_metric_valid": False,
@@ -2799,7 +2841,7 @@ def _directional_pair_metrics(study: dict[str, Any], rows: Sequence[dict[str, An
     """Return partner-paired forward/backward velocity-bias metrics."""
     directional_rows: list[dict[str, Any]] = []
     row_by_key = {
-        (int(row["gait_index"]), float(row["velocity_mps"])): row
+        (int(row["gait_index"]), float(row["velocity_mps"]), row.get("seed", 0), row.get("trial_index", 0)): row
         for row in rows
         if row.get("velocity_metric_valid") is True
     }
@@ -2810,7 +2852,7 @@ def _directional_pair_metrics(study: dict[str, Any], rows: Sequence[dict[str, An
             continue
         gait = gait_by_index[int(row["gait_index"])]
         partner_index = int(gait.get("time_reversal_partner", gait["index"]))
-        partner = row_by_key.get((partner_index, -velocity))
+        partner = row_by_key.get((partner_index, -velocity, row.get("seed", 0), row.get("trial_index", 0)))
         if partner is None:
             continue
         positive_bias = row.get("velocity_vx_bias_mps")

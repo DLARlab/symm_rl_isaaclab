@@ -205,6 +205,26 @@ def _write_pair(tmp_path: Path, *, robot: str, reflected: bool, decision_phase_o
     return study
 
 
+def test_parallel_pairs_preserve_every_trial_index(tmp_path):
+    module = _load_module()
+    study = _write_pair(tmp_path, robot="go2", reflected=False)
+    study["cells"] = [
+        {
+            **cell,
+            "id": f"{cell['id']}_{trial}",
+            "trial_index": trial,
+            "relative_output_dir": f"cells/missing_{cell['id']}_{trial}",
+        }
+        for cell in study["cells"]
+        for trial in range(100)
+    ]
+    payload = module.analyze_paired_study(study, tmp_path)
+    assert len(payload["rows"]) == 200
+    assert {row["trial_index"] for row in payload["rows"]} == set(range(100))
+    for row in payload["rows"]:
+        assert row["positive_cell_id"].rsplit("_", 1)[-1] == row["negative_cell_id"].rsplit("_", 1)[-1]
+
+
 def _bind_publication_recordings(study_path: Path, study: dict) -> None:
     """Bind synthetic archives to the publication study like the rollout writer."""
     plan_sha256 = hashlib.sha256(study_path.read_bytes()).hexdigest()

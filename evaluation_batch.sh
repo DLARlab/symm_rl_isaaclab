@@ -12,11 +12,12 @@ cd "$REPO_ROOT"
 # Edit one robot|run_name|model entry per task. Tasks run from top to bottom.
 # Robots: go2, x1, x1_go2bend. Run names are relative to each robot's log folder.
 tasks=(
-  "x1_go2bend|2026-10-16_21-42-35_x1_go2bend_no_trs|1499"
+  "x1|2026-10-19_21-33-11_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1|9999"
+  # "go2|2026-10-19_09-33-24_go2_no_trs|9999"
 )
 
 # Shared settings. "all" means only gaits in each checkpoint's saved training configuration.
-mode="both"  # both, video, or metrics
+mode="metrics"  # both, video, or metrics
 gait="all"
 
 for task in "${tasks[@]}"; do

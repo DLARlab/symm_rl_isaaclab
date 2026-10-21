@@ -1376,7 +1376,7 @@ def test_rewards_disable_straight_line_motion_and_configure_exponential_penaltie
     assert env_cfg.rewards.joint_target_limits.params["limit_fraction"] == 0.9
     assert env_cfg.rewards.joint_target_limits.params["scale"] == 10.0
     assert env_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.1
+    assert env_cfg.rewards.leg_permutation_symmetry.weight == 0.4
     assert env_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert env_cfg.rewards.smoothness.func is symm_quadruped.SmoothnessPenalty
     assert env_cfg.rewards.smoothness.weight == 0.1
@@ -1392,7 +1392,7 @@ def test_rewards_disable_straight_line_motion_and_configure_exponential_penaltie
     assert env_cfg.rewards.foot_clearance.params["foot_height_offset"] == pytest.approx(0.0275)
 
 
-def test_rewards_use_combined_xy_tracking_and_standard_yaw_and_roll_pitch_terms():
+def test_rewards_use_combined_xy_tracking_standard_yaw_and_roll_only_penalty():
     env_cfg = SimpleNamespace(rewards=SimpleNamespace())
 
     configure_rewards(
@@ -1413,10 +1413,11 @@ def test_rewards_use_combined_xy_tracking_and_standard_yaw_and_roll_pitch_terms(
     assert env_cfg.rewards.track_ang_vel_z_exp.func is base_mdp.track_ang_vel_z_exp
     assert env_cfg.rewards.track_ang_vel_z_exp.weight == 0.3
     assert env_cfg.rewards.track_ang_vel_z_exp.params["std"] == 0.25
-    assert env_cfg.rewards.base_roll_exp is None
-    assert env_cfg.rewards.base_roll_pitch_exp.func is symm_quadruped.base_roll_pitch_exp
-    assert env_cfg.rewards.base_roll_pitch_exp.weight == 0.15
-    assert env_cfg.rewards.base_roll_pitch_exp.params["scale"] == 10.0
+    assert env_cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp_penalty
+    assert env_cfg.rewards.base_roll_exp.weight == 0.20
+    assert env_cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
+    assert env_cfg.rewards.base_roll_pitch_exp is None
+    assert env_cfg.rewards.ang_vel_xy_l2 is None
     assert env_cfg.rewards.straight_line_motion is None
 
     # Exercise the configured functions: the old custom yaw path squares the denominator.
@@ -1438,9 +1439,8 @@ def test_rewards_use_combined_xy_tracking_and_standard_yaw_and_roll_pitch_terms(
         "track_lin_vel_xy_exp",
         "track_ang_vel_z_exp",
         "base_height",
-        "base_roll_pitch_exp",
     )
-    assert sum(getattr(env_cfg.rewards, name).weight for name in positive_names) == pytest.approx(1.0)
+    assert sum(getattr(env_cfg.rewards, name).weight for name in positive_names) == pytest.approx(0.85)
 
 
 def test_configured_yaw_tracking_uses_direct_error_denominator():
@@ -1494,7 +1494,7 @@ def test_robot_configs_share_rewards_except_robot_height_targets(go2_cfg_cls, x1
         assert command.add_noise_period is False
 
     assert x1_cfg.rewards.leg_permutation_symmetry.func is symm_quadruped.leg_permutation_symmetry_penalty
-    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.1
+    assert x1_cfg.rewards.leg_permutation_symmetry.weight == 0.4
     assert x1_cfg.rewards.leg_permutation_symmetry.params["phase_sync_tolerance"] == 0.02
     assert x1_cfg.rewards.track_ang_vel_z_exp.params["std"] == 0.25
     assert x1_cfg.rewards.foot_clearance.func is symm_quadruped.foot_clearance_penalty
@@ -2167,7 +2167,6 @@ def test_robot_negative_reward_weights_scales_and_hip_selection(cfg_cls):
         "dof_vel_l2": (0.05, 0.01),
         "dof_torques_l2": (0.05, 0.004),
         "action_smoothness": (0.05, 0.05),
-        "ang_vel_xy_l2": (0.05, 1.0),
         "dof_acc_l2": (0.05, 4.0e-6),
     }
     for name, (weight, scale) in expected.items():
@@ -2176,7 +2175,12 @@ def test_robot_negative_reward_weights_scales_and_hip_selection(cfg_cls):
         assert term.params["scale"] == scale, name
     assert cfg.rewards.smoothness.func is symm_quadruped.SmoothnessPenalty
     assert cfg.rewards.smoothness.weight == 0.1
-    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 18
+    assert cfg.rewards.base_roll_pitch_exp is None
+    assert cfg.rewards.ang_vel_xy_l2 is None
+    assert cfg.rewards.base_roll_exp.func is symm_quadruped.base_roll_exp_penalty
+    assert cfg.rewards.base_roll_exp.weight == 0.20
+    assert cfg.rewards.base_roll_exp.params["error_scale"] == 0.25
+    assert sum(isinstance(term, RewardTermCfg) and term.weight != 0 for term in vars(cfg.rewards).values()) == 17
 
     # Simulate an articulation whose storage order differs from the policy joint order.
     logical_names = cfg.actions.joint_pos.joint_names
@@ -2231,7 +2235,6 @@ def test_joint_limits_reject_invalid_range_fraction(limit_fraction):
     "term_name, field_name, values, expected_errors",
     [
         ("lin_vel_z_l2", "root_lin_vel_b", [[9.0, 8.0, 0.0], [9.0, 8.0, -0.5]], [0.0, 0.25]),
-        ("ang_vel_xy_l2", "root_ang_vel_b", [[0.0, 0.0, 9.0], [-0.3, 0.4, 9.0]], [0.0, 0.25]),
         ("dof_vel_l2", "joint_vel", [[0.0, 9.0, 0.0], [-3.0, 9.0, 4.0]], [0.0, 25.0]),
         ("dof_torques_l2", "applied_torque", [[0.0, 9.0, 0.0], [-3.0, 9.0, 4.0]], [0.0, 25.0]),
     ],
