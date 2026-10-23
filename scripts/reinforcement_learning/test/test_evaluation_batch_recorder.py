@@ -192,7 +192,8 @@ def test_runner_batches_trials_and_resets_only_ended_policy_slots(batch_env, tmp
     assert len(recorder.trial_plotter(99, tmp_path / "99")._data["time_steps"]) == 4
 
 
-def test_grid_saves_and_resumes_all_100_trials_with_one_rollout(batch_env, tmp_path):
+@pytest.mark.parametrize("split_by_velocity", [False, True])
+def test_grid_saves_and_resumes_all_100_trials_with_one_rollout(batch_env, tmp_path, split_by_velocity):
     env, command, robot = batch_env
     root = Path(__file__).resolve().parents[3]
     spec = importlib.util.spec_from_file_location(
@@ -220,6 +221,7 @@ def test_grid_saves_and_resumes_all_100_trials_with_one_rollout(batch_env, tmp_p
         settle_s=0.02,
         measure_s=0.06,
         num_envs=100,
+        split_by_velocity=split_by_velocity,
     )
     plan_path = analysis.prepare_study(study, resume=True, analyze_only=False, dry_run=False)
     plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()

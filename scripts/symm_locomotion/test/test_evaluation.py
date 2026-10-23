@@ -798,10 +798,12 @@ def test_publication_reanalysis_refreshes_paired_diagnostics(tmp_path, monkeypat
     )
 
 
-@pytest.mark.parametrize("protocol", ["full", "trained"])
-def test_analyze_study_writes_tables_report_and_family_figures(tmp_path, protocol):
+@pytest.mark.parametrize("protocol,split_by_velocity", [("full", False), ("trained", False), ("trained", True)])
+def test_analyze_study_writes_tables_report_and_family_figures(tmp_path, protocol, split_by_velocity):
     analysis = _analysis_module()
     options = {"protocol": protocol}
+    if split_by_velocity:
+        options["split_by_velocity"] = True
     if protocol == "trained":
         params = tmp_path / "run" / "params"
         params.mkdir(parents=True)
@@ -860,6 +862,22 @@ def test_analyze_study_writes_tables_report_and_family_figures(tmp_path, protoco
         _write_recording_manifest(study_path, study, cell, cell_dir / "sim_data.npz")
 
     overall = analysis.analyze_study(study_path)
+
+    if split_by_velocity:
+        for velocity in study["velocities_mps"]:
+            directory = study_path.parent / f"vx_{analysis.velocity_slug(velocity)}"
+            assert (directory / "figures/screening_report.svg").is_file()
+            assert (directory / "metrics/REPORT.md").is_file()
+            assert (directory / "metrics/joint_metrics.csv").is_file()
+            assert (directory / "metrics/foot_metrics.csv").is_file()
+            with (directory / "metrics/cell_metrics.csv").open(newline="") as stream:
+                velocity_rows = list(csv.DictReader(stream))
+            assert len(velocity_rows) == 1
+            assert {float(row["velocity_mps"]) for row in velocity_rows} == {velocity}
+            assert all((directory / row["relative_output_dir"] / "sim_data.npz").is_file() for row in velocity_rows)
+            scoped = json.loads((directory / "metrics/overall_metrics.json").read_text())
+            assert scoped["coverage"]["expected_cells"] == 1
+            assert scoped["coverage"]["valid_cells"] == 1
 
     assert overall["coverage"]["complete"] is True
     assert overall["coverage"]["velocity_only_success_domain_cells"] == len(study["cells"])

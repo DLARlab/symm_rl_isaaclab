@@ -18,4 +18,5 @@ fi
 # Videos: one environment, retaining the existing video duration.
 # Example: bash evaluation.sh --robot x1_go2bend --run RUN --model 1499
 # --mode video|metrics|both; --gait all|trot|bound|halfbound|rotarygallop|traversegallop
+# --velocities -2 -1.5 -0.5 0.5 1.5 2 --split_by_velocity groups statistical outputs by x command.
 exec bash "$REPO_ROOT/scripts/symm_locomotion/_run.sh" evaluate_trained.py "$@"

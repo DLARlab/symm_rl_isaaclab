@@ -350,9 +350,35 @@ For multiple evaluations configured directly in a file, edit the
 bash evaluation_batch.sh
 ```
 
-It lists the three X1 Go2-bend runs at model `1499` initially. Tasks run in
-listed order, using each checkpoint's trained gaits, and stop if a task fails.
-Edit the shared `mode` and `gait` settings in that file as needed.
+Tasks run in listed order, using each checkpoint's trained gaits, and stop if a
+task fails. Edit the shared `mode`, `gait`, and `velocities` settings in that
+file as needed. The batch currently evaluates x commands
+`-2, -1.5, -0.5, 0.5, 1.5, 2 m/s`, with zero lateral and yaw commands.
+
+The batch enables `--split_by_velocity`, creating a separate command folder
+for each velocity within a grid-specific study directory:
+
+```text
+<run>/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_<grid-id>/
+  study.json
+  metrics/                       # Combined results and forward/backward comparisons
+  vx_neg_2p0/
+    cells/                       # Each trained gait and its 100 trial archives
+    metrics/                     # Reports and tables for vx = -2 m/s only
+    figures/
+  vx_neg_1p5/
+  vx_neg_0p5/
+  vx_pos_0p5/
+  vx_pos_1p5/
+  vx_pos_2p0/
+```
+
+The grid identifier separates different velocity lists and keeps the previous
+combined ±1 m/s studies in their original directories. All velocities share one
+simulator session per policy. Trial counts, settling time, and measured duration
+remain 100, 250 steps, and 1,000 steps respectively for each gait/command.
+Use the same velocity list and `--split_by_velocity` with `--resume` or
+`--analyze_only` to select the corresponding study again.
 
 Alternatively, pass `--checkpoint /path/to/model_1499.pt`. Without a checkpoint
 or run, it selects the latest checkpoint for `--robot`. `--gait all` means all

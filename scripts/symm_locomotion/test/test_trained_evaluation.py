@@ -171,6 +171,108 @@ def test_parallel_trained_study_keeps_100_trials_per_command_and_old_results_sep
     )
 
 
+def test_velocity_sweep_separates_commands_and_preserves_existing_studies(tmp_path):
+    checkpoint = _checkpoint(tmp_path)
+    analysis = _module("trained_analysis_velocity_folders", "evaluation.py")
+    velocities = (-2.0, -1.5, -0.5, 0.5, 1.5, 2.0)
+    options = dict(
+        repo_root=Path(__file__).resolve().parents[3],
+        checkpoint=checkpoint,
+        robot="x1_go2bend",
+        task="task",
+        step_dt=0.02,
+        protocol="trained",
+        num_envs=100,
+        measure_s=20.0,
+    )
+    original = analysis.build_study(**options, velocities_mps=(-1.0, 1.0))
+    sweep = analysis.build_study(**options, velocities_mps=velocities, split_by_velocity=True)
+    different_grid = analysis.build_study(**options, velocities_mps=(-0.5, 0.5), split_by_velocity=True)
+    assert len(sweep["cells"]) == 600
+    assert len({cell["relative_output_dir"] for cell in sweep["cells"]}) == 600
+    assert len({original["output_root"], sweep["output_root"], different_grid["output_root"]}) == 3
+    for velocity in velocities:
+        cells = [cell for cell in sweep["cells"] if cell["velocity_mps"] == velocity]
+        assert len(cells) == 100
+        assert {Path(cell["relative_output_dir"]).parts[0] for cell in cells} == {
+            f"vx_{analysis.velocity_slug(velocity)}"
+        }
+        assert {cell["trial_index"] for cell in cells} == set(range(100))
+    manifest = analysis.prepare_study(sweep, resume=False, analyze_only=False, dry_run=False)
+    assert analysis.load_study_manifest(manifest)["split_by_velocity"] is True
+    assert (
+        analysis.existing_study_manifest_path(
+            checkpoint.parent,
+            "trained",
+            num_envs=100,
+            measure_steps=1000,
+            velocities_mps=velocities,
+            split_by_velocity=True,
+        )
+        == manifest
+    )
+
+
+def test_velocity_sweep_launcher_uses_one_simulator_session(tmp_path, monkeypatch, capsys):
+    checkpoint = _checkpoint(tmp_path)
+    cli = _module("trained_cli_velocity_folders", "symm_cli.py")
+    launches = []
+    monkeypatch.setattr(cli, "run_isaaclab", lambda args, command: launches.append(command) or 0)
+    assert (
+        cli.main(
+            [
+                "evaluate-trained",
+                "--robot",
+                "x1_go2bend",
+                "--checkpoint",
+                str(checkpoint),
+                "--mode",
+                "metrics",
+                "--split_by_velocity",
+                "--velocities",
+                "-2",
+                "-1.5",
+                "-0.5",
+                "0.5",
+                "1.5",
+                "2",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    assert len(launches) == 1
+    assert launches[0][launches[0].index("--num_envs") + 1] == "100"
+    assert "by_velocity" in launches[0][launches[0].index("--symm_leg_usage_plan") + 1]
+    assert "600 cells" in capsys.readouterr().out
+    assert not (checkpoint.parent / "evaluations").exists()
+
+
+def test_batch_launcher_forwards_the_six_velocity_commands(tmp_path):
+    root = Path(__file__).resolve().parents[3]
+    script = tmp_path / "evaluation_batch.sh"
+    script.write_text((root / "evaluation_batch.sh").read_text())
+    (tmp_path / "evaluation.sh").write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> "$EVALUATION_ARGS_LOG"\n'
+        'printf "__END__\\n" >> "$EVALUATION_ARGS_LOG"\n'
+    )
+    log = tmp_path / "arguments.txt"
+    subprocess.run(
+        ["bash", str(script)],
+        cwd=tmp_path,
+        env={**os.environ, "EVALUATION_ARGS_LOG": str(log)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    calls = [call.splitlines() for call in log.read_text().split("__END__\n") if call]
+    assert calls
+    for call in calls:
+        index = call.index("--velocities")
+        assert call[index + 1 : index + 7] == ["-2", "-1.5", "-0.5", "0.5", "1.5", "2"]
+        assert "--split_by_velocity" in call
+
+
 def test_directional_metrics_match_each_replica_instead_of_overwriting_rows():
     analysis = _module("trained_analysis_parallel_pairs", "evaluation.py")
     rows = [

@@ -356,6 +356,8 @@ def _study_identity(study: dict[str, Any]) -> dict[str, Any]:
         legacy_keys += ("policy_compatibility",)
     if "num_envs" in study:
         legacy_keys += ("num_envs",)
+    if study.get("split_by_velocity"):
+        legacy_keys += ("split_by_velocity",)
     if study.get("method_version") == METHOD_VERSION:
         return {key: study[key] for key in legacy_keys}
     keys = (
@@ -386,16 +388,36 @@ def validate_study_profile(study: Mapping[str, Any], profile: str) -> None:
         )
 
 
-def study_output_name(profile: str, *, num_envs: int = 1, measure_steps: int | None = None) -> str:
-    """Return a result directory that keeps parallel trials separate from older studies."""
+def study_output_name(
+    profile: str,
+    *,
+    num_envs: int = 1,
+    measure_steps: int | None = None,
+    velocities_mps: Sequence[float] | None = None,
+    split_by_velocity: bool = False,
+) -> str:
+    """Return a result directory for the trial count and optional x-velocity grid [m/s]."""
     name = PROTOCOL_OUTPUT_ROOT_NAMES[profile]
     if num_envs > 1:
         name += f"_envs{num_envs}_steps{measure_steps}"
+    if split_by_velocity:
+        if profile != "trained":
+            raise ValueError("Velocity folders are supported by the trained-gait profile only.")
+        if velocities_mps is None or len(velocities_mps) == 0:
+            raise ValueError("Velocity folders require at least one commanded x velocity [m/s].")
+        grid_hash = _canonical_sha256([float(value) for value in velocities_mps])[:10]
+        name += f"_by_velocity_{grid_hash}"
     return name
 
 
 def existing_study_manifest_path(
-    run_dir: Path, profile: str, *, num_envs: int = 1, measure_steps: int | None = None
+    run_dir: Path,
+    profile: str,
+    *,
+    num_envs: int = 1,
+    measure_steps: int | None = None,
+    velocities_mps: Sequence[float] | None = None,
+    split_by_velocity: bool = False,
 ) -> Path:
     """Resolve an existing profile manifest, including the pre-split full-v3 root."""
     if profile not in PROTOCOL_OUTPUT_ROOT_NAMES:
@@ -403,7 +425,13 @@ def existing_study_manifest_path(
     canonical = (
         run_dir.resolve()
         / "evaluations"
-        / study_output_name(profile, num_envs=num_envs, measure_steps=measure_steps)
+        / study_output_name(
+            profile,
+            num_envs=num_envs,
+            measure_steps=measure_steps,
+            velocities_mps=velocities_mps,
+            split_by_velocity=split_by_velocity,
+        )
         / "study.json"
     )
     if canonical.is_file() or profile != "full":
@@ -453,6 +481,7 @@ def build_study(
     protocol: str = DEFAULT_PROTOCOL,
     evaluation_config: dict[str, Any] | None = None,
     num_envs: int = 1,
+    split_by_velocity: bool = False,
 ) -> dict[str, Any]:
     """Build the selected evaluation profile and runtime plan for one checkpoint."""
     checkpoint = checkpoint.resolve()
@@ -540,7 +569,17 @@ def build_study(
                 selected_gaits.append(gait)
 
     run_dir = checkpoint.parent.resolve()
-    output_root = run_dir / "evaluations" / study_output_name(protocol, num_envs=num_envs, measure_steps=measure_steps)
+    output_root = (
+        run_dir
+        / "evaluations"
+        / study_output_name(
+            protocol,
+            num_envs=num_envs,
+            measure_steps=measure_steps,
+            velocities_mps=selected_velocities,
+            split_by_velocity=split_by_velocity,
+        )
+    )
     total_steps = settle_steps + measure_steps
     cells: list[dict[str, Any]] = []
     cell_specs = light_cell_specs or [(gait, velocity) for gait in selected_gaits for velocity in selected_velocities]
@@ -549,7 +588,9 @@ def build_study(
         family = str(gait["family"])
         slug = velocity_slug(velocity_mps)
         relative_output_dir = (
-            Path("cells") / f"gait_{gait_index:02d}_{family}" / f"vx_{slug}" / f"seed_{evaluation_seed:04d}"
+            Path(f"vx_{slug}") / "cells" / f"gait_{gait_index:02d}_{family}" / f"seed_{evaluation_seed:04d}"
+            if split_by_velocity
+            else Path("cells") / f"gait_{gait_index:02d}_{family}" / f"vx_{slug}" / f"seed_{evaluation_seed:04d}"
         )
         cells.append(
             {
@@ -575,6 +616,7 @@ def build_study(
     }
     study: dict[str, Any] = {
         **({"num_envs": num_envs} if num_envs > 1 else {}),
+        **({"split_by_velocity": True} if split_by_velocity else {}),
         "schema_version": SCHEMA_VERSION,
         "method_version": PROTOCOL_METHOD_VERSIONS[protocol],
         "protocol": PROTOCOL_PLAN_NAMES[protocol],
@@ -842,6 +884,11 @@ def prepare_study(
             )
         if not (resume or analyze_only):
             has_cell_artifacts = (output_root / "cells").exists() and any((output_root / "cells").rglob("*"))
+            if existing.get("split_by_velocity"):
+                has_cell_artifacts = has_cell_artifacts or any(
+                    _resolve_study_cell_dir(output_root, cell["relative_output_dir"]).exists()
+                    for cell in existing["cells"]
+                )
             has_runtime_artifacts = has_cell_artifacts or any(
                 (output_root / name).exists() for name in ("events.jsonl", "progress.json", "status.json")
             )
@@ -2982,6 +3029,44 @@ def analyze_study(study_path: Path) -> dict[str, Any]:
     study = load_study_manifest(study_path)
     study_root = study_path.parent
     rows = [analyze_cell(study, cell, study_root) for cell in study["cells"]]
+    paired_payload = None
+    if study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION, TRAINED_METHOD_VERSION}:
+        paired_payload = _load_paired_consistency_module().analyze_study_file(study_path)
+    overall = _write_study_analysis(study, rows, study_path, study_root, paired_payload=paired_payload)
+    if study.get("split_by_velocity"):
+        for velocity in study["velocities_mps"]:
+            command_dir = Path(f"vx_{velocity_slug(velocity)}")
+
+            def local_path(record: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    **record,
+                    "relative_output_dir": Path(record["relative_output_dir"]).relative_to(command_dir).as_posix(),
+                }
+
+            scoped_study = {
+                **study,
+                "velocities_mps": [velocity],
+                "cells": [local_path(cell) for cell in study["cells"] if cell["velocity_mps"] == velocity],
+            }
+            scoped_rows = [local_path(row) for row in rows if row["velocity_mps"] == velocity]
+            _write_study_analysis(
+                scoped_study,
+                scoped_rows,
+                study_path,
+                study_root / command_dir,
+            )
+    return overall
+
+
+def _write_study_analysis(
+    study: dict[str, Any],
+    rows: list[dict[str, Any]],
+    study_path: Path,
+    study_root: Path,
+    *,
+    paired_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write reports and figures for all cells or a selected command-velocity scope."""
     family_rows, overall = aggregate_results(study, rows)
     metrics_dir = study_root / "metrics"
     figures_dir = study_root / "figures"
@@ -3002,6 +3087,9 @@ def analyze_study(study_path: Path) -> dict[str, Any]:
         "input_study_sha256": _sha256_file(study_path),
         "input_study_identity_sha256": study["study_identity_sha256"],
     }
+    if study.get("split_by_velocity"):
+        analysis_provenance["selected_velocities_mps"] = study["velocities_mps"]
+        analysis_provenance["cell_paths_relative_to"] = str(study_root)
     analysis_provenance["record_sha256"] = _canonical_sha256(analysis_provenance)
     overall["analysis_provenance"] = {
         "path": "metrics/analysis_provenance.json",
@@ -3010,8 +3098,7 @@ def analyze_study(study_path: Path) -> dict[str, Any]:
         "metrics_sha256": analysis_provenance["metrics_sha256"],
         "input_study_sha256": analysis_provenance["input_study_sha256"],
     }
-    if study.get("method_version") in {FULL_METHOD_VERSION, LIGHT_METHOD_VERSION, TRAINED_METHOD_VERSION}:
-        paired_payload = _load_paired_consistency_module().analyze_study_file(study_path)
+    if paired_payload is not None:
         paired_outputs = paired_payload["outputs"]
         overall["paired_tr_consistency"] = {
             "method_version": paired_payload["method_version"],

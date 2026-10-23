@@ -937,6 +937,11 @@ def add_evaluation_args(parser: argparse.ArgumentParser) -> None:
         help="Fixed x velocities [m/s] evaluated for every selected gait row.",
     )
     parser.add_argument(
+        "--split_by_velocity",
+        action="store_true",
+        help="Group trained-gait recordings, reports, and figures into separate command-velocity folders.",
+    )
+    parser.add_argument(
         "--gait_indices",
         "--gait-indices",
         nargs="+",
@@ -1055,6 +1060,7 @@ def run_trained_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
             measure_s=args.measure_s,
             num_envs=args.num_envs,
             runtime_overrides=runtime_overrides,
+            split_by_velocity=args.split_by_velocity,
         )
     if args.mode in ("both", "video") and not args.analyze_only:
         for gait in gaits:
@@ -1175,11 +1181,22 @@ def run_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
     if args.protocol == "legacy" and evaluation_config is not None:
         raise ValueError("The legacy v1 compatibility profile does not accept --evaluation_config.")
     measure_steps = round(args.measure_s / args.robot_spec.step_dt)
-    output_name = analysis.study_output_name(args.protocol, num_envs=args.num_envs, measure_steps=measure_steps)
+    output_name = analysis.study_output_name(
+        args.protocol,
+        num_envs=args.num_envs,
+        measure_steps=measure_steps,
+        velocities_mps=args.velocities,
+        split_by_velocity=args.split_by_velocity,
+    )
     canonical_study_path = checkpoint.parent / "evaluations" / output_name / "study.json"
     study_path = (
         analysis.existing_study_manifest_path(
-            checkpoint.parent, args.protocol, num_envs=args.num_envs, measure_steps=measure_steps
+            checkpoint.parent,
+            args.protocol,
+            num_envs=args.num_envs,
+            measure_steps=measure_steps,
+            velocities_mps=args.velocities,
+            split_by_velocity=args.split_by_velocity,
         )
         if args.analyze_only or args.resume
         else canonical_study_path
@@ -1229,6 +1246,7 @@ def run_evaluation(args: argparse.Namespace, extra: list[str]) -> int:
             protocol=args.protocol,
             evaluation_config=evaluation_config,
             num_envs=args.num_envs,
+            split_by_velocity=args.split_by_velocity,
         )
         if study_path != canonical_study_path:
             study["output_root"] = str(study_path.parent)

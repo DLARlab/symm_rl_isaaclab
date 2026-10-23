@@ -351,9 +351,19 @@ bash evaluation.sh --robot x1_go2bend --run RUN --model 1499
 
 To configure several evaluations in a bash file, edit the repository-root
 `evaluation_batch.sh`. Its `tasks` array contains explicit
-`robot|run_name|model` entries; `mode` and `gait` are shared settings. Run
+`robot|run_name|model` entries; `mode`, `gait`, and `velocities` are shared settings. Run
 `bash evaluation_batch.sh` without arguments to process them in listed order.
 Each task uses its checkpoint's own training gaits, and a failure stops the batch.
+The batch currently uses `vx = -2, -1.5, -0.5, 0.5, 1.5, 2 m/s` and enables
+`--split_by_velocity`. All six commands run in one simulator session per policy.
+Results go under
+`<run>/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_<grid-id>/`.
+Each `vx_neg_2p0`, `vx_neg_1p5`, `vx_neg_0p5`, `vx_pos_0p5`, `vx_pos_1p5`, and
+`vx_pos_2p0` folder contains that command's `cells/`, `metrics/`, and `figures/`.
+The study root retains combined metrics, including forward/backward comparisons.
+The velocity-grid identifier keeps other grids and older ±1 m/s results separate.
+This layout is also available directly through `evaluation.sh --split_by_velocity`;
+reuse the same velocity list and flag when resuming or analyzing the study.
 
 This selects only templates present in `<run>/params/env.yaml`. The default
 `--gait all` means all trained templates, including all trained gallop partners.
