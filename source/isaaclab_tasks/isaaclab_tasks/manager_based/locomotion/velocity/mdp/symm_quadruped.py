@@ -49,7 +49,7 @@ SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS = (
 """Default per-leg signs for converting robot joints to the logical quadruped convention."""
 
 SYMM_QUADRUPED_JOINT_RANGES = (1.3264, 5.236, 5.06)
-"""Shared hip, thigh, and calf symmetry normalization ranges [rad], matching X1's reward scales."""
+"""Legacy hip, thigh, and calf symmetry normalization ranges [rad], retained for compatibility."""
 
 SYMM_QUADRUPED_LEG_PAIRS = (
     ("FL", "FR"),
@@ -2198,7 +2198,11 @@ def leg_permutation_symmetry_penalty(
     leg_pairs: Sequence[tuple[str, str]] = SYMM_QUADRUPED_LEG_PAIRS,
     phase_sync_tolerance: float = 0.02,
 ) -> torch.Tensor:
-    """Penalize joint differences for leg pairs commanded in synchrony.
+    """Penalize summed absolute joint-angle differences for leg pairs commanded in synchrony.
+
+    The total logical joint-angle error [rad] is summed across all joints and active pairs without normalization
+    or averaging. The raw penalty is ``exp(-3 * error) - 1``, with exponential coefficient 3 [rad^-1].
+    Pair selection uses circular commanded foot-offset distance, rather than measured contact timing.
 
     Args:
         env: The environment instance.
@@ -2208,12 +2212,12 @@ def leg_permutation_symmetry_penalty(
         leg_joint_ids: Mapping from logical leg tag to joint indices within :paramref:`joint_cfg`.
         leg_phase_index: Mapping from logical leg tag to gait phase column.
         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
-        joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
+        joint_ranges: Legacy joint normalization ranges [rad], retained for compatibility and unused.
         leg_pairs: Logical leg pairs to compare.
         phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 
     Returns:
-        The negative penalty after averaging over the active synchronous leg pairs.
+        Per-environment penalty in ``[-1, 0]`` from the summed absolute joint-angle error.
     """
     asset: Articulation = env.scene[asset_cfg.name]
     gait_command: GaitVelocityCommand = env.command_manager.get_term(command_name)
@@ -2223,7 +2227,8 @@ def leg_permutation_symmetry_penalty(
     logical_signs = torch.tensor(logical_joint_signs, dtype=joint_pos.dtype, device=joint_pos.device)
     joint_pos = joint_pos.reshape(joint_pos.shape[0], len(logical_joint_signs), -1) * logical_signs.unsqueeze(0)
     joint_pos = joint_pos.reshape(joint_pos.shape[0], -1)
-    joint_range = torch.tensor(joint_ranges, dtype=joint_pos.dtype, device=joint_pos.device)
+    # Previous joint-range normalization:
+    # joint_range = torch.tensor(joint_ranges, dtype=joint_pos.dtype, device=joint_pos.device)
 
     if not 0.0 <= phase_sync_tolerance <= 0.5:
         raise ValueError(f"Expected phase_sync_tolerance to be within [0.0, 0.5] cycles, got {phase_sync_tolerance}.")
@@ -2241,19 +2246,24 @@ def leg_permutation_symmetry_penalty(
         is_synchronous = phase_distance <= phase_sync_tolerance
         joint_a = joint_pos[:, leg_joint_ids[tag_a]]
         joint_b = joint_pos[:, leg_joint_ids[tag_b]]
-        error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b) / (joint_range.unsqueeze(0) + 1.0e-6)
-        weights = torch.softmax(error / 0.5, dim=-1)
-        pair_error = torch.sum(weights * error, dim=-1)
+        error = torch.abs(joint_a - sign.unsqueeze(0) * joint_b)
+        # Previous normalized, softmax-weighted joint error:
+        # error = error / (joint_range.unsqueeze(0) + 1.0e-6)
+        # weights = torch.softmax(error / 0.5, dim=-1)
+        # pair_error = torch.sum(weights * error, dim=-1)
+        pair_error = torch.sum(error, dim=-1)
         return torch.where(is_synchronous, pair_error, 0.0), is_synchronous
 
     error_sum = torch.zeros(env.num_envs, dtype=joint_pos.dtype, device=joint_pos.device)
-    synchronous_pair_count = torch.zeros_like(error_sum)
+    # synchronous_pair_count = torch.zeros_like(error_sum)
     for tag_a, tag_b in leg_pairs:
-        pair_error, is_synchronous = leg_permutation_error(tag_a, tag_b)
+        pair_error, _is_synchronous = leg_permutation_error(tag_a, tag_b)
         error_sum += pair_error
-        synchronous_pair_count += is_synchronous
-    mean_error = error_sum / synchronous_pair_count.clamp_min(1.0)
-    return -(1.0 - torch.exp(-5.0 * mean_error))
+        # synchronous_pair_count += _is_synchronous
+    # Previous pair-averaged exponential penalty:
+    # mean_error = error_sum / synchronous_pair_count.clamp_min(1.0)
+    # return -(1.0 - torch.exp(-5.0 * mean_error))
+    return torch.expm1(-3.0 * error_sum)
 
 
 def morphological_symmetry_penalty(
@@ -2278,7 +2288,7 @@ def morphological_symmetry_penalty(
         leg_joint_ids: Mapping from logical leg tag to joint indices within :paramref:`joint_cfg`.
         leg_phase_index: Mapping from logical leg tag to gait phase column.
         logical_joint_signs: Per-leg signs that map robot joints into a common logical convention.
-        joint_ranges: Hip, thigh, and calf joint ranges [rad] used to normalize errors.
+        joint_ranges: Legacy joint normalization ranges [rad], retained for compatibility and unused.
         leg_pairs: Logical leg pairs to compare.
         phase_sync_tolerance: Maximum circular foot-offset difference [cycles] for a pair to be synchronous.
 

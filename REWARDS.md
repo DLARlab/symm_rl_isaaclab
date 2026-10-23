@@ -64,7 +64,7 @@ penalty functions themselves return nonpositive values.
 | `dof_torques_l2` | $f_\tau=\exp[-0.004\sum_j\tau_j^2]-1$ | 0.05 |
 | `action_smoothness` | $f_{\Delta^2a}=\exp[-0.05\sum_j(a_{t,j}-2a_{t-1,j}+a_{t-2,j})^2]-1$ | 0.05 |
 | `dof_acc_l2` | $f_{\ddot q}=\exp[-4\times10^{-6}\sum_j((\dot q_{t,j}-\dot q_{t-1,j})/\Delta t)^2]-1$ | 0.05 |
-| `leg_permutation_symmetry` | $f_{\mathrm{sym}}=e^{-5\overline E}-1$ | 0.40 |
+| `leg_permutation_symmetry` | $f_{\mathrm{sym}}=e^{-3E_{\mathrm{sym}}}-1$ | 0.40 |
 | `smoothness` | $f_{\mathrm{smooth}}=-G_{\mathrm{stable}}\left(1-e^{-0.10D_\tau}\right)$ | 0.10 |
 | `alive_bonus` (zero weight) | $f_{\mathrm{alive}}=1$ | 0 |
 | `termination_penalty` (zero weight) | $f_{\mathrm{term}}=\mathbf 1[\text{non-timeout termination}]$ | 0 |
@@ -425,9 +425,9 @@ not shrunk twice. Target clamping remains a separate simulator safety step.
 
 ### Leg-permutation symmetry
 
-The current weight is 0.1 for both robots. The weighted penalty
-$0.1[\exp(-5\overline E)-1]$ enters the penalty sum $B$ and is bounded by
-$[-0.1,0]$ before timestep scaling.
+The current weight is 0.4 for the Go2, X1, and X1_go2bend tasks. The weighted
+penalty $0.4[\exp(-3E_{\mathrm{sym}})-1]$ enters the penalty sum $B$ and is
+bounded by $[-0.4,0]$ before timestep scaling.
 
 Map the measured joint angles into logical coordinates:
 
@@ -438,6 +438,7 @@ $$
 Go2 uses $\mathbf s_\ell=(1,1,1)$ for all legs. X1 uses
 $\mathbf s_{FL}=\mathbf s_{FR}=(1,1,1)$ and
 $\mathbf s_{RL}=\mathbf s_{RR}=(1,-1,-1)$ to express its mirrored front–rear posture.
+X1_go2bend uses $(1,1,1)$ for every leg.
 
 Joint order within each leg is hip abduction, thigh pitch, and calf pitch.
 The six candidate pairs are
@@ -454,23 +455,25 @@ d_{ab}=\min\!\left((\theta_a-\theta_b)\bmod1,(\theta_b-\theta_a)\bmod1\right),
 $$
 
 Let $\mathbf m_{ab}=(-1,1,1)$ for opposite left/right sides and $(1,1,1)$ for
-the same side. Using fixed normalization ranges
-$\mathbf Q=(1.3264,5.236,5.06)$ rad,
+the same side. Sum absolute logical joint-angle differences across all three
+joints and every synchronous pair:
 
 $$
-e_{ab,k}=\frac{\lvert\overline q_{a,k}-m_{ab,k}\overline q_{b,k}\rvert}{Q_k+10^{-6}},
-\qquad \beta_{ab,k}=\frac{e^{e_{ab,k}/0.5}}{\sum_{n=1}^3e^{e_{ab,n}/0.5}},
-\qquad E_{ab}=\sum_{k=1}^3\beta_{ab,k}e_{ab,k},
+E_{\mathrm{sym}}=\sum_{(a,b)\in\mathcal P}I_{ab}
+\sum_{k=1}^3\lvert\overline q_{a,k}-m_{ab,k}\overline q_{b,k}\rvert.
 $$
 
-$$
-\overline E=\frac{\sum_{(a,b)\in\mathcal P}I_{ab}E_{ab}}
-{\max\!\left(1,\sum_{(a,b)\in\mathcal P}I_{ab}\right)}.
-$$
+The total error has units rad and the exponential coefficient is
+$3\,\mathrm{rad}^{-1}$. There is no joint-range normalization, softmax weighting,
+or averaging across joints or pairs. The legacy `joint_ranges` argument remains
+accepted for compatibility and no longer changes the penalty.
 
 The raw penalty is zero when no pair is synchronous.
 It uses measured joint angles without subtracting the default pose. Changing
 `--no-trs` does not change the environment reward's weight.
+For bounding, only FL–FR and RL–RR are selected. Circular distance handles
+offsets across the cycle boundary; the maximum configured relative phase noise
+of 0.003 cycles is smaller than the 0.02-cycle synchronization tolerance.
 
 ## Disabled terms
 

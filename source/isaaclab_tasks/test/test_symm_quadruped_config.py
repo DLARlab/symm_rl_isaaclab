@@ -793,6 +793,99 @@ def test_leg_permutation_penalty_only_uses_synchronous_pairs():
     assert penalty[1].item() == 0.0
 
 
+@pytest.mark.parametrize("joint_ranges", [symm_quadruped.SYMM_QUADRUPED_JOINT_RANGES, (1.0, 2.0, 3.0)])
+def test_leg_permutation_penalty_sums_unscaled_joint_errors_and_pairs(joint_ranges):
+    joint_pos = torch.zeros(6, 12)
+    joint_pos[1, 1] = 0.4
+    joint_pos[2, 1:3] = 0.2
+    joint_pos[3, [1, 7]] = 0.2
+    joint_pos[4, 0] = 0.4
+    joint_pos[5, 1:3] = torch.tensor([-0.2, 0.2])
+    env = SimpleNamespace(
+        num_envs=6,
+        device="cpu",
+        scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_pos=_tensor_data(joint_pos)))},
+        command_manager=SimpleNamespace(
+            get_term=lambda _: SimpleNamespace(foot_thetas=torch.tensor([[0.0, 0.0, 0.5, 0.5]]).expand(6, -1))
+        ),
+    )
+
+    penalty = symm_quadruped.leg_permutation_symmetry_penalty(
+        env,
+        command_name="base_velocity",
+        joint_cfg=SimpleNamespace(joint_ids=list(range(12))),
+        joint_ranges=joint_ranges,
+    )
+
+    # Every nonzero case has the same total absolute error, independent of its distribution.
+    expected = torch.expm1(-3.0 * torch.tensor([0.0, 0.4, 0.4, 0.4, 0.4, 0.4]))
+    torch.testing.assert_close(penalty, expected)
+
+
+@pytest.mark.parametrize(
+    "logical_joint_signs",
+    [symm_quadruped.SYMM_QUADRUPED_LOGICAL_JOINT_SIGNS, dobot_x1_symm.DOBOT_X1_SYMM_LOGICAL_JOINT_SIGNS],
+)
+def test_leg_permutation_penalty_preserves_mirrored_joint_axes(logical_joint_signs):
+    logical_positions = torch.tensor([[0.2, 0.4, -0.8, -0.2, 0.4, -0.8, 0.1, 0.3, -0.7, -0.1, 0.3, -0.7]])
+    logical_positions = logical_positions.repeat(2, 1)
+    logical_positions[1, 7] += 0.1
+    joint_pos = logical_positions * torch.tensor(logical_joint_signs).reshape(1, 12)
+    env = SimpleNamespace(
+        num_envs=2,
+        device="cpu",
+        scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_pos=_tensor_data(joint_pos)))},
+        command_manager=SimpleNamespace(
+            get_term=lambda _: SimpleNamespace(foot_thetas=torch.tensor([[0.0, 0.0, 0.5, 0.5]]).expand(2, -1))
+        ),
+    )
+
+    penalty = symm_quadruped.leg_permutation_symmetry_penalty(
+        env,
+        command_name="base_velocity",
+        joint_cfg=SimpleNamespace(joint_ids=list(range(12))),
+        logical_joint_signs=logical_joint_signs,
+    )
+
+    torch.testing.assert_close(penalty, torch.expm1(-3.0 * torch.tensor([0.0, 0.1])))
+
+
+@pytest.mark.parametrize(
+    ("foot_thetas", "expected_pairs"),
+    [
+        ((0.0, 0.0, 0.5, 0.5), (("FL", "FR"), ("RL", "RR"))),
+        ((-0.002, 0.001, 0.498, 0.501), (("FL", "FR"), ("RL", "RR"))),
+        ((0.995, 0.005, 1.495, -0.495), (("FL", "FR"), ("RL", "RR"))),
+        ((0.0, 0.5, 0.5, 0.0), (("FL", "RR"), ("RL", "FR"))),
+        ((0.13, -0.13, 0.5, 0.5), (("RL", "RR"),)),
+        ((-0.13, 0.13, 0.63, 0.37), ()),
+        ((0.0, 0.019, 0.23, 0.71), (("FL", "FR"),)),
+        ((0.0, 0.021, 0.23, 0.71), ()),
+    ],
+    ids=["bound", "bound_noise", "bound_wrap", "trot", "half_bound", "gallop", "within_tolerance", "outside_tolerance"],
+)
+def test_leg_permutation_pair_selection_uses_circular_commanded_offsets(foot_thetas, expected_pairs):
+    joint_pos = torch.arange(12, dtype=torch.float32).reshape(1, 12) / 10.0
+    env = SimpleNamespace(
+        num_envs=1,
+        device="cpu",
+        scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_pos=_tensor_data(joint_pos)))},
+        command_manager=SimpleNamespace(get_term=lambda _: SimpleNamespace(foot_thetas=torch.tensor([foot_thetas]))),
+    )
+
+    for pair in symm_quadruped.SYMM_QUADRUPED_LEG_PAIRS:
+        penalty = symm_quadruped.leg_permutation_symmetry_penalty(
+            env,
+            command_name="base_velocity",
+            joint_cfg=SimpleNamespace(joint_ids=list(range(12))),
+            leg_pairs=(pair,),
+        )
+        if pair in expected_pairs:
+            assert penalty.item() < 0.0, pair
+        else:
+            assert penalty.item() == 0.0, pair
+
+
 @pytest.mark.parametrize("phase_sync_tolerance", [-0.01, 0.51])
 def test_leg_permutation_penalty_rejects_invalid_phase_tolerance(phase_sync_tolerance):
     joint_pos = torch.zeros(1, 12)
