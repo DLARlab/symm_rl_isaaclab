@@ -11,6 +11,7 @@ export WANDB_USERNAME="xchen168-syracuse-university"
 # OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1_go2bend --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --tr-value-coef 0 --tr-policy-coef 0.1 env.policy_observation_history.history_length=20
 # OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1_go2bend --iterations 10000 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20
 
-
-OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1_go2bend --iterations 1500 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20 --gait bound
-OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot go2 --iterations 1500 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20 --gait bound
+# # Bound test (fixed)
+# OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1 --iterations 1500 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20 --gait bound
+# OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot x1_go2bend --iterations 1500 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20 --gait bound
+# OMNI_KIT_ACCEPT_EULA=YES ./scripts/symm_locomotion/train.sh --robot go2 --iterations 1500 --num-envs 2048 --logger wandb --log_project_name Go2-symm-rl --no-trs env.policy_observation_history.history_length=20 --gait bound

@@ -112,3 +112,6 @@ nohup.out
 .vscode/
 .agents/
 .codex/
+
+
+logs_boundnotfixed/
