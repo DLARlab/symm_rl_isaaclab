@@ -1,7 +1,0 @@
-robot,method,expected_cells,valid_cells,tracking_success_cells,velocity_only_success_cells,gait_only_success_cells,joint_success_cells,terminated_cells
-x1_go2bend,ppo,4800,4800,100,100,1900,100,0
-x1_go2bend,trs,4800,4800,400,400,1600,100,0
-x1,ppo,4800,4800,600,600,1893,300,0
-x1,trs,4800,4800,1100,1100,1900,400,0
-go2,ppo,4800,4800,300,300,2073,100,0
-go2,trs,4800,4800,400,400,2000,100,0
