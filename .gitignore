@@ -115,3 +115,7 @@ nohup.out
 
 
 logs_boundnotfixed/
+
+
+analysis/
+*.md
