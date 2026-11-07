@@ -1,0 +1,138 @@
+% Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+% All rights reserved.
+%
+% SPDX-License-Identifier: BSD-3-Clause
+%
+% LaTeX fragment. Required packages: amsmath, amssymb, booktabs.
+% Source configuration: train2.sh and the shared symm_quadruped reward configuration.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{7pt}
+    \renewcommand{\arraystretch}{1.22}
+    \caption{Reward functions used for quadrupedal locomotion with Go2, X1, and X1 with Go2-style leg bends. The functions $f_i(t)$ are shown before multiplication by their weights $w_i$ and the control-step duration. All listed weights are shared across the three robots. The final reward uses the nonlinear composition in Eq.~\eqref{eq:locomotion_reward_composition}. The last two terms have zero weight.}
+    \label{tab:locomotion_rewards}
+    \begin{tabular}{@{}llr@{}}
+        \toprule
+        Reward term & Raw function $f_i(t)$ & Weight $w_i$ \\
+        \midrule
+        Planar velocity tracking & $\exp\!\left(-\|\mathbf v^b_{xy,t}-\mathbf v^{\mathrm{cmd}}_{xy,t}\|_2^2/0.25\right)$ & $0.40$ \\
+        Yaw-rate tracking & $\exp\!\left(-(\omega^b_{z,t}-\omega^{\mathrm{cmd}}_{z,t})^2/0.25\right)$ & $0.30$ \\
+        Base-height tracking & $\exp\!\left(-100(h_t-h^\star)^2\right)$ & $0.15$ \\
+        \midrule
+        Vertical base velocity & $\exp\!\left(-5(v^b_{z,t})^2\right)-1$ & $0.10$ \\
+        Base roll & $\exp\!\left(-|\alpha_t|/0.25\right)-1$ & $0.20$ \\
+        Joint velocity & $\exp\!\left(-0.01\|\dot{\mathbf q}_t\|_2^2\right)-1$ & $0.05$ \\
+        Joint torque & $\exp\!\left(-0.004\|\boldsymbol\tau_t\|_2^2\right)-1$ & $0.05$ \\
+        Joint acceleration & $\exp\!\left(-4\times10^{-6}\|\ddot{\mathbf q}_t\|_2^2\right)-1$ & $0.05$ \\
+        First action difference & $\exp\!\left(-0.05\|\mathbf a_t-\mathbf a_{t-1}\|_2^2\right)-1$ & $0.05$ \\
+        Second action difference & $\exp\!\left(-0.05\|\mathbf a_t-2\mathbf a_{t-1}+\mathbf a_{t-2}\|_2^2\right)-1$ & $0.05$ \\
+        Swing contact force & $\displaystyle\sum_{i=1}^{4} S_{i,t}\left[\exp(-0.05F_{i,t})-1\right]$ & $0.30$ \\
+        Stance foot speed & $\displaystyle\sum_{i=1}^{4} C_{i,t}\left[\exp(-2\|\mathbf v^w_{i,t}\|_2)-1\right]$ & $0.30$ \\
+        Swing foot clearance & $\displaystyle\sum_{i=1}^{4}\overline S_{i,t}\left[\exp\!\left(-|h_{i,t}-h^\star_{i,t}|/0.025\right)-1\right]$ & $0.10$ \\
+        Hip-position deviation & $\exp\!\left(-\|\mathbf q_{\mathrm{hip},t}-\mathbf q_{\mathrm{hip}}^{\mathrm{nom}}\|_2^2\right)-1$ & $0.10$ \\
+        Measured joint-limit violation & $\exp(-10E_{\mathrm{lim},t})-1$ & $2.00$ \\
+        Leg-permutation symmetry & $\exp(-3E_{\mathrm{sym},t})-1$ & $0.40$ \\
+        Torque-change smoothness & $m_tG_t\left[\exp\!\left(-0.1\|\boldsymbol\tau_t-\boldsymbol\tau_{t-1}\|_1\right)-1\right]$ & $0.10$ \\
+        \midrule
+        Alive bonus & $1$ & $0$ \\
+        Termination indicator & $\mathbf 1_{\mathrm{terminated},t}$ & $0$ \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+The environment combines the weighted terms according to
+\begin{equation}
+\begin{aligned}
+    r_{t,+} &= \Delta t\sum_i\max\!\left(w_i f_i(t),0\right),\\
+    r_{t,-} &= \Delta t\sum_i\min\!\left(w_i f_i(t),0\right),\\
+    r_t &= r_{t,+}\exp\!\left(r_{t,-}/0.02\right),
+    \qquad \Delta t=0.02\,\mathrm{s}.
+\end{aligned}
+\label{eq:locomotion_reward_composition}
+\end{equation}
+The termination contribution is zero in these configurations. Reward terms assigned no function in the configuration are omitted from Table~\ref{tab:locomotion_rewards}. The PPO baseline and PPO-TRS use the same environment reward; the actor consistency loss is a separate optimization term.
+
+All dimensional quantities are expressed in SI units. The superscripts $b$ and $w$ denote body and world frames. The quantities $\mathbf q_t$, $\dot{\mathbf q}_t$, and $\boldsymbol\tau_t$ denote measured joint positions, joint velocities, and applied joint torques, respectively. The vector $\mathbf a_t$ is the raw policy action, before conversion to joint-position targets. Joint acceleration is computed over one control step as $\ddot{\mathbf q}_t=(\dot{\mathbf q}_t-\dot{\mathbf q}_{t-1})/\Delta t$. The action differences are not divided by $\Delta t$. The angles $\alpha_t$ and $\beta_t$ denote base roll and pitch, and $h_t$ and $h_{i,t}$ denote base and foot-link heights above the flat-ground environment origin.
+
+The contact magnitude is $F_{i,t}=\max_{\ell\in\mathcal H}\|\mathbf F^w_{i,\ell}\|_2$, where $\mathcal H$ contains the three most recent contact-sensor samples. Thus, the force penalty uses the full three-dimensional net contact force. The stance penalty likewise uses the full three-dimensional world-frame foot speed.
+
+The nonnegative swing and stance gates $S_{i,t}$ and $C_{i,t}$ are computed from the commanded foot phase $\varphi_{i,t}\in[0,1)$ and stance ratio $d_t$ using the periodic von Mises construction:
+\begin{equation}
+\begin{aligned}
+    S_{i,t} &= W_\kappa(\varphi_{i,t};0,1-d_t),\\
+    C_{i,t} &= W_\kappa(\varphi_{i,t};1-d_t,1),\\
+    \overline S_{i,t} &= \operatorname{clip}(S_{i,t},0,1),
+    \qquad \kappa=16.
+\end{aligned}
+\end{equation}
+Here, for a von Mises cumulative distribution function $F_\kappa(x;\ell)$ on the real line with location $\ell$ and concentration $\kappa$,
+\begin{equation}
+\begin{aligned}
+    W_\kappa(\varphi;u,v)
+    &=\sum_{n=-1}^{1}
+    F_\kappa(2\pi\varphi;2\pi(u+n))\\
+    &\quad\cdot\left[1-F_\kappa(2\pi\varphi;2\pi(v+n))\right].
+\end{aligned}
+\end{equation}
+The commanded stance ratio is $d_t=0.56$; the nominal gait period is $0.52\,\mathrm{s}$ for Go2 and $0.60\,\mathrm{s}$ for both X1 variants.
+
+The clearance target follows a squared-sine swing trajectory:
+\begin{equation}
+\begin{aligned}
+    \chi_{i,t} &= \operatorname{clip}\!\left(\frac{\varphi_{i,t}}{1-d_t},0,1\right),\\
+    h^\star_{i,t} &= h_0+H_{\mathrm{sw}}\sin^2(\pi\chi_{i,t}).
+\end{aligned}
+\end{equation}
+The clearance term penalizes both undershoot and overshoot. It uses the swing gate without an additional command-speed gate, including at zero commanded velocity.
+
+For joint $j$, let $\underline q_j$ and $\overline q_j$ be its full runtime position limits, and let $q_j^{\mathrm{mid}}=(\underline q_j+\overline q_j)/2$. With $[x]_+:=\max(x,0)$, the measured joint-limit error is
+\begin{equation}
+    E_{\mathrm{lim},t}
+    =\sum_j\left[
+    |q_{j,t}-q_j^{\mathrm{mid}}|
+    -0.45(\overline q_j-\underline q_j)
+    \right]_+.
+\end{equation}
+This gives a penalty-free central region covering $90\%$ of each full joint range. The term uses measured positions rather than commanded targets.
+
+For leg-permutation symmetry, let $\mathcal P$ contain all six unordered pairs of the four legs, let $\vartheta_{\ell,t}$ be the commanded phase offset of leg $\ell$, and define $d_{\mathrm{cyc}}(x,y)=\min_{n\in\mathbb Z}|x-y-n|$. The error is
+\begin{equation}
+\begin{aligned}
+    E_{\mathrm{sym},t}
+    &=\sum_{(\ell,m)\in\mathcal P}
+    \mathbf 1\!\left\{d_{\mathrm{cyc}}(\vartheta_{\ell,t},\vartheta_{m,t})\leq0.02\right\}\\
+    &\quad\cdot
+    \left\|D_\ell\mathbf q_{\ell,t}
+    -M_{\ell m}D_m\mathbf q_{m,t}\right\|_1.
+\end{aligned}
+\end{equation}
+Each leg vector contains hip, thigh, and calf angles. The matrix $M_{\ell m}=\operatorname{diag}(-1,1,1)$ for a left--right pair and $M_{\ell m}=I$ otherwise. The logical-axis matrices $D_\ell$ are given in Table~\ref{tab:locomotion_reward_parameters}. Errors are summed across active pairs and joints without normalization or averaging.
+
+The torque-change term is gated by base stability:
+\begin{equation}
+    G_t
+    =\frac{\exp[-2(\alpha_t^2+\beta_t^2)]}
+    {1+\exp[-20(h_t^w-0.25)]},
+\end{equation}
+where $h_t^w$ is the world-frame base height. The mask $m_t$ is zero for the first reward evaluation after an episode reset and one thereafter, so torque differences are not penalized across reset boundaries. The action history used by the second-difference term is initialized to zero, while the joint-velocity history used for acceleration is initialized from the reset robot state.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{8pt}
+    \renewcommand{\arraystretch}{1.2}
+    \caption{Robot-specific parameters used by the reward functions. Both front-leg logical-axis matrices are $I$. The X1 with Go2-style bends variant uses the X1 reward parameters and changes the rear-leg joint conventions and limits.}
+    \label{tab:locomotion_reward_parameters}
+    \begin{tabular}{@{}lccc@{}}
+        \toprule
+        Parameter & Go2 & X1 & X1 with Go2-style bends \\
+        \midrule
+        Base-height target $h^\star$ [m] & $0.30$ & $0.35$ & $0.35$ \\
+        Resting foot-link height $h_0$ [m] & $0.022$ & $0.0275$ & $0.0275$ \\
+        Swing-height amplitude $H_{\mathrm{sw}}$ [m] & $0.06$ & $0.08$ & $0.08$ \\
+        Rear-leg logical-axis matrices $D_{\mathrm{RL}},D_{\mathrm{RR}}$ & $I$ & $\operatorname{diag}(1,-1,-1)$ & $I$ \\
+        \bottomrule
+    \end{tabular}
+\end{table*}

@@ -1,0 +1,157 @@
+% Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+% All rights reserved.
+%
+% SPDX-License-Identifier: BSD-3-Clause
+%
+% LaTeX fragment. Required packages: amsmath, amssymb, booktabs, multirow.
+% Numerical sources: analysis/trs_ppo_2026-10-27/metric_comparison.csv
+% and analysis/trs_ppo_2026-10-27/signed_clock_reversal_trial0.csv.
+
+\subsection{Locomotion Evaluation}
+\label{sec:locomotion_evaluation}
+
+\paragraph{Evaluation metrics.}
+Let $N$ denote the number of measurement samples, $\Delta t=0.02\,\mathrm{s}$ the control-step duration, and $d_a=12$ the number of actuated joints. For body-frame longitudinal velocity, lateral velocity, and yaw rate, we define the tracking RMSE as
+\begin{equation}
+    E_z=\sqrt{\frac{1}{N}\sum_{t=1}^{N}\left(z_t-z_t^{\mathrm{cmd}}\right)^2},
+    \qquad z\in\{v_x,v_y,\omega_z\}.
+    \label{eq:loco_tracking_rmse}
+\end{equation}
+
+For reversal consistency, we compare forward and backward rollouts at the same speed magnitude and with conjugate gait commands. Let $\bar\mu_\theta^{+}(\phi)$ and $\bar\mu_\theta^{-}(\phi)$ denote cycle-averaged actor means at their decision phases, and let $\bar{\mathbf c}^{+}(\phi),\bar{\mathbf c}^{-}(\phi)\in[0,1]^4$ denote cycle-averaged contact probabilities. Using $M=128$ phase samples, $\phi_m=m/M$, and the corrected alignment $\check\phi_m=(-\phi_m)\bmod 1$, we define
+\begin{equation}
+    E_\mu=\sqrt{\frac{1}{M d_a}\sum_{m=0}^{M-1}
+    \left\|\bar\mu_\theta^{-}(\phi_m)-\mathcal T_{\mathcal A}\!\left(\bar\mu_\theta^{+}(\check\phi_m)\right)\right\|_2^2},
+    \label{eq:loco_actor_reversal}
+\end{equation}
+\begin{equation}
+    E_c=\frac{1}{4M}\sum_{m=0}^{M-1}
+    \left\|\bar{\mathbf c}^{-}(\phi_m)-\bar{\mathbf c}^{+}(\check\phi_m)\right\|_1.
+    \label{eq:loco_contact_reversal}
+\end{equation}
+These metrics compare independently generated rollouts; they do not evaluate the actor on an exactly reversed observation history. The action transformation $\mathcal T_{\mathcal A}$ is the identity for the joint-position-offset actions used here.
+
+We measure mechanical effort using mean absolute mechanical power and normalized torque-squared rate:
+\begin{equation}
+\begin{aligned}
+    P_{\mathrm{abs}}&=\frac{1}{N}\sum_{t=1}^{N}\sum_{j=1}^{d_a}\left|\tau_{t,j}\dot q_{t,j}\right|,\\
+    U_\tau&=\frac{1}{N}\sum_{t=1}^{N}\sum_{j=1}^{d_a}\left(\frac{\tau_{t,j}}{\tau_j^{\mathrm{lim}}}\right)^2,
+\end{aligned}
+\label{eq:loco_effort_metrics}
+\end{equation}
+where $\tau_{t,j}$ is applied torque, $\dot q_{t,j}$ is joint velocity, and $\tau_j^{\mathrm{lim}}$ is the configured effort limit. $P_{\mathrm{abs}}$ is measured in watts and $U_\tau$ is dimensionless. These quantities describe actuator use rather than electrical energy consumption.
+
+For each leg group $L\in\{\mathrm F,\mathrm H\}$, with joint indices $\mathcal J_L$, we compute normalized torque exposure and absolute work:
+\begin{equation}
+\begin{aligned}
+    X_{\tau,L}&=\Delta t\sum_{t=1}^{N}\sum_{j\in\mathcal J_L}\left(\frac{\tau_{t,j}}{\tau_j^{\mathrm{lim}}}\right)^2,\\
+    X_{W,L}&=\Delta t\sum_{t=1}^{N}\sum_{j\in\mathcal J_L}\left|\tau_{t,j}\dot q_{t,j}\right|.
+\end{aligned}
+\label{eq:loco_leg_exposures}
+\end{equation}
+Their front/hind imbalances are
+\begin{equation}
+    I_k=100\,\frac{|X_{k,\mathrm F}-X_{k,\mathrm H}|}{X_{k,\mathrm F}+X_{k,\mathrm H}},
+    \qquad k\in\{\tau,W\},
+    \label{eq:loco_load_imbalance}
+\end{equation}
+with zero imbalance when both exposures are zero. We write $I_\tau$ and $I_W$ for normalized torque and absolute-work imbalance, respectively. Each imbalance is calculated within a trial before averaging, so front-heavy and hind-heavy trials cannot cancel. Finally, the joint-target clipping percentage is
+\begin{equation}
+    C_{\mathrm{clip}}=\frac{100}{N d_a}\sum_{t=1}^{N}\sum_{j=1}^{d_a}\chi_{t,j}^{\mathrm{clip}},
+    \label{eq:loco_clipping}
+\end{equation}
+where $\chi_{t,j}^{\mathrm{clip}}=1$ when a requested joint-position target is clipped and zero otherwise.
+
+\paragraph{Comparison protocol.}
+We evaluate the final policies after 20,000 training iterations over eight gait templates and six longitudinal commands, $v_x^{\mathrm{cmd}}\in\{-2,-1,-0.5,0.5,1,2\}\,\mathrm{m/s}$, with zero lateral and yaw-rate commands. Each of the 48 conditions has 100 recorded trials. Rollouts include 5\,s of settling and a planned 20\,s measurement period, trimmed to complete gait cycles. We average trials within each condition, conditions within each gait family, and then the four families equally. Tables~\ref{tab:loco_tracking_statistics} and~\ref{tab:loco_effort_statistics} report these means and the paired difference $\Delta=\mathrm{PPO\mbox{-}TRS}-\mathrm{PPO}$. Their 95\% scenario-resampling intervals use 10,000 paired bootstrap replicates over conditions within each family. Each robot--method pair has one trained policy, so these intervals describe sensitivity to the evaluated conditions rather than uncertainty across training seeds. Table~\ref{tab:loco_reversal_statistics} reports the corrected-phase subset, using one representative trial per condition and 24 forward/backward pairs per policy.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{4pt}
+    \renewcommand{\arraystretch}{1.15}
+    \caption{Command-tracking results. Differences and their 95\% scenario-resampling intervals use the units of the corresponding metric. Negative differences indicate lower error under PPO-TRS. The last column counts conditions with lower error out of the 48 evaluated conditions.}
+    \label{tab:loco_tracking_statistics}
+    \begin{tabular}{@{}llrrrrc@{}}
+        \toprule
+        Robot & Metric & PPO & PPO-TRS & $\Delta$ & \shortstack{95\% scenario\\interval for $\Delta$} & \shortstack{Improved\\conditions} \\
+        \midrule
+        \multirow{3}{*}{Go2}
+        & $E_{v_x}$ [m/s] & 0.2146 & 0.2007 & $-0.0140$ & $[-0.0264,-0.0017]$ & 32/48 \\
+        & $E_{v_y}$ [m/s] & 0.0973 & 0.0655 & $-0.0318$ & $[-0.0508,-0.0163]$ & 42/48 \\
+        & $E_{\omega_z}$ [rad/s] & 0.0989 & 0.0995 & $+0.0006$ & $[-0.0101,+0.0114]$ & 24/48 \\
+        \midrule
+        \multirow{3}{*}{X1-Opposed}
+        & $E_{v_x}$ [m/s] & 0.0912 & 0.0973 & $+0.0061$ & $[-0.0081,+0.0211]$ & 21/48 \\
+        & $E_{v_y}$ [m/s] & 0.0559 & 0.0545 & $-0.0015$ & $[-0.0100,+0.0062]$ & 27/48 \\
+        & $E_{\omega_z}$ [rad/s] & 0.0799 & 0.0841 & $+0.0042$ & $[-0.0049,+0.0136]$ & 24/48 \\
+        \midrule
+        \multirow{3}{*}{X1-Aligned}
+        & $E_{v_x}$ [m/s] & 0.0932 & 0.0850 & $-0.0082$ & $[-0.0220,+0.0043]$ & 27/48 \\
+        & $E_{v_y}$ [m/s] & 0.0558 & 0.0668 & $+0.0109$ & $[+0.0037,+0.0187]$ & 19/48 \\
+        & $E_{\omega_z}$ [rad/s] & 0.0908 & 0.0877 & $-0.0031$ & $[-0.0138,+0.0068]$ & 27/48 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.15}
+    \caption{Behavioral reversal consistency on the corrected-phase subset of 24 forward/backward pairs per policy. Values are averaged with equal weights for the four gait families. Reductions are relative to PPO. These are descriptive sample results without training-seed uncertainty estimates.}
+    \label{tab:loco_reversal_statistics}
+    \begin{tabular}{@{}lrrrrrr@{}}
+        \toprule
+        \multirow{2}{*}{Robot} & \multicolumn{3}{c}{Actor-mean RMSE $E_\mu$ [raw action]} & \multicolumn{3}{c}{Contact-pattern error $E_c$ [fraction]} \\
+        \cmidrule(lr){2-4}\cmidrule(lr){5-7}
+        & PPO & PPO-TRS & Reduction & PPO & PPO-TRS & Reduction \\
+        \midrule
+        Go2 & 1.5130 & 1.3211 & 12.7\% & 0.1308 & 0.1007 & 23.0\% \\
+        X1-Opposed & 1.7799 & 1.7649 & 0.8\% & 0.1569 & 0.1491 & 5.0\% \\
+        X1-Aligned & 2.1538 & 1.9563 & 9.2\% & 0.1398 & 0.1349 & 3.5\% \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.15}
+    \caption{Mechanical effort, front/hind workload imbalance, and joint-target clipping. Differences and their 95\% scenario-resampling intervals use watts for $P_{\mathrm{abs}}$, dimensionless units for $U_\tau$, and percentage points for $I_\tau$, $I_W$, and $C_{\mathrm{clip}}$. Lower imbalance means a more even load distribution; lower power alone does not establish better energy efficiency when tracking quality differs.}
+    \label{tab:loco_effort_statistics}
+    \begin{tabular}{@{}llrrrr@{}}
+        \toprule
+        Robot & Metric & PPO & PPO-TRS & $\Delta$ & \shortstack{95\% scenario\\interval for $\Delta$} \\
+        \midrule
+        \multirow{5}{*}{Go2}
+        & $P_{\mathrm{abs}}$ [W] & 125.95 & 130.00 & $+4.05$ & $[-3.48,+12.93]$ \\
+        & $U_\tau$ & 0.4347 & 0.4545 & $+0.0198$ & $[+0.0040,+0.0356]$ \\
+        & $I_\tau$ & $36.46\%$ & $27.96\%$ & $-8.50$ & $[-11.49,-5.33]$ \\
+        & $I_W$ & $12.69\%$ & $11.79\%$ & $-0.90$ & $[-4.44,+2.34]$ \\
+        & $C_{\mathrm{clip}}$ & $1.357\%$ & $0.921\%$ & $-0.436$ & $[-0.704,-0.184]$ \\
+        \midrule
+        \multirow{5}{*}{X1-Opposed}
+        & $P_{\mathrm{abs}}$ [W] & 185.20 & 198.74 & $+13.54$ & $[-6.14,+36.34]$ \\
+        & $U_\tau$ & 1.0496 & 0.9791 & $-0.0706$ & $[-0.1129,-0.0323]$ \\
+        & $I_\tau$ & $9.24\%$ & $10.78\%$ & $+1.54$ & $[-0.36,+3.52]$ \\
+        & $I_W$ & $10.21\%$ & $9.20\%$ & $-1.01$ & $[-3.97,+1.83]$ \\
+        & $C_{\mathrm{clip}}$ & $1.348\%$ & $0.641\%$ & $-0.707$ & $[-1.157,-0.277]$ \\
+        \midrule
+        \multirow{5}{*}{X1-Aligned}
+        & $P_{\mathrm{abs}}$ [W] & 207.56 & 205.83 & $-1.73$ & $[-27.28,+25.21]$ \\
+        & $U_\tau$ & 1.0119 & 0.9812 & $-0.0307$ & $[-0.0821,+0.0201]$ \\
+        & $I_\tau$ & $12.72\%$ & $11.27\%$ & $-1.44$ & $[-4.78,+1.93]$ \\
+        & $I_W$ & $14.01\%$ & $13.89\%$ & $-0.13$ & $[-4.94,+5.05]$ \\
+        & $C_{\mathrm{clip}}$ & $2.858\%$ & $1.724\%$ & $-1.134$ & $[-1.682,-0.582]$ \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+\paragraph{Results.}
+We first examine command tracking in Table~\ref{tab:loco_tracking_statistics}. PPO-TRS reduces Go2's longitudinal and lateral velocity errors by 6.5\% and 32.6\%, respectively, with lateral tracking improving in 42 of the 48 gait--velocity conditions. The other configurations show clearer tradeoffs. X1-Aligned achieves 8.8\% lower mean longitudinal error, but its scenario-resampling interval for the difference spans zero; its lateral error increases by 19.6\% and worsens across all eight gait means. X1-Opposed also has a 6.6\% increase in mean longitudinal error. One possible explanation is that the regularizer discourages unnecessary differences between forward and backward responses, but can also oppose corrections needed for accurate tracking. Its objective penalizes action mismatch without directly considering the tracking quality of the paired actions, a limitation also discussed for symmetry losses by Mittal et al.~\cite{mittal2024symmetry}. The present comparisons do not isolate this mechanism.
+
+Gait analysis requires distinguishing periodicity, time-reversal symmetry, and symmetry under leg exchange. Ding and Gan~\cite{ding2024breaking} show that these properties need not change together: their half-bounding branches lose the identified time-reversal symmetry, whereas some galloping solutions retain it despite lacking leg-permutation symmetries. This model-specific result motivates evaluating each realized gait rather than assuming that a more synchronized footfall pattern is more compatible with TRS. In our evaluation, trot and bound are paired with the same commanded template under reversal, while half-bound and gallop variants are paired with their conjugate variants; for example, gallop A is paired with gallop C. Reversal consistency therefore does not require preserving the same leading-leg variant. Table~\ref{tab:loco_reversal_statistics} shows that PPO-TRS reduces Go2's actor-mean consistency RMSE by 12.7\% and contact-pattern error by 23.0\% in the corrected-phase sample. X1-Aligned improves actor consistency by 9.2\%, whereas X1-Opposed changes by only 0.8\%. These measurements support improved behavioral consistency most clearly on Go2, but do not establish reversible dynamics or confirm that every commanded gait is executed correctly.
+
+Finally, Table~\ref{tab:loco_effort_statistics} distinguishes mechanical effort from its distribution. Go2's normalized torque imbalance decreases from 36.46\% to 27.96\%, improving across all eight gait means, although its mean mechanical power increases by 3.2\%. Similarly, X1-Opposed uses 6.7\% less normalized squared torque but 7.3\% more mechanical power. Reduced actuator utilization or more balanced loading therefore does not necessarily imply lower energy consumption. The gait-level results reinforce this distinction: Go2's bound has better torque balance, but its work imbalance increases from 6.72\% to 12.52\%. Our time-reversal transformation does not exchange the front and hind legs, so equal workload is not imposed by the regularizer. Contact timing and pitching dynamics can also require different contributions from the two leg groups. Joint-target clipping decreases across all three configurations, and all three scenario-resampling intervals for its change lie below zero, indicating fewer out-of-range requests across the evaluated conditions.

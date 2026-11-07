@@ -1,0 +1,86 @@
+{
+  "bootstrap_replicates": 10000,
+  "bootstrap_seed": 20261027,
+  "weighting": "equal families; equal gait/velocity conditions within each family; mean 100 trials per condition",
+  "phase_audit": "trial 000 for all 48 conditions in each of six studies",
+  "sources": [
+    {
+      "robot": "x1_go2bend",
+      "method": "ppo",
+      "run": "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-24_merged_0-19999_x1_go2bend_no_trs",
+      "checkpoint_sha256": "6bc9ae1692356d286807f2a5e0ddc119d503b1284519ef8920ba74c0b30bea7f",
+      "input_sha256": {
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-24_merged_0-19999_x1_go2bend_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/study.json": "c2cabd7218e7e8212fe2b5c6287dbc337f23e2ea3ba0f2bf3a2dcceabac0af3c",
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-24_merged_0-19999_x1_go2bend_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/overall_metrics.json": "277ee5893a6c1a9bfc45633b87e615f24d9ee05756ce5b2cf2de3390dd647a71",
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-24_merged_0-19999_x1_go2bend_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/cell_metrics.csv": "b50818319b6e91f2e871fda1eef1282cb32f937e09e3cb86bbe528f1ea0e6f32",
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-24_merged_0-19999_x1_go2bend_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/paired_tr_consistency.csv": "5f20d8b96b3c50982be007b131d01c74b49722cdf5f93337abde85d06c87be2d"
+      },
+      "duplicate_vx_rmse_conditions": 41
+    },
+    {
+      "robot": "x1_go2bend",
+      "method": "trs",
+      "run": "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-25_22-14-58_x1_go2bend_with_trs_mirror0p1_valuecoef0_actorcoef0.1",
+      "checkpoint_sha256": "0b6fc28e9fc4b3d2fab4ff71956b155eaf0d04b301f7809daa03c9e6a58677b8",
+      "input_sha256": {
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-25_22-14-58_x1_go2bend_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/study.json": "fc77976666770c6bfa7506f0b4e388b76fed5660911eccbfde21a8e7ce9a6ee9",
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-25_22-14-58_x1_go2bend_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/overall_metrics.json": "f21a32498f796b667f2c047038fa857e4c2de4d2be34528a527b00109aebc5ca",
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-25_22-14-58_x1_go2bend_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/cell_metrics.csv": "f61155b2c79669308e6d5593a72e299773bc7b29086bd1f39effe0f9749e3bea",
+        "logs/rsl_rl/dobot_x1_go2bend_symm_flat/2026-10-25_22-14-58_x1_go2bend_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/paired_tr_consistency.csv": "4081e546a5f4d34b4a0425d41663bc32b09dca7b9064ee0d11e2b91516734c07"
+      },
+      "duplicate_vx_rmse_conditions": 48
+    },
+    {
+      "robot": "x1",
+      "method": "ppo",
+      "run": "logs/rsl_rl/dobot_x1_symm_flat/2026-10-24_merged_0-19999_x1_no_trs",
+      "checkpoint_sha256": "17bb8798c3d53a27dc310a8e63bb0dea418d6f0251ed6e52148d3eed7cba3514",
+      "input_sha256": {
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-24_merged_0-19999_x1_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/study.json": "6b326286629d17ce64aa2bd49ffb68ff5ab7d4db09f289509e41384d8d95ff37",
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-24_merged_0-19999_x1_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/overall_metrics.json": "b7accd1cf7bc2bd99c68f37cfd76a089a254c926e3da156e0ac3f61c69b292d2",
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-24_merged_0-19999_x1_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/cell_metrics.csv": "8666b49cbca1a504814495960d4e6ed3b6c61195d96fb1eff16cb4fa0c739a27",
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-24_merged_0-19999_x1_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/paired_tr_consistency.csv": "4d66f3e9630b258ae6c5b256b044969ad221450a705cdd2ec26df0c9e120fde2"
+      },
+      "duplicate_vx_rmse_conditions": 30
+    },
+    {
+      "robot": "x1",
+      "method": "trs",
+      "run": "logs/rsl_rl/dobot_x1_symm_flat/2026-10-25_04-19-45_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1",
+      "checkpoint_sha256": "18c70a2a7b0810c1ae28021bc054e2676eb08d0b6f49a2b10c33127d488890f1",
+      "input_sha256": {
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-25_04-19-45_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/study.json": "09427d1961a666120a651d23b4bef63792b41054e6a3914bd104d47f9b666fa3",
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-25_04-19-45_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/overall_metrics.json": "5c386074b66556a922a7243e78e131ea34a5fff5d0c247c96a9ed375ea8f7667",
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-25_04-19-45_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/cell_metrics.csv": "b8eec648b98e70d67618a4dc1c45d1450d715ab2a796e95824388209445be456",
+        "logs/rsl_rl/dobot_x1_symm_flat/2026-10-25_04-19-45_x1_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/paired_tr_consistency.csv": "dfd0e81d0316101d9ff2007b0bb529450ae9e16d2dbd2e4ccdaebe05f649c503"
+      },
+      "duplicate_vx_rmse_conditions": 6
+    },
+    {
+      "robot": "go2",
+      "method": "ppo",
+      "run": "logs/rsl_rl/unitree_go2_symm_flat/2026-10-24_merged_0-19999_go2_no_trs",
+      "checkpoint_sha256": "891e9fdb21e5a09f2225bba821d6c01f533076118ca0f846b602c91ce84cd0af",
+      "input_sha256": {
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-24_merged_0-19999_go2_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/study.json": "fa6db0e8500ffffbe1dc9127d0ab45d4e872879a991a8727cca454bfe1d2c888",
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-24_merged_0-19999_go2_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/overall_metrics.json": "75075563895e87c9754febc215ba718d90539c8262642f45fdc79a396e2ece6c",
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-24_merged_0-19999_go2_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/cell_metrics.csv": "ed1bb6ce21d72f9250ffddfe0d08ef25372b66c4e2a7c7d72ab0f628e1648a38",
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-24_merged_0-19999_go2_no_trs/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/paired_tr_consistency.csv": "4d2b2f0a2aee644d7c01b844ce1608e30bfc57952d2f4da77402770657498a60"
+      },
+      "duplicate_vx_rmse_conditions": 0
+    },
+    {
+      "robot": "go2",
+      "method": "trs",
+      "run": "logs/rsl_rl/unitree_go2_symm_flat/2026-10-25_12-38-07_go2_with_trs_mirror0p1_valuecoef0_actorcoef0.1",
+      "checkpoint_sha256": "1d645d08b67a7ddbbc9fc12164d4a59da0c40c9793afdd9648dce04bd02640d3",
+      "input_sha256": {
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-25_12-38-07_go2_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/study.json": "6972418ceab844780fb7b6206f3d56983975ff42d5c7d749816bef53b3312b26",
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-25_12-38-07_go2_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/overall_metrics.json": "42a20fe1c1f23f84a58d6ecbe4c6f9767a1002c1edb8909510730499738fc3a5",
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-25_12-38-07_go2_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/cell_metrics.csv": "d7f28f8a3f41e0c8e83ce7c9caa0f8899d36735355ffe47fe9fbf61439d2036e",
+        "logs/rsl_rl/unitree_go2_symm_flat/2026-10-25_12-38-07_go2_with_trs_mirror0p1_valuecoef0_actorcoef0.1/evaluations/leg_usage_grid_trained_envs100_steps1000_by_velocity_fafd5a20d4/metrics/paired_tr_consistency.csv": "23c536bf7a641a9077bea194e999b1eacaaae6a3789aa071db35394ca1274a29"
+      },
+      "duplicate_vx_rmse_conditions": 0
+    }
+  ]
+}
